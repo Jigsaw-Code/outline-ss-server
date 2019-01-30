@@ -140,6 +140,9 @@ func (s *udpService) Start() {
 			if !tgtUDPAddr.IP.IsGlobalUnicast() {
 				return onet.NewConnectionError("ERR_ADDRESS_INVALID", fmt.Sprintf("Target address is not global unicast: %v", tgtAddr.String()), err)
 			}
+			if IsLanAddress(tgtUDPAddr.IP) {
+				return onet.NewConnectionError("ERR_ADDRESS_INVALID", fmt.Sprintf("Target address is a LAN address: %v", tgtAddr.String()), nil)
+			}
 
 			payload := buf[len(tgtAddr):]
 
