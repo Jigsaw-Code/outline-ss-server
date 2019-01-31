@@ -128,8 +128,8 @@ func proxyConnection(clientConn onet.DuplexConn, proxyMetrics *metrics.ProxyMetr
 	if !tgtTCPAddr.IP.IsGlobalUnicast() {
 		return onet.NewConnectionError("ERR_ADDRESS_INVALID", fmt.Sprintf("Target address is not global unicast: %v", tgtAddr.String()), err)
 	}
-	if IsLanAddress(tgtTCPAddr.IP) {
-		return onet.NewConnectionError("ERR_ADDRESS_INVALID", fmt.Sprintf("Target address is a LAN address: %v", tgtAddr.String()), nil)
+	if onet.IsPrivateAddress(tgtTCPAddr.IP) {
+		return onet.NewConnectionError("ERR_ADDRESS_PRIVATE", fmt.Sprintf("Target address is a private address: %v", tgtAddr.String()), nil)
 	}
 
 	tgtTCPConn, err := net.DialTCP("tcp", nil, tgtTCPAddr)

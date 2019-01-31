@@ -12,28 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package shadowsocks
+package net
 
 import "net"
 
-var lanSubnets []*net.IPNet
+var privateNetworks []*net.IPNet
 
 func init() {
 	for _, cidr := range []string{
+		// RFC 1918: private IPv4 networks
 		"10.0.0.0/8",
 		"172.16.0.0/12",
 		"192.168.0.0/16",
+		// RFC 4193: IPv6 ULAs
 		"fc00::/7",
 	} {
 		_, subnet, _ := net.ParseCIDR(cidr)
-		lanSubnets = append(lanSubnets, subnet)
+		privateNetworks = append(privateNetworks, subnet)
 	}
 }
 
-// IsLanAddress returns whether an IP address belongs to the LAN.
-func IsLanAddress(ip net.IP) bool {
-	for _, subnet := range lanSubnets {
-		if subnet.Contains(ip) {
+// IsPrivateAddress returns whether an IP address belongs to the LAN.
+func IsPrivateAddress(ip net.IP) bool {
+	for _, network := range privateNetworks {
+		if network.Contains(ip) {
 			return true
 		}
 	}

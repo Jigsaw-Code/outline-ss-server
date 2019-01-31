@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package shadowsocks
+package net
 
 import (
 	"net"
 	"testing"
 )
 
-var lanTests = []struct {
+var privateAddressTests = []struct {
 	address  string
 	expected bool
 }{
@@ -37,8 +37,8 @@ var lanTests = []struct {
 }
 
 func TestIsLanAddress(t *testing.T) {
-	for _, tt := range lanTests {
-		actual := IsLanAddress(net.ParseIP(tt.address))
+	for _, tt := range privateAddressTests {
+		actual := IsPrivateAddress(net.ParseIP(tt.address))
 		if actual != tt.expected {
 			t.Errorf("IsLanAddress(%s): expected %t, actual %t", tt.address, tt.expected, actual)
 		}
