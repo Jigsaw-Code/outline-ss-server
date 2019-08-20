@@ -53,10 +53,10 @@ func WrapConn(c DuplexConn, r io.Reader, w io.Writer) DuplexConn {
 	return &duplexConnAdaptor{DuplexConn: conn, r: r, w: w}
 }
 
-// PacketConn is a wrapper for net.PacketConn and io.Writer interfaces.
+// PacketConn is a wrapper for net.PacketConn and io.ReadWriter interfaces.
 type PacketConn interface {
 	net.PacketConn
-	io.Writer
+	io.ReadWriter
 }
 
 func copyOneWay(leftConn, rightConn DuplexConn) (int64, error) {

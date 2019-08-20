@@ -1,6 +1,7 @@
 package shadowsocks
 
 import (
+	"io"
 	"errors"
 	"net"
 	"strconv"
@@ -28,7 +29,8 @@ type ssDialer struct {
 	cipher    shadowaead.Cipher
 }
 
-// NewDialer creates a Dialer that routes connections to a Shadowsocks proxy.
+// NewDialer creates a Dialer that routes connections to a Shadowsocks proxy listening at
+// `host:port`, with authentication parameters `cipher` (AEAD) and `password`.
 func NewDialer(host, password, cipher string, port int) (Dialer, error) {
 	proxyIP, err := net.ResolveIPAddr("ip", host)
 	if err != nil {
@@ -62,8 +64,8 @@ func (d *ssDialer) DialTCP(address string) (onet.DuplexConn, error) {
 	return onet.WrapConn(conn, ssr, ssw), nil
 }
 
-// Clients are encouraged to use the `Write` method of onet.PacketConn to leverage the
-// proxy address as the default destination.
+// Clients are encouraged to use io.ReadWriter methods of onet.PacketConn
+// to leverage the association with the proxy.
 func (d *ssDialer) DialUDP(address string) (onet.PacketConn, error) {
 	proxyAddr := &net.UDPAddr{IP: d.proxyIP, Port: d.proxyPort}
 	pc, err := net.ListenPacket("udp", "")
@@ -74,22 +76,27 @@ func (d *ssDialer) DialUDP(address string) (onet.PacketConn, error) {
 	if err != nil {
 		return nil, errors.New("Invalid target address")
 	}
-	// Ignore the error, it would have failed when spliting the address
+	// Ignore the error, it would have failed when splitting the address
 	targetPort, _ := strconv.Atoi(targetPortStr)
 	targetAddr := &packetConnAddr{Host: targetHost, Port: targetPort}
 	conn := packetConn{
-		PacketConn: pc, proxyAddr: proxyAddr, targetAddr: targetAddr, cipher: d.cipher,
-		buf: make([]byte, udpBufSize)}
+		PacketConn: pc, proxyAddr: proxyAddr, targetAddr: targetAddr,
+			cipher: d.cipher, buf: make([]byte, udpBufSize)}
 	return &conn, nil
 }
 
 type packetConn struct {
 	net.PacketConn
+	io.ReadWriter
 	proxyAddr  *net.UDPAddr
 	targetAddr net.Addr
 	cipher     shadowaead.Cipher
 	m          sync.Mutex
 	buf        []byte // Write lock
+}
+
+func (c *packetConn) Write(b []byte) (int, error) {
+	return c.WriteTo(b, c.proxyAddr)
 }
 
 // WriteTo encrypts b and write to addr using the embedded PacketConn.
@@ -108,6 +115,11 @@ func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	return len(b), err
 }
 
+func (c *packetConn) Read(b []byte) (int, error) {
+	n, _, err := c.ReadFrom(b)
+	return n, err
+}
+
 // ReadFrom reads from the embedded PacketConn and decrypts into b.
 func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	n, _, err := c.PacketConn.ReadFrom(b)
@@ -124,6 +136,7 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	return len(buf) - len(socksSrcAddr), c.targetAddr, err
 }
 
+
 // Convenience struct to hold a domain name or IP address host. Used for SOCKS addressing.
 type packetConnAddr struct {
 	net.Addr
@@ -137,10 +150,6 @@ func (a *packetConnAddr) String() string {
 
 func (a *packetConnAddr) Network() string {
 	return "udp"
-}
-
-func (c *packetConn) Write(b []byte) (int, error) {
-	return c.WriteTo(b, c.proxyAddr)
 }
 
 func newAeadCipher(cipher, password string) (shadowaead.Cipher, error) {

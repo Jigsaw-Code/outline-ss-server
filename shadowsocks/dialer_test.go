@@ -1,6 +1,7 @@
 package shadowsocks
 
 import (
+	"io"
 	"net"
 	"strconv"
 	"testing"
@@ -19,6 +20,7 @@ const (
 )
 
 func TestShadowsocksDialer_DialTCP(t *testing.T) {
+	// Let the OS pick an available port
 	listenTCPAddr := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}
 	proxyListener, err := net.ListenTCP("tcp", listenTCPAddr)
 	if err != nil {
@@ -42,21 +44,11 @@ func TestShadowsocksDialer_DialTCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShadowsocksDialer.DialTCP failed: %v", err)
 	}
-	_, err = conn.Write([]byte(testPayload))
-	if err != nil {
-		t.Fatalf("Failed to write: %v", err)
-	}
-	buf := make([]byte, len(testPayload))
-	_, err = conn.Read(buf)
-	if err != nil {
-		t.Fatalf("Failed to read: %v", err)
-	}
-	if string(buf) != testPayload {
-		t.Fatalf("Expected output '%v'. Got '%v'", testPayload, string(buf))
-	}
+	expectEchoPayload(conn, len(testPayload), t)
 }
 
 func TestShadowsocksDialer_DialUDP(t *testing.T) {
+	// Let the OS pick an available port
 	listenUDPAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}
 	proxyConn, err := net.ListenUDP("udp", listenUDPAddr)
 	if err != nil {
@@ -84,18 +76,7 @@ func TestShadowsocksDialer_DialUDP(t *testing.T) {
 		t.Fatalf("ShadowsocksDialer.DialUDP failed: %v", err)
 	}
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-	_, err = conn.Write([]byte(testPayload))
-	if err != nil {
-		t.Fatalf("Failed to write: %v", err)
-	}
-	buf := make([]byte, udpBufSize)
-	n, _, err := conn.ReadFrom(buf)
-	if err != nil {
-		t.Fatalf("Failed to read: %v", err)
-	}
-	if string(buf[:n]) != testPayload {
-		t.Fatalf("Expected output '%v'. Got '%v'", testPayload, string(buf))
-	}
+	expectEchoPayload(conn, udpBufSize, t)
 }
 
 func startShadowsocksTCPProxy(listener *net.TCPListener, t *testing.T) {
@@ -212,5 +193,20 @@ func startUDPEchoServer(conn *net.UDPConn, t *testing.T) {
 			t.Fatalf("Failed to read from UDP: %v", err)
 		}
 		conn.WriteTo(buf[:n], addr)
+	}
+}
+
+func expectEchoPayload(conn io.ReadWriter, bufSize int, t *testing.T) {
+	_, err := conn.Write([]byte(testPayload))
+	if err != nil {
+		t.Fatalf("Failed to write: %v", err)
+	}
+	buf := make([]byte, bufSize)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("Failed to read: %v", err)
+	}
+	if string(buf[:n]) != testPayload {
+		t.Fatalf("Expected output '%v'. Got '%v'", testPayload, string(buf))
 	}
 }
