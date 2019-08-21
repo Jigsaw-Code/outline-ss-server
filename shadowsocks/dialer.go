@@ -1,8 +1,8 @@
 package shadowsocks
 
 import (
-	"io"
 	"errors"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -13,14 +13,17 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
-// Dialer is a dialer for Shadowsocks proxy connections.
+// Dialer is a dialer for Shadowsocks TCP and UDP connections.
 type Dialer interface {
-	// DialTCP connects to `address` over TCP though the Shadowsocks proxy.
-	// `address` has the form `host:port`, where `host` can be a domain name or IP address.
-	DialTCP(address string) (onet.DuplexConn, error)
-	// DialUDP relays UDP packets to/from `address` though the Shadowsocks proxy.
-	// `address` has the form `host:port`, where `host` can be a domain name or IP address.
-	DialUDP(address string) (onet.PacketConn, error)
+	// DialTCP connects to `raddr` over TCP though the Shadowsocks proxy.
+	// `laddr` is a local bind address, a local address is automatically chosen if nil
+	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
+	DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error)
+
+	// DialUDP relays UDP packets to/from `raddr` though the Shadowsocks proxy.
+	// `laddr` is a local bind address, a local address is automatically chosen if nil
+	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
+	DialUDP(laddr *net.UDPAddr, raddr string) (onet.PacketConn, error)
 }
 
 type ssDialer struct {
@@ -31,7 +34,8 @@ type ssDialer struct {
 
 // NewDialer creates a Dialer that routes connections to a Shadowsocks proxy listening at
 // `host:port`, with authentication parameters `cipher` (AEAD) and `password`.
-func NewDialer(host, password, cipher string, port int) (Dialer, error) {
+// TODO: add a dialer argument to support proxy chaining and transport changes.
+func NewDialer(host string, port int, password, cipher string) (Dialer, error) {
 	proxyIP, err := net.ResolveIPAddr("ip", host)
 	if err != nil {
 		return nil, errors.New("Failed to resolve proxy address")
@@ -40,48 +44,45 @@ func NewDialer(host, password, cipher string, port int) (Dialer, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := ssDialer{proxyIP: net.ParseIP(proxyIP.String()), proxyPort: port, cipher: aead}
+	d := ssDialer{proxyIP: proxyIP.IP, proxyPort: port, cipher: aead}
 	return &d, nil
 }
 
-func (d *ssDialer) DialTCP(address string) (onet.DuplexConn, error) {
+func (d *ssDialer) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
+	socksTargetAddr := socks.ParseAddr(raddr)
+	if socksTargetAddr == nil {
+		return nil, errors.New("Failed to parse target address")
+	}
 	proxyAddr := &net.TCPAddr{IP: d.proxyIP, Port: d.proxyPort}
-	conn, err := net.DialTCP("tcp", nil, proxyAddr)
+	proxyConn, err := net.DialTCP("tcp", laddr, proxyAddr)
 	if err != nil {
 		return nil, err
 	}
-	ssw := NewShadowsocksWriter(conn, d.cipher)
-	socksTargetAddr := socks.ParseAddr(address)
-	if socksTargetAddr == nil {
-		return nil, errors.New("Invalid target address")
-	}
+	ssw := NewShadowsocksWriter(proxyConn, d.cipher)
 	_, err = ssw.Write(socksTargetAddr)
 	if err != nil {
-		conn.Close()
+		proxyConn.Close()
 		return nil, errors.New("Failed to write target address")
 	}
-	ssr := NewShadowsocksReader(conn, d.cipher)
-	return onet.WrapConn(conn, ssr, ssw), nil
+	ssr := NewShadowsocksReader(proxyConn, d.cipher)
+	return onet.WrapConn(proxyConn, ssr, ssw), nil
 }
 
-// Clients are encouraged to use io.ReadWriter methods of onet.PacketConn
-// to leverage the association with the proxy.
-func (d *ssDialer) DialUDP(address string) (onet.PacketConn, error) {
-	proxyAddr := &net.UDPAddr{IP: d.proxyIP, Port: d.proxyPort}
-	pc, err := net.ListenPacket("udp", "")
+// Clients can use the io.ReadWriter methods of onet.PacketConn to leverage the connection to `raddr`.
+func (d *ssDialer) DialUDP(laddr *net.UDPAddr, raddr string) (onet.PacketConn, error) {
+	targetHost, targetPort, err := SplitHostPortNumber(raddr)
 	if err != nil {
 		return nil, err
 	}
-	targetHost, targetPortStr, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, errors.New("Invalid target address")
-	}
-	// Ignore the error, it would have failed when splitting the address
-	targetPort, _ := strconv.Atoi(targetPortStr)
 	targetAddr := &packetConnAddr{Host: targetHost, Port: targetPort}
+	proxyAddr := &net.UDPAddr{IP: d.proxyIP, Port: d.proxyPort}
+	pc, err := net.ListenUDP("udp", laddr)
+	if err != nil {
+		return nil, err
+	}
 	conn := packetConn{
 		PacketConn: pc, proxyAddr: proxyAddr, targetAddr: targetAddr,
-			cipher: d.cipher, buf: make([]byte, udpBufSize)}
+		cipher: d.cipher, buf: make([]byte, udpBufSize)}
 	return &conn, nil
 }
 
@@ -95,23 +96,24 @@ type packetConn struct {
 	buf        []byte // Write lock
 }
 
+// Write encrypts `b` and writes to the connected address through the proxy.
 func (c *packetConn) Write(b []byte) (int, error) {
-	return c.WriteTo(b, c.proxyAddr)
+	return c.WriteTo(b, c.targetAddr)
 }
 
-// WriteTo encrypts b and write to addr using the embedded PacketConn.
+// WriteTo encrypts `b` and writes to `addr` through the proxy.
 func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	c.m.Lock()
 	defer c.m.Unlock()
-	socksTargetAddr := socks.ParseAddr(c.targetAddr.String())
+	socksTargetAddr := socks.ParseAddr(addr.String())
 	if socksTargetAddr == nil {
-		return 0, errors.New("Invalid target address")
+		return 0, errors.New("Failed to parse target address")
 	}
 	buf, err := shadowaead.Pack(c.buf, append(socksTargetAddr, b...), c.cipher)
 	if err != nil {
 		return 0, err
 	}
-	_, err = c.PacketConn.WriteTo(buf, addr)
+	_, err = c.PacketConn.WriteTo(buf, c.proxyAddr)
 	return len(b), err
 }
 
@@ -120,22 +122,35 @@ func (c *packetConn) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// ReadFrom reads from the embedded PacketConn and decrypts into b.
+// ReadFrom reads from the embedded PacketConn and decrypts into `b`.
 func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
-	n, _, err := c.PacketConn.ReadFrom(b)
-	if err != nil {
-		return n, c.targetAddr, err
+	if len(b) < c.cipher.SaltSize() {
+		return 0, nil, shadowaead.ErrShortPacket
 	}
+	n, addr, err := c.PacketConn.ReadFrom(b)
+	if err != nil {
+		return n, nil, err
+	} else if addr.String() != c.proxyAddr.String() {
+		return n, addr, errors.New("Received a packet from an unassociated address")
+	}
+	// Avoid overlapping the destination and cipher buffers per https://golang.org/pkg/crypto/cipher/#AEAD.
 	buf, err := shadowaead.Unpack(b[c.cipher.SaltSize():], b[:n], c.cipher)
 	if err != nil {
-		return n, c.targetAddr, err
+		return n, nil, err
 	}
 	socksSrcAddr := socks.SplitAddr(buf[:n])
-	copy(b, buf[len(socksSrcAddr):]) // Remove the SOCKS source address
+	if socksSrcAddr == nil {
+		return n, nil, errors.New("Failed to read source address")
+	}
+	srcHost, srcPort, err := SplitHostPortNumber(socksSrcAddr.String())
+	if err != nil {
+		return len(buf), nil, errors.New("Failed to parse source address")
+	}
+	srcAddr := &packetConnAddr{Host: srcHost, Port: srcPort}
+	copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
+	return len(buf) - len(socksSrcAddr), srcAddr, err
 
-	return len(buf) - len(socksSrcAddr), c.targetAddr, err
 }
-
 
 // Convenience struct to hold a domain name or IP address host. Used for SOCKS addressing.
 type packetConnAddr struct {
@@ -162,4 +177,20 @@ func newAeadCipher(cipher, password string) (shadowaead.Cipher, error) {
 		return nil, errors.New("Only AEAD ciphers supported")
 	}
 	return aead, nil
+}
+
+// SplitHostPortNumber parses the host and port from `address`, which has the form `host:port`,
+// validating that the port is a number.
+func SplitHostPortNumber(address string) (host string, port int, err error) {
+	host, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		err = errors.New("Failed to split host and port")
+		return
+	}
+	port, err = strconv.Atoi(portStr)
+	if err != nil {
+		err = errors.New("Invalid non-numeric port")
+		return
+	}
+	return
 }
