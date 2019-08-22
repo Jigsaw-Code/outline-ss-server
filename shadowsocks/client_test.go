@@ -2,8 +2,10 @@ package shadowsocks
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,94 +20,98 @@ const (
 	testTargetAddr = "test.local:1111"
 )
 
-func TestShadowsocksDialer_DialTCP(t *testing.T) {
+func TestShadowsocksClient_DialTCP(t *testing.T) {
 	proxyAddr := startShadowsocksTCPEchoProxy(testTargetAddr, t)
-	proxyHost, proxyPort, err := SplitHostPortNumber(proxyAddr.String())
+	proxyHost, proxyPort, err := splitHostPortNumber(proxyAddr.String())
 	if err != nil {
 		t.Fatalf("Failed to parse proxy address: %v", err)
 	}
-	d, err := NewDialer(proxyHost, proxyPort, testPassword, testCipher)
+	d, err := NewClient(proxyHost, proxyPort, testPassword, testCipher)
 	if err != nil {
-		t.Fatalf("Failed to create ShadowsocksDialer: %v", err)
+		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}
 	conn, err := d.DialTCP(nil, testTargetAddr)
 	if err != nil {
-		t.Fatalf("ShadowsocksDialer.DialTCP failed: %v", err)
+		t.Fatalf("ShadowsocksClient.DialTCP failed: %v", err)
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-	expectEchoPayload(conn, MakeTestPayload(1024), 1024, t)
+	expectEchoPayload(conn, MakeTestPayload(1024), make([]byte, 1024), t)
 }
 
-func TestShadowsocksDialer_DialUDP(t *testing.T) {
+func TestShadowsocksClient_ListenUDP(t *testing.T) {
 	proxyAddr := startShadowsocksUDPEchoServer(testTargetAddr, t)
-	proxyHost, proxyPort, err := SplitHostPortNumber(proxyAddr.String())
+	proxyHost, proxyPort, err := splitHostPortNumber(proxyAddr.String())
 	if err != nil {
 		t.Fatalf("Failed to parse proxy address: %v", err)
 	}
-	d, err := NewDialer(proxyHost, proxyPort, testPassword, testCipher)
+	d, err := NewClient(proxyHost, proxyPort, testPassword, testCipher)
 	if err != nil {
-		t.Fatalf("Failed to create ShadowsocksDialer: %v", err)
+		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}
-	conn, err := d.DialUDP(nil, testTargetAddr)
+	conn, err := d.ListenUDP(nil)
 	if err != nil {
-		t.Fatalf("ShadowsocksDialer.DialUDP failed: %v", err)
+		t.Fatalf("ShadowsocksClient.ListenUDP failed: %v", err)
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-	expectEchoPayload(conn, MakeTestPayload(1024), udpBufSize, t)
+	pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: NewAddr(testTargetAddr, "udp")}
+	expectEchoPayload(pcrw, MakeTestPayload(1024), make([]byte, maxUDPBufferSize), t)
 }
 
-func BenchmarkShadowsocksDialer_DialTCP(b *testing.B) {
+func BenchmarkShadowsocksClient_DialTCP(b *testing.B) {
 	b.StopTimer()
 	b.ResetTimer()
 
 	proxyAddr := startShadowsocksTCPEchoProxy(testTargetAddr, b)
-	proxyHost, proxyPort, err := SplitHostPortNumber(proxyAddr.String())
+	proxyHost, proxyPort, err := splitHostPortNumber(proxyAddr.String())
 	if err != nil {
 		b.Fatalf("Failed to parse proxy address: %v", err)
 	}
-	d, err := NewDialer(proxyHost, proxyPort, testPassword, testCipher)
+	d, err := NewClient(proxyHost, proxyPort, testPassword, testCipher)
 	if err != nil {
-		b.Fatalf("Failed to create ShadowsocksDialer: %v", err)
+		b.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}
 	conn, err := d.DialTCP(nil, testTargetAddr)
 	if err != nil {
-		b.Fatalf("ShadowsocksDialer.DialTCP failed: %v", err)
+		b.Fatalf("ShadowsocksClient.DialTCP failed: %v", err)
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
+	buf := make([]byte, 1024)
 	for n := 0; n < b.N; n++ {
 		payload := MakeTestPayload(1024)
 		b.StartTimer()
-		expectEchoPayload(conn, payload, len(payload), b)
+		expectEchoPayload(conn, payload, buf, b)
 		b.StopTimer()
 	}
 }
 
-func BenchmarkShadowsocksDialer_DialUDP(b *testing.B) {
+func BenchmarkShadowsocksClient_ListenUDP(b *testing.B) {
 	b.StopTimer()
 	b.ResetTimer()
 
 	proxyAddr := startShadowsocksUDPEchoServer(testTargetAddr, b)
-	proxyHost, proxyPort, err := SplitHostPortNumber(proxyAddr.String())
+	proxyHost, proxyPort, err := splitHostPortNumber(proxyAddr.String())
 	if err != nil {
 		b.Fatalf("Failed to parse proxy address: %v", err)
 	}
-	d, err := NewDialer(proxyHost, proxyPort, testPassword, testCipher)
+	d, err := NewClient(proxyHost, proxyPort, testPassword, testCipher)
 	if err != nil {
-		b.Fatalf("Failed to create ShadowsocksDialer: %v", err)
+		b.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}
-	conn, err := d.DialUDP(nil, testTargetAddr)
+	conn, err := d.ListenUDP(nil)
 	if err != nil {
-		b.Fatalf("ShadowsocksDialer.DialUDP failed: %v", err)
+		b.Fatalf("ShadowsocksClient.ListenUDP failed: %v", err)
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
+	buf := make([]byte, maxUDPBufferSize)
 	for n := 0; n < b.N; n++ {
 		payload := MakeTestPayload(1024)
+		pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: NewAddr(testTargetAddr, "udp")}
 		b.StartTimer()
-		expectEchoPayload(conn, payload, udpBufSize, b)
+		expectEchoPayload(pcrw, payload, buf, b)
 		b.StopTimer()
 	}
 }
@@ -191,12 +197,27 @@ func startShadowsocksUDPEchoServer(expectedTgtAddr string, t testing.TB) net.Add
 	return conn.LocalAddr()
 }
 
-func expectEchoPayload(conn io.ReadWriter, payload []byte, bufSize int, t testing.TB) {
+// io.ReadWriter adapter for net.PacketConn. Used to share code between UDP and TCP tests.
+type packetConnReadWriter struct {
+	net.PacketConn
+	io.ReadWriter
+	targetAddr net.Addr
+}
+
+func (pc *packetConnReadWriter) Read(b []byte) (n int, err error) {
+	n, _, err = pc.PacketConn.ReadFrom(b)
+	return
+}
+
+func (pc *packetConnReadWriter) Write(b []byte) (int, error) {
+	return pc.PacketConn.WriteTo(b, pc.targetAddr)
+}
+
+func expectEchoPayload(conn io.ReadWriter, payload, buf []byte, t testing.TB) {
 	_, err := conn.Write(payload)
 	if err != nil {
 		t.Fatalf("Failed to write payload: %v", err)
 	}
-	buf := make([]byte, bufSize)
 	n, err := conn.Read(buf)
 	if err != nil {
 		t.Fatalf("Failed to read payload: %v", err)
@@ -204,4 +225,20 @@ func expectEchoPayload(conn io.ReadWriter, payload []byte, bufSize int, t testin
 	if !bytes.Equal(payload, buf[:n]) {
 		t.Fatalf("Expected output '%v'. Got '%v'", payload, buf[:n])
 	}
+}
+
+// splitHostPortNumber parses the host and port from `address`, which has the form `host:port`,
+// validating that the port is a number.
+func splitHostPortNumber(address string) (host string, port int, err error) {
+	host, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		err = errors.New("Failed to split host and port")
+		return
+	}
+	port, err = strconv.Atoi(portStr)
+	if err != nil {
+		err = errors.New("Invalid non-numeric port")
+		return
+	}
+	return
 }
