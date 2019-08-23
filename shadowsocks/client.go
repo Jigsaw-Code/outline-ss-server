@@ -101,15 +101,15 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	defer freeUDPBuffer(cipherBuf)
 	n, err := c.UDPConn.Read(cipherBuf)
 	if err != nil {
-		return n, nil, err
+		return 0, nil, err
 	}
 	buf, err := shadowaead.Unpack(b, cipherBuf[:n], c.cipher)
 	if err != nil {
-		return n, nil, err
+		return 0, nil, err
 	}
 	socksSrcAddr := socks.SplitAddr(buf[:n])
 	if socksSrcAddr == nil {
-		return n, nil, errors.New("Failed to read source address")
+		return 0, nil, errors.New("Failed to read source address")
 	}
 	srcAddr := &addr{address: socksSrcAddr.String(), network: "udp"}
 	copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
