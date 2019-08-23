@@ -87,7 +87,13 @@ func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	}
 	cipherBuf := newUDPBuffer()
 	defer freeUDPBuffer(cipherBuf)
-	buf, err := shadowaead.Pack(cipherBuf, append(socksTargetAddr, b...), c.cipher)
+	saltSize := c.cipher.SaltSize()
+	// Copy the SOCKS target address, reserving space for the generated salt to avoid partially
+	// overlapping the plaintext and cipher slices since `Pack` skips the salt when calling
+	// `AEAD.Seal` (see https://golang.org/pkg/crypto/cipher/#AEAD).
+	plaintextBuf := append(cipherBuf[:saltSize], socksTargetAddr...)[saltSize:]
+	plaintextBuf = append(plaintextBuf[:len(socksTargetAddr)], b...) // Copy the payload.
+	buf, err := shadowaead.Pack(cipherBuf, plaintextBuf, c.cipher)
 	if err != nil {
 		return 0, err
 	}
@@ -103,7 +109,9 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	buf, err := shadowaead.Unpack(b, cipherBuf[:n], c.cipher)
+	// Avoid partially overlapping the plaintext and cipher slices since `Unpack` skips the salt
+	// when calling `AEAD.Open` (see https://golang.org/pkg/crypto/cipher/#AEAD).
+	buf, err := shadowaead.Unpack(cipherBuf[c.cipher.SaltSize():], cipherBuf[:n], c.cipher)
 	if err != nil {
 		return 0, nil, err
 	}

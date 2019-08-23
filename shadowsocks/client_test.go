@@ -56,7 +56,7 @@ func TestShadowsocksClient_ListenUDP(t *testing.T) {
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 	pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: NewAddr(testTargetAddr, "udp")}
-	expectEchoPayload(pcrw, MakeTestPayload(1024), make([]byte, maxUDPBufferSize), t)
+	expectEchoPayload(pcrw, MakeTestPayload(1024), make([]byte, 1024), t)
 }
 
 func BenchmarkShadowsocksClient_DialTCP(b *testing.B) {
