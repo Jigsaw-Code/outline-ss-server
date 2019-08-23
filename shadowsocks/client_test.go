@@ -133,8 +133,8 @@ func startShadowsocksTCPEchoProxy(expectedTgtAddr string, t testing.TB) net.Addr
 			if err != nil {
 				t.Fatalf("AcceptTCP failed: %v", err)
 			}
-			defer clientConn.Close()
 			go func() {
+				defer clientConn.Close()
 				ssr := NewShadowsocksReader(clientConn, cipher)
 				ssw := NewShadowsocksWriter(clientConn, cipher)
 				ssClientConn := onet.WrapConn(clientConn, ssr, ssw)

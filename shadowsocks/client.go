@@ -13,19 +13,13 @@ import (
 // Client is a client for Shadowsocks TCP and UDP connections.
 type Client interface {
 	// DialTCP connects to `raddr` over TCP though a Shadowsocks proxy.
-	// `laddr` is a local bind address, a local address is automatically chosen if nil
+	// `laddr` is a local bind address, a local address is automatically chosen if nil.
 	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
 	DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error)
 
 	// ListenUDP relays UDP packets though a Shadowsocks proxy.
-	// `laddr` is a local bind address, a local address is automatically chosen if nil
+	// `laddr` is a local bind address, a local address is automatically chosen if nil.
 	ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error)
-}
-
-type ssClient struct {
-	proxyIP   net.IP
-	proxyPort int
-	cipher    shadowaead.Cipher
 }
 
 // NewClient creates a client that routes connections to a Shadowsocks proxy listening at
@@ -44,33 +38,39 @@ func NewClient(host string, port int, password, cipher string) (Client, error) {
 	return &d, nil
 }
 
-func (d *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
+type ssClient struct {
+	proxyIP   net.IP
+	proxyPort int
+	cipher    shadowaead.Cipher
+}
+
+func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
 	socksTargetAddr := socks.ParseAddr(raddr)
 	if socksTargetAddr == nil {
 		return nil, errors.New("Failed to parse target address")
 	}
-	proxyAddr := &net.TCPAddr{IP: d.proxyIP, Port: d.proxyPort}
+	proxyAddr := &net.TCPAddr{IP: c.proxyIP, Port: c.proxyPort}
 	proxyConn, err := net.DialTCP("tcp", laddr, proxyAddr)
 	if err != nil {
 		return nil, err
 	}
-	ssw := NewShadowsocksWriter(proxyConn, d.cipher)
+	ssw := NewShadowsocksWriter(proxyConn, c.cipher)
 	_, err = ssw.Write(socksTargetAddr)
 	if err != nil {
 		proxyConn.Close()
 		return nil, errors.New("Failed to write target address")
 	}
-	ssr := NewShadowsocksReader(proxyConn, d.cipher)
+	ssr := NewShadowsocksReader(proxyConn, c.cipher)
 	return onet.WrapConn(proxyConn, ssr, ssw), nil
 }
 
-func (d *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
-	proxyAddr := &net.UDPAddr{IP: d.proxyIP, Port: d.proxyPort}
+func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
+	proxyAddr := &net.UDPAddr{IP: c.proxyIP, Port: c.proxyPort}
 	pc, err := net.DialUDP("udp", laddr, proxyAddr)
 	if err != nil {
 		return nil, err
 	}
-	conn := packetConn{UDPConn: pc, cipher: d.cipher}
+	conn := packetConn{UDPConn: pc, cipher: c.cipher}
 	return &conn, nil
 }
 
@@ -107,18 +107,17 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	socksSrcAddr := socks.SplitAddr(buf[:n])
+	socksSrcAddr := socks.SplitAddr(buf)
 	if socksSrcAddr == nil {
 		return 0, nil, errors.New("Failed to read source address")
 	}
-	srcAddr := &addr{address: socksSrcAddr.String(), network: "udp"}
+	srcAddr := NewAddr(socksSrcAddr.String(), "udp")
 	copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
 	return len(buf) - len(socksSrcAddr), srcAddr, err
 
 }
 
 type addr struct {
-	net.Addr
 	address string
 	network string
 }
