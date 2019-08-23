@@ -26,6 +26,7 @@ type Client interface {
 // `host:port`, with authentication parameters `cipher` (AEAD) and `password`.
 // TODO: add a dialer argument to support proxy chaining and transport changes.
 func NewClient(host string, port int, password, cipher string) (Client, error) {
+	// TODO: consider using net.LookupIP to get a list of IPs, and add logic for optimal selection.
 	proxyIP, err := net.ResolveIPAddr("ip", host)
 	if err != nil {
 		return nil, errors.New("Failed to resolve proxy address")
