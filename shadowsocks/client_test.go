@@ -213,6 +213,8 @@ func (pc *packetConnReadWriter) Write(b []byte) (int, error) {
 	return pc.PacketConn.WriteTo(b, pc.targetAddr)
 }
 
+// Writes `payload` to `conn` and reads it into `buf`, which we take as a parameter to avoid
+// reallocations in benchmarks and memory profiles. Fails the test if the read payload does not match.
 func expectEchoPayload(conn io.ReadWriter, payload, buf []byte, t testing.TB) {
 	_, err := conn.Write(payload)
 	if err != nil {

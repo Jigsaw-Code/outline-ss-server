@@ -2,6 +2,7 @@ package shadowsocks
 
 import (
 	"errors"
+	"io"
 	"net"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
@@ -89,11 +90,10 @@ func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	cipherBuf := newUDPBuffer()
 	defer freeUDPBuffer(cipherBuf)
 	saltSize := c.cipher.SaltSize()
-	// Copy the SOCKS target address, reserving space for the generated salt to avoid partially
-	// overlapping the plaintext and cipher slices since `Pack` skips the salt when calling
+	// Copy the SOCKS target address and payload, reserving space for the generated salt to avoid
+	// partially overlapping the plaintext and cipher slices since `Pack` skips the salt when calling
 	// `AEAD.Seal` (see https://golang.org/pkg/crypto/cipher/#AEAD).
-	plaintextBuf := append(cipherBuf[:saltSize], socksTargetAddr...)[saltSize:]
-	plaintextBuf = append(plaintextBuf[:len(socksTargetAddr)], b...) // Copy the payload.
+	plaintextBuf := append(append(cipherBuf[saltSize:saltSize], socksTargetAddr...), b...)
 	buf, err := shadowaead.Pack(cipherBuf, plaintextBuf, c.cipher)
 	if err != nil {
 		return 0, err
@@ -120,9 +120,12 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if socksSrcAddr == nil {
 		return 0, nil, errors.New("Failed to read source address")
 	}
+	if len(b) < len(buf)-len(socksSrcAddr) {
+		return 0, nil, io.ErrShortBuffer
+	}
+	n = copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
 	srcAddr := NewAddr(socksSrcAddr.String(), "udp")
-	copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
-	return len(buf) - len(socksSrcAddr), srcAddr, err
+	return n, srcAddr, nil
 
 }
 
