@@ -120,13 +120,12 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if socksSrcAddr == nil {
 		return 0, nil, errors.New("Failed to read source address")
 	}
-	if len(b) < len(buf)-len(socksSrcAddr) {
-		return 0, nil, io.ErrShortBuffer
-	}
-	n = copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
 	srcAddr := NewAddr(socksSrcAddr.String(), "udp")
+	n = copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
+	if len(b) < len(buf)-len(socksSrcAddr) {
+		return n, srcAddr, io.ErrShortBuffer
+	}
 	return n, srcAddr, nil
-
 }
 
 type addr struct {
