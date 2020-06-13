@@ -189,6 +189,7 @@ func (s *tcpService) Start() {
 				return
 			}
 			logger.Errorf("Failed to accept: %v", err)
+			continue
 		}
 
 		go func() (connError *onet.ConnectionError) {
