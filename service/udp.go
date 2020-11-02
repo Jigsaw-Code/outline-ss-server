@@ -249,6 +249,9 @@ func isDNS(addr net.Addr) bool {
 	return port == "53"
 }
 
+// Short timeout used for DNS packets (see RFC 5452 Section 10).
+const shortTimeout = 17 * time.Second
+
 type natconn struct {
 	net.PacketConn
 	cipher *ss.Cipher
@@ -277,8 +280,7 @@ func (c *natconn) onWrite(addr net.Addr) {
 
 	timeout := c.defaultTimeout
 	if isDNS {
-		// Shorten timeout as required by RFC 5452 Section 10.
-		timeout = 17 * time.Second
+		timeout = shortTimeout
 	}
 
 	newDeadline := time.Now().Add(timeout)
@@ -339,6 +341,12 @@ func (m *natmap) set(key string, pc net.PacketConn, cipher *ss.Cipher, clientLoc
 		clientLocation: clientLocation,
 		defaultTimeout: m.timeout,
 	}
+
+	// Start the natconn in the short-deadline state.  The first write
+	// will immediately replace this deadline, but having a finite
+	// deadline here ensures that the connection does not leak if
+	// no write arrives (because the client's packets are rejected).
+	entry.SetReadDeadline(time.Now().Add(shortTimeout))
 
 	m.Lock()
 	defer m.Unlock()
