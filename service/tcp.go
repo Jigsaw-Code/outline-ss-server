@@ -148,19 +148,43 @@ func (s *tcpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidat
 	s.targetIPValidator = targetIPValidator
 }
 
+// SOCKS address types as defined in RFC 1928 section 5.
+const (
+	AtypIPv4       = 1
+	AtypDomainName = 3
+	AtypIPv6       = 4
+)
+
 func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (onet.DuplexConn, *onet.ConnectionError) {
-	tgtTCPAddr, err := net.ResolveTCPAddr("tcp", tgtAddr.String())
-	if err != nil {
-		return nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr.String()), err)
-	}
-	if err := targetIPValidator(tgtTCPAddr.IP); err != nil {
-		return nil, err
+	switch tgtAddr[0] {
+	case AtypDomainName:
+		tgtHost := string(tgtAddr[2 : 2 + int(tgtAddr[1])])
+		tgtIPs, err := net.LookupIP(tgtHost)
+		if err != nil {
+			return nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr.String()), err)
+		}
+		for _, ip := range tgtIPs {
+			if err := targetIPValidator(ip); err != nil {
+				return nil, err
+			}
+		}
+	case AtypIPv4:
+		tgtIP := net.IP(tgtAddr[1 : 1 + net.IPv4len])
+		if err := targetIPValidator(tgtIP); err != nil {
+			return nil, err
+		}
+	case AtypIPv6:
+		tgtIP := net.IP(tgtAddr[1 : 1 + net.IPv6len])
+		if err := targetIPValidator(tgtIP); err != nil {
+			return nil, err
+		}
 	}
 
-	tgtTCPConn, err := net.DialTCP("tcp", nil, tgtTCPAddr)
+	tgtConn, err := net.Dial("tcp", tgtAddr.String())
 	if err != nil {
 		return nil, onet.NewConnectionError("ERR_CONNECT", "Failed to connect to target", err)
 	}
+	tgtTCPConn := tgtConn.(*net.TCPConn)
 	tgtTCPConn.SetKeepAlive(true)
 	return metrics.MeasureConn(tgtTCPConn, &proxyMetrics.ProxyTarget, &proxyMetrics.TargetProxy), nil
 }
