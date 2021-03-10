@@ -29,6 +29,8 @@ func init() {
 		"192.168.0.0/16",
 		// RFC 4193: IPv6 ULAs
 		"fc00::/7",
+		// RFC 6598: reserved prefix for CGNAT
+		"100.64.0.0/10",
 	} {
 		_, subnet, _ := net.ParseCIDR(cidr)
 		privateNetworks = append(privateNetworks, subnet)
