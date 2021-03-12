@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/Jigsaw-Code/outline-ss-server/slicepool"
 )
@@ -31,6 +32,23 @@ const payloadSizeMask = 0x3FFF // 16*1024 - 1
 // Buffer pool used for decrypting Shadowsocks streams.
 // The largest buffer we could need is for decrypting a max-length payload.
 var readBufPool = slicepool.MakePool(payloadSizeMask + maxTagSize())
+
+// The "chunk size boost" behavior starts each connection using a small
+// encryption buffer, to fit each ciphertext in one packet.  This ensures
+// that each packet can be decrypted and used by the receiver without
+// waiting for the next one, which reduces streaming latency when the
+// connection is in the TCP slow-start phase.
+//
+// Once the connection has sent 1 MB of data without a 1-second pause, it
+// is presumed to be out of slow-start, and the chunk size is increased to
+// the protocol maximum (payloadSizeMask) to minimize the protocol overhead.
+//
+// This behavior also saves memory for sockets that are not heavily used.
+//
+// This is based on the behavior reportedly used by Google for TLS:
+// https://hpbn.co/transport-layer-security-tls/#tls-optimizations-at-google
+var chunkSizeBoostTriggerBytes int64 = 1024 * 1024
+var chunkSizeBoostTimeout = time.Second
 
 // Writer is an io.Writer that also implements io.ReaderFrom to
 // allow for piping the data without extra allocations and copies.
@@ -45,6 +63,7 @@ type Writer struct {
 	// Indicates that a concurrent flush is currently allowed.
 	needFlush     bool
 	writer        io.Writer
+	mss           int // Maximum Segment Size for chunk size boost
 	ssCipher      *Cipher
 	saltGenerator SaltGenerator
 	// Wrapper for input that arrives as a slice.
@@ -62,6 +81,47 @@ type Writer struct {
 // the shadowsocks protocol with the given shadowsocks cipher.
 func NewShadowsocksWriter(writer io.Writer, ssCipher *Cipher) *Writer {
 	return &Writer{writer: writer, ssCipher: ssCipher, saltGenerator: RandomSaltGenerator}
+}
+
+// SetMSS informs the Writer about the Maximum Segment Size
+// of the underlying io.Writer.  This is used to implement the
+// Chunk Size Boost behavior.  If this method is used, it must
+// be called before the first write.
+func (sw *Writer) SetMSS(mss int) {
+	sw.mss = mss
+}
+
+// Returns true if this call resulted in reallocating the buffer.
+func (sw *Writer) setPayloadSize(payloadSize int) bool {
+	// The maximum length message is the salt (first message only), length, length tag,
+	// payload, and payload tag.
+	sizeBufSize := 2 + sw.aead.Overhead()
+	bufSize := sw.ssCipher.SaltSize() + sizeBufSize + payloadSize + sw.aead.Overhead()
+	if len(sw.buf) != bufSize {
+		sw.buf = make([]byte, bufSize)
+		return true
+	}
+	return false
+}
+
+// Use a short buffer, sized to fit each chunk into the MSS.
+// (Exception: the first chunk can spill across two packets if it is filled,
+// due to the additional salt.  This seems unlikely to be a common case.)
+// If the MSS is not set, or is unsuitable, this configures a long buffer
+// instead.
+func (sw *Writer) useShortBuffer() bool {
+	payloadSize := sw.mss - (2 + 2*sw.aead.Overhead())
+	if payloadSize > 0 && payloadSize < payloadSizeMask {
+		// The MSS is big enough to hold a nonempty payload, and
+		// small enough to limit the payload size.
+		return sw.setPayloadSize(payloadSize)
+	}
+	return sw.useLongBuffer()
+}
+
+// Use a long buffer, sized to maximize payload in each chunk.
+func (sw *Writer) useLongBuffer() bool {
+	return sw.setPayloadSize(payloadSizeMask)
 }
 
 // SetSaltGenerator sets the salt generator to be used. Must be called before the first write.
@@ -83,11 +143,7 @@ func (sw *Writer) init() (err error) {
 		}
 		sw.saltGenerator = nil // No longer needed, so release reference.
 		sw.counter = make([]byte, sw.aead.NonceSize())
-		// The maximum length message is the salt (first message only), length, length tag,
-		// payload, and payload tag.
-		sizeBufSize := 2 + sw.aead.Overhead()
-		maxPayloadBufSize := payloadSizeMask + sw.aead.Overhead()
-		sw.buf = make([]byte, len(salt)+sizeBufSize+maxPayloadBufSize)
+		sw.useShortBuffer()
 		// Store the salt at the start of sw.buf.
 		copy(sw.buf, salt)
 	}
@@ -165,7 +221,7 @@ func (sw *Writer) buffers() (sizeBuf, payloadBuf []byte) {
 	// followed by a variable-length payload block.
 	sizeBuf = sw.buf[saltSize : saltSize+2]
 	payloadStart := saltSize + 2 + sw.aead.Overhead()
-	payloadBuf = sw.buf[payloadStart : payloadStart+payloadSizeMask]
+	payloadBuf = sw.buf[payloadStart : len(sw.buf)-sw.aead.Overhead()]
 	return
 }
 
@@ -203,12 +259,39 @@ func (sw *Writer) ReadFrom(r io.Reader) (int64, error) {
 	}
 	sw.mu.Unlock()
 
+	// Number of bytes written without a pause.  Used to control chunk size boost.
+	writtenConsecutive := written
+
 	// Main transfer loop
 	for err == nil {
+		beforeRead := time.Now()
 		sw.pending, err = r.Read(payloadBuf)
-		written += int64(sw.pending)
+		readTime := time.Now().Sub(beforeRead)
+
+		bytesRead := sw.pending
+		written += int64(bytesRead)
+
 		if flushErr := sw.flush(); flushErr != nil {
 			err = flushErr
+		}
+
+		if readTime > chunkSizeBoostTimeout {
+			// The socket has been idle, so the TCP window may have shrunk.
+			writtenConsecutive = 0
+			// Reduce the buffer size if the first write after an idle
+			// period didn't fully utilize it.
+			if bytesRead < len(payloadBuf) && sw.useShortBuffer() {
+				_, payloadBuf = sw.buffers()
+			}
+		}
+		writtenConsecutive += int64(bytesRead)
+		if writtenConsecutive > chunkSizeBoostTriggerBytes {
+			// The socket has been consistently active, so the TCP window has
+			// likely grown.  If the buffer is being filled, increase chunk size
+			// to reduce AEAD overhead.
+			if bytesRead == len(payloadBuf) && sw.useLongBuffer() {
+				_, payloadBuf = sw.buffers()
+			}
 		}
 	}
 

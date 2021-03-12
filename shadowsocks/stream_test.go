@@ -13,6 +13,12 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+func init() {
+	// Reduce chunk size boost trigger amount to capture the transition behavior without
+	// having to send many megabytes of data.
+	chunkSizeBoostTriggerBytes = 20_000
+}
+
 func newTestCipher(t *testing.T) *Cipher {
 	cipher, err := NewCipher("chacha20-ietf-poly1305", "test secret")
 	if err != nil {
@@ -409,5 +415,96 @@ func TestLazyWriteConcurrentFlush(t *testing.T) {
 	}
 	if !bytes.Equal(decrypted[len(header):], body) {
 		t.Errorf("Wrong final content: %v", decrypted)
+	}
+}
+
+func TestMSSEndToEnd(t *testing.T) {
+	t.Parallel()
+	cipher := newTestCipher(t)
+
+	// Test values near the default (0), minimum (35), typical (600, 1500), and maximum.
+	testMSSValues := []int{
+		-1, 0, 1, 2, 32, 33, 34, 35, 36, 500, 600, 1500, 16415, 16416, 16417, 16418, 32768,
+	}
+
+	input := make([]byte, 2*chunkSizeBoostTriggerBytes)
+	for i := range input {
+		input[i] = byte(i) // Arbitrary test contents
+	}
+
+	for _, mss := range testMSSValues {
+		mss := mss
+		t.Run(fmt.Sprintf("MSS=%d", mss), func(t *testing.T) {
+			t.Parallel()
+			connReader, connWriter := io.Pipe()
+			writer := NewShadowsocksWriter(connWriter, cipher)
+			writer.SetMSS(mss)
+			reader := NewShadowsocksReader(connReader, cipher)
+			go func() {
+				defer connWriter.Close()
+				_, err := writer.Write(input)
+				if err != nil {
+					t.Errorf("Failed Write: %v", err)
+				}
+			}()
+			output, err := ioutil.ReadAll(reader)
+			if err != nil {
+				t.Errorf("ReadAll failed: %v", err)
+			} else if !bytes.Equal(input, output) {
+				t.Errorf("Data mismatch (lengths %d, %d, mss=%d)", len(input), len(output), mss)
+			}
+		})
+	}
+}
+
+func TestMSSSizeCheck(t *testing.T) {
+	t.Parallel()
+	cipher := newTestCipher(t)
+
+	testPayloadSize := []int{
+		1, 2, 3, 500, 1500, 16382, 16383,
+	}
+
+	input := make([]byte, 2*chunkSizeBoostTriggerBytes)
+
+	for _, payloadSize := range testPayloadSize {
+		payloadSize := payloadSize
+		t.Run(fmt.Sprintf("payloadSize=%d", payloadSize), func(t *testing.T) {
+			t.Parallel()
+			connReader, connWriter := io.Pipe()
+			writer := NewShadowsocksWriter(connWriter, cipher)
+			writer.SetMSS(payloadSize + 2 + 2*cipher.TagSize())
+			reader := NewShadowsocksReader(connReader, cipher)
+			go func() {
+				_, err := writer.Write(input)
+				if err != nil {
+					t.Errorf("Failed Write: %v", err)
+				}
+				connWriter.Close()
+			}()
+			outputBuf := make([]byte, 32768)
+			var total int64 = 0
+			for {
+				n, err := reader.Read(outputBuf)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prevTotal := total
+				total += int64(n)
+				if int(total) == len(input) {
+					break
+				}
+				var expectedN int
+				if prevTotal <= chunkSizeBoostTriggerBytes {
+					expectedN = payloadSize
+				} else {
+					expectedN = payloadSizeMask
+				}
+
+				if n != expectedN {
+					t.Errorf("Expected %d payload bytes, got %d", expectedN, n)
+				}
+			}
+		})
 	}
 }

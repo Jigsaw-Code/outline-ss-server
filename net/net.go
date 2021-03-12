@@ -3,6 +3,7 @@ package net
 import (
 	"io"
 	"net"
+	"syscall"
 )
 
 // DuplexConn is a net.Conn that allows for closing only the reader or writer end of
@@ -96,4 +97,19 @@ type ConnectionError struct {
 
 func NewConnectionError(status, message string, cause error) *ConnectionError {
 	return &ConnectionError{Status: status, Message: message, Cause: cause}
+}
+
+// GetMSS returns the TCP Maximum Segment Size if conn is a TCP connection
+// and support RawConn access.
+func GetMSS(conn *net.TCPConn) (mss int, err error) {
+	var rawConn syscall.RawConn
+	rawConn, err = conn.SyscallConn()
+	if err != nil {
+		return
+	}
+	rawConn.Control(func(fd uintptr) {
+		// This should work on POSIX platforms and Windows 10.
+		mss, err = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_MAXSEG)
+	})
+	return
 }

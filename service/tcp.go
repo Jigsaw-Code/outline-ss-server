@@ -270,6 +270,13 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		logger.Debugf("proxy %s <-> %s", clientTCPConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
 		ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
+		mss, err := onet.GetMSS(clientTCPConn)
+		if err != nil {
+			logger.Debugf("Failed to get MSS: %v\n", err)
+		} else {
+			logger.Debugf("Setting MSS to %d\n", mss)
+			ssw.SetMSS(mss)
+		}
 
 		fromClientErrCh := make(chan error)
 		go func() {
