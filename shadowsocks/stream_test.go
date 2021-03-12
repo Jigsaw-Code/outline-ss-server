@@ -411,3 +411,57 @@ func TestLazyWriteConcurrentFlush(t *testing.T) {
 		t.Errorf("Wrong final content: %v", decrypted)
 	}
 }
+
+func TestChunkSizeIntegrity(t *testing.T) {
+	t.Parallel()
+	cipher := newTestCipher(t)
+
+	// Test extreme and reasonable values.
+	testChunkSizes := []int{
+		1, 2, 3, 4, 250, 256, 257, 1000, 4000, 8192, 16383,
+	}
+
+	const numWrites = 5
+
+	input := make([]byte, numWrites*16383)
+	for i := range input {
+		input[i] = byte(i) // Arbitrary test contents
+	}
+
+	for _, maxChunkSize := range testChunkSizes {
+		maxChunkSize := maxChunkSize
+		t.Run(fmt.Sprintf("maxChunkSize=%d", maxChunkSize), func(t *testing.T) {
+			t.Parallel()
+			connReader, connWriter := io.Pipe()
+			writer := NewShadowsocksWriter(connWriter, cipher)
+			writer.SetMaxChunkSize(maxChunkSize)
+			reader := NewShadowsocksReader(connReader, cipher)
+			go func() {
+				defer connWriter.Close()
+				if _, err := writer.Write(input[:numWrites*maxChunkSize]); err != nil {
+					t.Errorf("Failed Write: %v", err)
+				}
+			}()
+
+			// Check that all writes have the expected size and contents.
+			buf := make([]byte, 2*maxChunkSize)
+			for i := 0; i < numWrites; i++ {
+				n, err := reader.Read(buf)
+				if err != nil {
+					t.Errorf("Read failed at chunk %d: %v", i, err)
+				} else if n != maxChunkSize {
+					t.Errorf("Chunk %d has wrong size: %d", i, n)
+				} else if !bytes.Equal(input[i*maxChunkSize:][:maxChunkSize], buf[:n]) {
+					t.Errorf("Data mismatch at chunk %d", i)
+				}
+			}
+			// Check that the stream is closed cleanly.
+			n, err := reader.Read(buf)
+			if n != 0 {
+				t.Errorf("Got %d extra bytes", n)
+			} else if err != io.EOF {
+				t.Errorf("Wanted EOF, got %v", err)
+			}
+		})
+	}
+}

@@ -51,6 +51,8 @@ type Writer struct {
 	byteWrapper bytes.Reader
 	// Number of plaintext bytes that are currently buffered.
 	pending int
+	// Maximum number of plaintext bytes to write in each chunk.
+	maxChunkSize int
 	// These are populated by init():
 	buf  []byte
 	aead cipher.AEAD
@@ -61,12 +63,27 @@ type Writer struct {
 // NewShadowsocksWriter creates a Writer that encrypts the given Writer using
 // the shadowsocks protocol with the given shadowsocks cipher.
 func NewShadowsocksWriter(writer io.Writer, ssCipher *Cipher) *Writer {
-	return &Writer{writer: writer, ssCipher: ssCipher, saltGenerator: RandomSaltGenerator}
+	return &Writer{
+		writer:        writer,
+		ssCipher:      ssCipher,
+		saltGenerator: RandomSaltGenerator,
+		maxChunkSize:  payloadSizeMask,
+	}
 }
 
 // SetSaltGenerator sets the salt generator to be used. Must be called before the first write.
 func (sw *Writer) SetSaltGenerator(saltGenerator SaltGenerator) {
 	sw.saltGenerator = saltGenerator
+}
+
+// SetMaxChunkSize sets the maximum number of bytes to encrypt as a chunk.
+// Defaults to 2^16-1.  Smaller values save memory but increase framing overhead.
+// Must be called before the first write.
+func (sw *Writer) SetMaxChunkSize(maxChunkSize int) {
+	if maxChunkSize > payloadSizeMask || maxChunkSize <= 0 {
+		maxChunkSize = payloadSizeMask
+	}
+	sw.maxChunkSize = maxChunkSize
 }
 
 // init generates a random salt, sets up the AEAD object and writes
@@ -86,7 +103,7 @@ func (sw *Writer) init() (err error) {
 		// The maximum length message is the salt (first message only), length, length tag,
 		// payload, and payload tag.
 		sizeBufSize := 2 + sw.aead.Overhead()
-		maxPayloadBufSize := payloadSizeMask + sw.aead.Overhead()
+		maxPayloadBufSize := sw.maxChunkSize + sw.aead.Overhead()
 		sw.buf = make([]byte, len(salt)+sizeBufSize+maxPayloadBufSize)
 		// Store the salt at the start of sw.buf.
 		copy(sw.buf, salt)
@@ -165,7 +182,7 @@ func (sw *Writer) buffers() (sizeBuf, payloadBuf []byte) {
 	// followed by a variable-length payload block.
 	sizeBuf = sw.buf[saltSize : saltSize+2]
 	payloadStart := saltSize + 2 + sw.aead.Overhead()
-	payloadBuf = sw.buf[payloadStart : payloadStart+payloadSizeMask]
+	payloadBuf = sw.buf[payloadStart : payloadStart+sw.maxChunkSize]
 	return
 }
 
