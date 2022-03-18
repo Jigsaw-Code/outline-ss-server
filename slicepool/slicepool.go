@@ -34,7 +34,7 @@ type Pool struct {
 func MakePool(sliceLen int) Pool {
 	return Pool{
 		pool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				slice := make([]byte, sliceLen)
 				// Return a *[]byte instead of []byte ensures that
 				// the []byte is not copied, which would cause a heap
