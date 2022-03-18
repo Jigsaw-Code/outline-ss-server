@@ -49,7 +49,7 @@ func remoteIP(conn net.Conn) net.IP {
 }
 
 // Wrapper for logger.Debugf during TCP access key searches.
-func debugTCP(cipherID, template string, val interface{}) {
+func debugTCP[T any](cipherID, template string, val T) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
 	if logger.IsEnabledFor(logging.DEBUG) {
