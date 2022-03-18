@@ -33,7 +33,7 @@ import (
 const serverUDPBufferSize = 64 * 1024
 
 // Wrapper for logger.Debugf during UDP proxying.
-func debugUDP(tag string, template string, val interface{}) {
+func debugUDP[T any](tag string, template string, val T) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
 	if logger.IsEnabledFor(logging.DEBUG) {
