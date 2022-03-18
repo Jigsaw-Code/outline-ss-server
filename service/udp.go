@@ -41,7 +41,7 @@ func debugUDP[T any](tag string, template string, val T) {
 	}
 }
 
-func debugUDPAddr(addr net.Addr, template string, val interface{}) {
+func debugUDPAddr[T any, A net.Addr](addr A, template string, val T) {
 	if logger.IsEnabledFor(logging.DEBUG) {
 		// Avoid calling addr.String() unless debugging is enabled.
 		debugUDP(addr.String(), template, val)
