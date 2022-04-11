@@ -74,7 +74,7 @@ type SSServer struct {
 	ports       map[int]*ssPort
 }
 
-func (s *SSServer) startPort(portNum int) error {
+func (s *SSServer) startPort(portNum int, rateLimiterConfig *service.RateLimiterConfig) error {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
 	if err != nil {
 		return fmt.Errorf("Failed to start TCP on port %v: %v", portNum, err)
@@ -85,9 +85,11 @@ func (s *SSServer) startPort(portNum int) error {
 	}
 	logger.Infof("Listening TCP and UDP on port %v", portNum)
 	port := &ssPort{cipherList: service.NewCipherList()}
+
+	limiter := service.NewRateLimiter(rateLimiterConfig)
 	// TODO: Register initial data metrics at zero.
-	port.tcpService = service.NewTCPService(port.cipherList, &s.replayCache, s.m, tcpReadTimeout)
-	port.udpService = service.NewUDPService(s.natTimeout, port.cipherList, s.m)
+	port.tcpService = service.NewTCPService(port.cipherList, &s.replayCache, s.m, tcpReadTimeout, limiter)
+	port.udpService = service.NewUDPService(s.natTimeout, port.cipherList, s.m, limiter)
 	s.ports[portNum] = port
 	go port.tcpService.Serve(listener)
 	go port.udpService.Serve(packetConn)
@@ -120,6 +122,7 @@ func (s *SSServer) loadConfig(filename string) error {
 
 	portChanges := make(map[int]int)
 	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
+	portKeyLimits := make(map[int]map[string]service.KeyLimits)
 	for _, keyConfig := range config.Keys {
 		portChanges[keyConfig.Port] = 1
 		cipherList, ok := portCiphers[keyConfig.Port]
@@ -133,6 +136,19 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		entry := service.MakeCipherEntry(keyConfig.ID, cipher, keyConfig.Secret)
 		cipherList.PushBack(&entry)
+		var keyLimits map[string]service.KeyLimits
+		keyLimits, ok = portKeyLimits[keyConfig.Port]
+		if !ok {
+			keyLimits = make(map[string]service.KeyLimits)
+			portKeyLimits[keyConfig.Port] = keyLimits
+		}
+		if keyConfig.Limits != nil {
+			keyLimits[keyConfig.ID] = *keyConfig.Limits
+		} else if config.DefaultKeyLimits != nil {
+			keyLimits[keyConfig.ID] = *config.DefaultKeyLimits
+		} else {
+			keyLimits[keyConfig.ID] = noLimits
+		}
 	}
 	for port := range s.ports {
 		portChanges[port] = portChanges[port] - 1
@@ -143,7 +159,8 @@ func (s *SSServer) loadConfig(filename string) error {
 				return fmt.Errorf("Failed to remove port %v: %v", portNum, err)
 			}
 		} else if count == +1 {
-			if err := s.startPort(portNum); err != nil {
+			rateLimiterConfig := &service.RateLimiterConfig{KeyToLimits: portKeyLimits[portNum]}
+			if err := s.startPort(portNum, rateLimiterConfig); err != nil {
 				return fmt.Errorf("Failed to start port %v: %v", portNum, err)
 			}
 		}
@@ -197,7 +214,16 @@ type Config struct {
 		Port   int
 		Cipher string
 		Secret string
+		Limits *service.KeyLimits
 	}
+	DefaultKeyLimits *service.KeyLimits
+}
+
+var noLimits service.KeyLimits = service.KeyLimits{
+	LargeScalePeriod: time.Millisecond,
+	LargeScaleLimit: 1 << 30,
+	SmallScalePeriod: time.Millisecond,
+	SmallScaleLimit: 1 << 30,
 }
 
 func readConfig(filename string) (*Config, error) {
@@ -207,6 +233,17 @@ func readConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 	err = yaml.Unmarshal(configData, &config)
+	if err != nil {
+		return nil, err
+	}
+	if config.DefaultKeyLimits == nil {
+		config.DefaultKeyLimits = &noLimits
+	}
+	for i := range config.Keys {
+		if config.Keys[i].Limits == nil {
+			config.Keys[i].Limits = config.DefaultKeyLimits
+		}
+	}
 	return &config, err
 }
 

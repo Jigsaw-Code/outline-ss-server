@@ -102,7 +102,6 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 			continue
 		}
 		debugTCP(id, "Found cipher at index %d", ci)
-		// Move the active cipher to the front, so that the search is quicker next time.
 		return entry, elt
 	}
 	return nil, nil
@@ -114,6 +113,7 @@ type tcpService struct {
 	stopped     bool
 	ciphers     CipherList
 	m           metrics.ShadowsocksMetrics
+	limiter     RateLimiter
 	running     sync.WaitGroup
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
@@ -123,11 +123,13 @@ type tcpService struct {
 
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-func NewTCPService(ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPService {
+func NewTCPService(ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics,
+				   timeout time.Duration, limiter RateLimiter) TCPService {
 	return &tcpService{
 		ciphers:           ciphers,
 		m:                 m,
-		readTimeout:       timeout,
+		readTimeout: 	   timeout,
+		limiter:           limiter,
 		replayCache:       replayCache,
 		targetIPValidator: onet.RequirePublicIP,
 	}
@@ -227,6 +229,17 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	var proxyMetrics metrics.ProxyMetrics
 	clientConn := metrics.MeasureConn(clientTCPConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientTCPConn), s.ciphers)
+	var clientWriter io.Writer = clientConn
+
+	var accessKey string
+	if cipherEntry != nil {
+		accessKey = cipherEntry.ID
+		var limiterErr error
+		clientReader, clientWriter, limiterErr = s.limiter.WrapReaderWriter(accessKey, clientReader, clientWriter)
+		if limiterErr != nil {
+			logger.Panicf("got unexpected error wrapping streams: %v", limiterErr)
+		}
+	}
 
 	connError := func() *onet.ConnectionError {
 		if keyErr != nil {
@@ -268,7 +281,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		defer tgtConn.Close()
 
 		logger.Debugf("proxy %s <-> %s", clientTCPConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
-		ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
+		ssw := ss.NewShadowsocksWriter(clientWriter, cipherEntry.Cipher)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 
 		fromClientErrCh := make(chan error)
@@ -306,11 +319,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
 		status = connError.Status
 	}
-	var id string
-	if cipherEntry != nil {
-		id = cipherEntry.ID
-	}
-	s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, timeToCipher, connDuration)
+	s.m.AddClosedTCPConnection(clientLocation, accessKey, status, proxyMetrics, timeToCipher, connDuration)
 	clientConn.Close() // Closing after the metrics are added aids integration testing.
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }

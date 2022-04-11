@@ -78,11 +78,18 @@ type udpService struct {
 	m                 metrics.ShadowsocksMetrics
 	running           sync.WaitGroup
 	targetIPValidator onet.TargetIPValidator
+	limiter           RateLimiter
 }
 
 // NewUDPService creates a UDPService
-func NewUDPService(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics) UDPService {
-	return &udpService{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
+func NewUDPService(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics, limiter RateLimiter) UDPService {
+	return &udpService{
+		natTimeout: natTimeout,
+		ciphers: cipherList,
+		m: m,
+		targetIPValidator: onet.RequirePublicIP,
+		limiter: limiter,
+	}
 }
 
 // UDPService is a running UDP shadowsocks proxy that can be stopped.
@@ -221,6 +228,11 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 			}
 
 			debugUDPAddr(clientAddr, "Proxy exit %v", targetConn.LocalAddr())
+			limitErr := s.limiter.Allow(keyID, len(payload))
+			if limitErr != nil {
+				debugUDPAddr(clientAddr, "Rate limite exceeded: %v", limitErr)
+				return onet.NewConnectionError("ERR_LIMIT", "Rate limit exceeded", limitErr)
+			}
 			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
