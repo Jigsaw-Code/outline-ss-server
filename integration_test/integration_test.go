@@ -97,6 +97,11 @@ func startUDPEchoServer(t testing.TB) (*net.UDPConn, *sync.WaitGroup) {
 	return conn, &running
 }
 
+func makeLimiter(cipherList service.CipherList) service.TrafficLimiter {
+	c := service.MakeTestTrafficLimiterConfig(cipherList)
+	return service.NewTrafficLimiter(&c)
+}
+
 func TestTCPEcho(t *testing.T) {
 	echoListener, echoRunning := startTCPEchoServer(t)
 
@@ -111,7 +116,7 @@ func TestTCPEcho(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
-	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
+	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout, makeLimiter(cipherList))
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyListener)
 
@@ -164,6 +169,192 @@ func TestTCPEcho(t *testing.T) {
 	echoRunning.Wait()
 }
 
+func TestTrafficLimiterTCP(t *testing.T) {
+	echoListener, echoRunning := startTCPEchoServer(t)
+
+	proxyListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("ListenTCP failed: %v", err)
+	}
+	secrets := ss.MakeTestSecrets(1)
+	cipherList, err := service.MakeTestCiphers(secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayCache := service.NewReplayCache(5)
+	const testTimeout = 5 * time.Second
+
+	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*service.CipherEntry).ID
+	trafficLimiter := service.NewTrafficLimiter(&service.TrafficLimiterConfig{
+		KeyToRateLimit: map[string]int{
+			key: 1000,
+		},
+	})
+
+	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout, trafficLimiter)
+	proxy.SetTargetIPValidator(allowAll)
+	go proxy.Serve(proxyListener)
+
+	proxyHost, proxyPort, err := net.SplitHostPort(proxyListener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	portNum, err := strconv.Atoi(proxyPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := client.NewClient(proxyHost, portNum, secrets[0], ss.TestCipher)
+	if err != nil {
+		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
+	}
+
+	doWriteRead := func(N int, repeats int) time.Duration {
+		up := ss.MakeTestPayload(N)
+		conn, err := client.DialTCP(nil, echoListener.Addr().String())
+		defer conn.Close()
+		if err != nil {
+			t.Fatalf("ShadowsocksClient.DialTCP failed: %v", err)
+		}
+		start := time.Now()
+		down := make([]byte, N)
+
+		for i := 0; i < repeats; i++ {
+			n, err := conn.Write(up)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != N {
+				t.Fatalf("Tried to upload %d bytes, but only sent %d", N, n)
+			}
+
+			n, err = io.ReadFull(conn, down)
+			if err != nil && err != io.EOF {
+				t.Fatal(err)
+			}
+			if n != N {
+				t.Fatalf("Expected to download %d bytes, but only received %d", N, n)
+			}
+
+			if !bytes.Equal(up, down) {
+				t.Fatal("Echo mismatch")
+			}
+		}
+
+		return time.Now().Sub(start)
+	}
+
+	period1 := doWriteRead(200, 4)
+	if period1 < 500*time.Millisecond {
+		t.Fatalf("Write-read loop is too fast")
+	}
+
+	time.Sleep(1 * time.Second)
+
+	period2 := doWriteRead(200, 2)
+	if period2 > 100*time.Millisecond {
+		t.Fatalf("Write-read loop is too slow")
+	}
+
+	period3 := doWriteRead(500, 2)
+	if period3 < 500*time.Millisecond {
+		t.Fatalf("Write-read loop is too fast")
+	}
+
+	proxy.Stop()
+	echoListener.Close()
+	echoRunning.Wait()
+}
+
+func TestTrafficLimiterUDP(t *testing.T) {
+	echoConn, echoRunning := startUDPEchoServer(t)
+
+	proxyConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("ListenTCP failed: %v", err)
+	}
+	secrets := ss.MakeTestSecrets(1)
+	cipherList, err := service.MakeTestCiphers(secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testMetrics := &fakeUDPMetrics{fakeLocation: "QQ"}
+
+	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*service.CipherEntry).ID
+	trafficLimiter := service.NewTrafficLimiter(&service.TrafficLimiterConfig{
+		KeyToRateLimit: map[string]int{
+			key: 1000,
+		},
+	})
+
+	proxy := service.NewUDPService(time.Hour, cipherList, testMetrics, trafficLimiter)
+	proxy.SetTargetIPValidator(allowAll)
+	go proxy.Serve(proxyConn)
+
+	proxyHost, proxyPort, err := net.SplitHostPort(proxyConn.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	portNum, err := strconv.Atoi(proxyPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := client.NewClient(proxyHost, portNum, secrets[0], ss.TestCipher)
+	if err != nil {
+		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
+	}
+	conn, err := client.ListenUDP(nil)
+	if err != nil {
+		t.Fatalf("ShadowsocksClient.ListenUDP failed: %v", err)
+	}
+
+	run := func(N int, expectReadError bool) {
+		up := ss.MakeTestPayload(N)
+		n, err := conn.WriteTo(up, echoConn.LocalAddr())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != N {
+			t.Fatalf("Tried to upload %d bytes, but only sent %d", N, n)
+		}
+
+		conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+
+		down := make([]byte, N)
+		n, addr, err := conn.ReadFrom(down)
+		if err != nil {
+			if !expectReadError {
+				t.Fatalf("Unexpected read error: %v", err)
+			}
+			return
+		} else {
+			if expectReadError {
+				t.Fatalf("Expected read error")
+			}
+		}
+		if n != N {
+			t.Fatalf("Tried to download %d bytes, but only sent %d", N, n)
+		}
+		if addr.String() != echoConn.LocalAddr().String() {
+			t.Errorf("Reported address mismatch: %s != %s", addr.String(), echoConn.LocalAddr().String())
+		}
+
+		if !bytes.Equal(up, down) {
+			t.Fatal("Echo mismatch")
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		run(300, false)
+		run(300, true)
+		time.Sleep(time.Second)
+	}
+
+	conn.Close()
+	echoConn.Close()
+	echoRunning.Wait()
+	proxy.GracefulStop()
+}
+
 type statusMetrics struct {
 	metrics.NoOpMetrics
 	sync.Mutex
@@ -184,7 +375,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	require.NoError(t, err)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
-	proxy := service.NewTCPService(cipherList, nil, testMetrics, testTimeout)
+	proxy := service.NewTCPService(cipherList, nil, testMetrics, testTimeout, makeLimiter(cipherList))
 	go proxy.Serve(proxyListener)
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyListener.Addr().String())
@@ -266,7 +457,7 @@ func TestUDPEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	testMetrics := &fakeUDPMetrics{fakeLocation: "QQ"}
-	proxy := service.NewUDPService(time.Hour, cipherList, testMetrics)
+	proxy := service.NewUDPService(time.Hour, cipherList, testMetrics, makeLimiter(cipherList))
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyConn)
 
@@ -363,7 +554,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 		b.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	proxy := service.NewTCPService(cipherList, nil, &metrics.NoOpMetrics{}, testTimeout)
+	proxy := service.NewTCPService(cipherList, nil, &metrics.NoOpMetrics{}, testTimeout, makeLimiter(cipherList))
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyListener)
 
@@ -430,7 +621,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
-	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
+	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout, makeLimiter(cipherList))
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyListener)
 
@@ -505,7 +696,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewUDPService(time.Hour, cipherList, &metrics.NoOpMetrics{})
+	proxy := service.NewUDPService(time.Hour, cipherList, &metrics.NoOpMetrics{}, makeLimiter(cipherList))
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyConn)
 
@@ -554,7 +745,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewUDPService(time.Hour, cipherList, &metrics.NoOpMetrics{})
+	proxy := service.NewUDPService(time.Hour, cipherList, &metrics.NoOpMetrics{}, makeLimiter(cipherList))
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyConn)
 

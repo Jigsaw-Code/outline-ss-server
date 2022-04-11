@@ -3,13 +3,16 @@ keys:
     port: 9000
     cipher: chacha20-ietf-poly1305
     secret: Secret0
+    rate_limit: 128000
 
   - id: user-1
     port: 9000
     cipher: chacha20-ietf-poly1305
     secret: Secret1
+    rate_limit: 128000
 
   - id: user-2
     port: 9001
     cipher: chacha20-ietf-poly1305
     secret: Secret2
+    rate_limit: 128000
