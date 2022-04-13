@@ -319,7 +319,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	}
 	s.m.AddClosedTCPConnection(clientLocation, accessKey, status, proxyMetrics, timeToCipher, connDuration)
 	clientConn.Close() // Closing after the metrics are added aids integration testing.
-	logger.Debugf("Done with status %v, duration %v, metrics: %v", status, connDuration, proxyMetrics)
+	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
