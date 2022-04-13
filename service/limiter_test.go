@@ -22,14 +22,14 @@ func TestTrafficLimiter(t *testing.T) {
 
 	var tok int64 = 1024
 	config := TrafficLimiterConfig{
-		KeyToLimits: map[string]*KeyLimits{
-			key1: &KeyLimits{
+		KeyToLimits: map[string]*TrafficLimits{
+			key1: &TrafficLimits{
 				LargeScalePeriod: time.Minute,
 				LargeScaleLimit:  10 * tok,
 				SmallScalePeriod: time.Second,
 				SmallScaleLimit:  2 * tok,
 			},
-			key2: &KeyLimits{
+			key2: &TrafficLimits{
 				LargeScalePeriod: time.Minute,
 				LargeScaleLimit:  10 * tok,
 				SmallScalePeriod: time.Second,

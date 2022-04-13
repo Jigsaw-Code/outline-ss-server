@@ -20,7 +20,7 @@ import (
 
 func MakeTestTrafficLimiterConfig(ciphers CipherList) TrafficLimiterConfig {
 	elts := ciphers.SnapshotForClientIP(net.IP{})
-	keyToLimits := make(map[string]*KeyLimits)
+	keyToLimits := make(map[string]*TrafficLimits)
 	for _, elt := range elts {
 		entry := elt.Value.(*CipherEntry)
 		keyToLimits[entry.ID] = nil

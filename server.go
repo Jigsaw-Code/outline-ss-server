@@ -122,7 +122,7 @@ func (s *SSServer) loadConfig(filename string) error {
 
 	portChanges := make(map[int]int)
 	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
-	portKeyLimits := make(map[int]map[string]*service.KeyLimits)
+	portKeyLimits := make(map[int]map[string]*service.TrafficLimits)
 	for _, keyConfig := range config.Keys {
 		portChanges[keyConfig.Port] = 1
 		cipherList, ok := portCiphers[keyConfig.Port]
@@ -136,15 +136,15 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		entry := service.MakeCipherEntry(keyConfig.ID, cipher, keyConfig.Secret)
 		cipherList.PushBack(&entry)
-		var keyLimits map[string]*service.KeyLimits
+		var keyLimits map[string]*service.TrafficLimits
 		keyLimits, ok = portKeyLimits[keyConfig.Port]
 		if !ok {
-			keyLimits = make(map[string]*service.KeyLimits)
+			keyLimits = make(map[string]*service.TrafficLimits)
 			portKeyLimits[keyConfig.Port] = keyLimits
 		}
-		keyLimits[keyConfig.ID] = keyConfig.Limits
-		if config.DefaultKeyLimits != nil {
-			keyLimits[keyConfig.ID] = config.DefaultKeyLimits
+		keyLimits[keyConfig.ID] = keyConfig.TrafficLimits
+		if config.DefaultTrafficLimits != nil {
+			keyLimits[keyConfig.ID] = config.DefaultTrafficLimits
 		}
 	}
 	for port := range s.ports {
@@ -207,13 +207,13 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 
 type Config struct {
 	Keys []struct {
-		ID     string
-		Port   int
-		Cipher string
-		Secret string
-		Limits *service.KeyLimits
+		ID            string
+		Port          int
+		Cipher        string
+		Secret        string
+		TrafficLimits *service.TrafficLimits
 	}
-	DefaultKeyLimits *service.KeyLimits
+	DefaultTrafficLimits *service.TrafficLimits
 }
 
 func readConfig(filename string) (*Config, error) {

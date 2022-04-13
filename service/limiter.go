@@ -25,7 +25,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type KeyLimits struct {
+type TrafficLimits struct {
 	LargeScalePeriod time.Duration
 	LargeScaleLimit  int64
 	SmallScalePeriod time.Duration
@@ -34,7 +34,7 @@ type KeyLimits struct {
 
 type TrafficLimiterConfig struct {
 	// If the corresponding KeyLimits is nil, it means no limits
-	KeyToLimits map[string]*KeyLimits
+	KeyToLimits map[string]*TrafficLimits
 }
 
 type TrafficLimiter interface {

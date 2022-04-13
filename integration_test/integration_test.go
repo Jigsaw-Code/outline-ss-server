@@ -187,7 +187,7 @@ func TestTrafficLimiterTCP(t *testing.T) {
 	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*service.CipherEntry).ID
 	const tok = 1024
 	trafficLimiter := service.NewTrafficLimiter(&service.TrafficLimiterConfig{
-		KeyToLimits: map[string]*service.KeyLimits{
+		KeyToLimits: map[string]*service.TrafficLimits{
 			key: &service.KeyLimits{
 				LargeScaleLimit:  80 * tok,
 				LargeScalePeriod: 60 * time.Second,
@@ -295,7 +295,7 @@ func TestTrafficLimiterUDP(t *testing.T) {
 	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*service.CipherEntry).ID
 	smallScalePeriod := 100 * time.Millisecond
 	trafficLimiter := service.NewTrafficLimiter(&service.TrafficLimiterConfig{
-		KeyToLimits: map[string]*service.KeyLimits{
+		KeyToLimits: map[string]*service.TrafficLimits{
 			key: &service.KeyLimits{
 				LargeScaleLimit:  100 * tok,
 				LargeScalePeriod: 60 * time.Second,

@@ -13,3 +13,14 @@ keys:
     port: 9001
     cipher: chacha20-ietf-poly1305
     secret: Secret2
+    traffic_limits:
+      large_scale_limit: 100000000000
+      large_scale_period: "30d"
+      small_scale_limit: 12800000000
+      small_scale_period: "1s"
+
+default_traffic_limits:
+  large_scale_limit: 2000000000
+  large_scale_period: "30d"
+  small_scale_limit: 128000000
+  small_scale_period: "1s"
