@@ -16,21 +16,14 @@ package service
 
 import (
 	"net"
-	"time"
 )
 
 func MakeTestTrafficLimiterConfig(ciphers CipherList) TrafficLimiterConfig {
 	elts := ciphers.SnapshotForClientIP(net.IP{})
-	keyLimits := KeyLimits{
-		LargeScalePeriod: 1000 * time.Hour,
-		LargeScaleLimit:  1 << 30,
-		SmallScalePeriod: 1000 * time.Hour,
-		SmallScaleLimit:  1 << 30,
-	}
-	keyToLimits := make(map[string]KeyLimits)
+	keyToLimits := make(map[string]*KeyLimits)
 	for _, elt := range elts {
 		entry := elt.Value.(*CipherEntry)
-		keyToLimits[entry.ID] = keyLimits
+		keyToLimits[entry.ID] = nil
 	}
 	return TrafficLimiterConfig{KeyToLimits: keyToLimits}
 }

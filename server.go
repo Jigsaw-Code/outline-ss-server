@@ -122,7 +122,7 @@ func (s *SSServer) loadConfig(filename string) error {
 
 	portChanges := make(map[int]int)
 	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
-	portKeyLimits := make(map[int]map[string]service.KeyLimits)
+	portKeyLimits := make(map[int]map[string]*service.KeyLimits)
 	for _, keyConfig := range config.Keys {
 		portChanges[keyConfig.Port] = 1
 		cipherList, ok := portCiphers[keyConfig.Port]
@@ -136,18 +136,15 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		entry := service.MakeCipherEntry(keyConfig.ID, cipher, keyConfig.Secret)
 		cipherList.PushBack(&entry)
-		var keyLimits map[string]service.KeyLimits
+		var keyLimits map[string]*service.KeyLimits
 		keyLimits, ok = portKeyLimits[keyConfig.Port]
 		if !ok {
-			keyLimits = make(map[string]service.KeyLimits)
+			keyLimits = make(map[string]*service.KeyLimits)
 			portKeyLimits[keyConfig.Port] = keyLimits
 		}
-		if keyConfig.Limits != nil {
-			keyLimits[keyConfig.ID] = *keyConfig.Limits
-		} else if config.DefaultKeyLimits != nil {
-			keyLimits[keyConfig.ID] = *config.DefaultKeyLimits
-		} else {
-			keyLimits[keyConfig.ID] = noLimits
+		keyLimits[keyConfig.ID] = keyConfig.Limits
+		if config.DefaultKeyLimits != nil {
+			keyLimits[keyConfig.ID] = config.DefaultKeyLimits
 		}
 	}
 	for port := range s.ports {
@@ -219,13 +216,6 @@ type Config struct {
 	DefaultKeyLimits *service.KeyLimits
 }
 
-var noLimits service.KeyLimits = service.KeyLimits{
-	LargeScalePeriod: time.Millisecond,
-	LargeScaleLimit:  1 << 30,
-	SmallScalePeriod: time.Millisecond,
-	SmallScaleLimit:  1 << 30,
-}
-
 func readConfig(filename string) (*Config, error) {
 	config := Config{}
 	configData, err := ioutil.ReadFile(filename)
@@ -235,14 +225,6 @@ func readConfig(filename string) (*Config, error) {
 	err = yaml.Unmarshal(configData, &config)
 	if err != nil {
 		return nil, err
-	}
-	if config.DefaultKeyLimits == nil {
-		config.DefaultKeyLimits = &noLimits
-	}
-	for i := range config.Keys {
-		if config.Keys[i].Limits == nil {
-			config.Keys[i].Limits = config.DefaultKeyLimits
-		}
 	}
 	return &config, err
 }

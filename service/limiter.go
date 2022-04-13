@@ -33,7 +33,8 @@ type KeyLimits struct {
 }
 
 type TrafficLimiterConfig struct {
-	KeyToLimits map[string]KeyLimits
+	// If the corresponding KeyLimits is nil, it means no limits
+	KeyToLimits map[string]*KeyLimits
 }
 
 type TrafficLimiter interface {
@@ -42,12 +43,18 @@ type TrafficLimiter interface {
 }
 
 func NewTrafficLimiter(config *TrafficLimiterConfig) TrafficLimiter {
-	keyToLimiter := make(map[string]*perKeyLimiter, 0)
+	keyToLimiter := make(map[string]*perKeyLimiter, len(config.KeyToLimits))
 	for accessKey, limits := range config.KeyToLimits {
-		keyToLimiter[accessKey] = &perKeyLimiter{
-			largeScale: createLimiter(limits.LargeScalePeriod, limits.LargeScaleLimit),
-			smallScale: createLimiter(limits.SmallScalePeriod, limits.SmallScaleLimit),
+		var limiter *perKeyLimiter
+		if limits == nil {
+			limiter = nil
+		} else {
+			limiter = &perKeyLimiter{
+				largeScale: createLimiter(limits.LargeScalePeriod, limits.LargeScaleLimit),
+				smallScale: createLimiter(limits.SmallScalePeriod, limits.SmallScaleLimit),
+			}
 		}
+		keyToLimiter[accessKey] = limiter
 	}
 	return &trafficLimiter{keyToLimiter: keyToLimiter}
 }
@@ -160,6 +167,9 @@ func (l *trafficLimiter) WrapReaderWriter(accessKey string, reader io.Reader, wr
 	if !ok {
 		logger.Panicf("Access key %v not found", accessKey)
 	}
+	if limiter == nil {
+		return reader, writer
+	}
 	return &limitedReader{reader: reader, limiter: limiter}, &limitedWriter{writer: writer, limiter: limiter}
 }
 
@@ -167,6 +177,9 @@ func (l *trafficLimiter) Allow(accessKey string, n int) error {
 	limiter, ok := l.keyToLimiter[accessKey]
 	if !ok {
 		logger.Panicf("Access key %v not found", accessKey)
+	}
+	if limiter == nil {
+		return nil
 	}
 	return limiter.Allow(n)
 }
