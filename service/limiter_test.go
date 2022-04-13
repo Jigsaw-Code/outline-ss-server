@@ -16,29 +16,29 @@ func makeRandBuffer(n int64) *bytes.Buffer {
 	return bytes.NewBuffer(arr)
 }
 
-func TestRateLimiter(t *testing.T) {
+func TestTrafficLimiter(t *testing.T) {
 	key1 := "key1"
 	key2 := "key2"
 
 	var tok int64 = 1024
-	config := RateLimiterConfig{
+	config := TrafficLimiterConfig{
 		KeyToLimits: map[string]KeyLimits{
-			key1: KeyLimits {
+			key1: KeyLimits{
 				LargeScalePeriod: time.Minute,
-				LargeScaleLimit: 10 * tok,
+				LargeScaleLimit:  10 * tok,
 				SmallScalePeriod: time.Second,
-				SmallScaleLimit: 2 * tok,
+				SmallScaleLimit:  2 * tok,
 			},
 			key2: KeyLimits{
 				LargeScalePeriod: time.Minute,
-				LargeScaleLimit: 10 * tok,
+				LargeScaleLimit:  10 * tok,
 				SmallScalePeriod: time.Second,
-				SmallScaleLimit: 3 * tok,
+				SmallScaleLimit:  3 * tok,
 			},
 		},
 	}
 
-	limiter := NewRateLimiter(&config)
+	limiter := NewTrafficLimiter(&config)
 
 	src1 := makeRandBuffer(20 * tok)
 	src1Orig := src1.Bytes()
@@ -48,10 +48,8 @@ func TestRateLimiter(t *testing.T) {
 	src2Orig := src2.Bytes()
 	dst2 := &bytes.Buffer{}
 
-	r1, w1, err1 := limiter.WrapReaderWriter(key1, src1, dst1)
-	require.NoError(t, err1)
-	r2, w2, err2 := limiter.WrapReaderWriter(key2, src2, dst2)
-	require.NoError(t, err2)
+	r1, w1 := limiter.WrapReaderWriter(key1, src1, dst1)
+	r2, w2 := limiter.WrapReaderWriter(key2, src2, dst2)
 
 	b := make([]byte, 50)
 
@@ -59,7 +57,7 @@ func TestRateLimiter(t *testing.T) {
 	_, err := io.ReadFull(r1, b)
 	require.NoError(t, err)
 	require.Equal(t, b, src1Orig[:len(b)])
-	if time.Now().Sub(start) > 10 * time.Millisecond {
+	if time.Now().Sub(start) > 10*time.Millisecond {
 		t.Errorf("read took too long")
 	}
 
@@ -67,7 +65,7 @@ func TestRateLimiter(t *testing.T) {
 	_, err = io.ReadFull(r2, b)
 	require.NoError(t, err)
 	require.Equal(t, b, src2Orig[:len(b)])
-	if time.Now().Sub(start) > 10 * time.Millisecond {
+	if time.Now().Sub(start) > 10*time.Millisecond {
 		t.Errorf("read took too long")
 	}
 
@@ -76,14 +74,14 @@ func TestRateLimiter(t *testing.T) {
 	_, err = w1.Write(src1Orig[:size])
 	require.NoError(t, err)
 	require.Equal(t, src1Orig[:size], dst1.Bytes()[:size])
-	if time.Now().Sub(start) < 500 * time.Millisecond {
+	if time.Now().Sub(start) < 500*time.Millisecond {
 		t.Fatalf("write took too short")
 	}
 
-	allowErr := limiter.Allow(key2, int(3 * tok))
+	allowErr := limiter.Allow(key2, int(3*tok))
 	require.NoError(t, allowErr)
 
-	allowErr = limiter.Allow(key2, int(1 * tok))
+	allowErr = limiter.Allow(key2, int(1*tok))
 	require.Error(t, allowErr)
 
 	start = time.Now()
@@ -91,7 +89,7 @@ func TestRateLimiter(t *testing.T) {
 	_, err = w2.Write(src2Orig[:size])
 	require.NoError(t, err)
 	require.Equal(t, src2Orig[:size], dst2.Bytes()[:size])
-	if time.Now().Sub(start) < 500 * time.Millisecond {
+	if time.Now().Sub(start) < 500*time.Millisecond {
 		t.Fatalf("write took too short")
 	}
 
@@ -99,7 +97,7 @@ func TestRateLimiter(t *testing.T) {
 	size = 7 * tok
 	_, err = w2.Write(src2Orig[:size])
 	require.Error(t, err)
-	if time.Now().Sub(start) > 10 * time.Millisecond {
+	if time.Now().Sub(start) > 10*time.Millisecond {
 		t.Fatalf("write took too long")
 	}
 }

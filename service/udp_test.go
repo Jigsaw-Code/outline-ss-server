@@ -202,17 +202,22 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, makeLimiter(NewCipherList()))
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	if err != nil {
+		logger.Fatal(err)
+	}
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, makeLimiter(cipherList))
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCipher, targetConn, "ZZ", "key id")
+	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*CipherEntry).ID
+	nat.Add(&clientAddr, clientConn, natCipher, targetConn, "ZZ", key)
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }

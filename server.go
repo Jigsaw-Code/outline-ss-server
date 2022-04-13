@@ -74,7 +74,7 @@ type SSServer struct {
 	ports       map[int]*ssPort
 }
 
-func (s *SSServer) startPort(portNum int, rateLimiterConfig *service.RateLimiterConfig) error {
+func (s *SSServer) startPort(portNum int, trafficLimiterConfig *service.TrafficLimiterConfig) error {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
 	if err != nil {
 		return fmt.Errorf("Failed to start TCP on port %v: %v", portNum, err)
@@ -86,7 +86,7 @@ func (s *SSServer) startPort(portNum int, rateLimiterConfig *service.RateLimiter
 	logger.Infof("Listening TCP and UDP on port %v", portNum)
 	port := &ssPort{cipherList: service.NewCipherList()}
 
-	limiter := service.NewRateLimiter(rateLimiterConfig)
+	limiter := service.NewTrafficLimiter(trafficLimiterConfig)
 	// TODO: Register initial data metrics at zero.
 	port.tcpService = service.NewTCPService(port.cipherList, &s.replayCache, s.m, tcpReadTimeout, limiter)
 	port.udpService = service.NewUDPService(s.natTimeout, port.cipherList, s.m, limiter)
@@ -159,8 +159,8 @@ func (s *SSServer) loadConfig(filename string) error {
 				return fmt.Errorf("Failed to remove port %v: %v", portNum, err)
 			}
 		} else if count == +1 {
-			rateLimiterConfig := &service.RateLimiterConfig{KeyToLimits: portKeyLimits[portNum]}
-			if err := s.startPort(portNum, rateLimiterConfig); err != nil {
+			trafficLimiterConfig := &service.TrafficLimiterConfig{KeyToLimits: portKeyLimits[portNum]}
+			if err := s.startPort(portNum, trafficLimiterConfig); err != nil {
 				return fmt.Errorf("Failed to start port %v: %v", portNum, err)
 			}
 		}
@@ -221,9 +221,9 @@ type Config struct {
 
 var noLimits service.KeyLimits = service.KeyLimits{
 	LargeScalePeriod: time.Millisecond,
-	LargeScaleLimit: 1 << 30,
+	LargeScaleLimit:  1 << 30,
 	SmallScalePeriod: time.Millisecond,
-	SmallScaleLimit: 1 << 30,
+	SmallScaleLimit:  1 << 30,
 }
 
 func readConfig(filename string) (*Config, error) {

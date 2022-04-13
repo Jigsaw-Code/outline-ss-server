@@ -113,7 +113,7 @@ type tcpService struct {
 	stopped     bool
 	ciphers     CipherList
 	m           metrics.ShadowsocksMetrics
-	limiter     RateLimiter
+	limiter     TrafficLimiter
 	running     sync.WaitGroup
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
@@ -124,11 +124,11 @@ type tcpService struct {
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 func NewTCPService(ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics,
-				   timeout time.Duration, limiter RateLimiter) TCPService {
+	timeout time.Duration, limiter TrafficLimiter) TCPService {
 	return &tcpService{
 		ciphers:           ciphers,
 		m:                 m,
-		readTimeout: 	   timeout,
+		readTimeout:       timeout,
 		limiter:           limiter,
 		replayCache:       replayCache,
 		targetIPValidator: onet.RequirePublicIP,
@@ -234,11 +234,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	var accessKey string
 	if cipherEntry != nil {
 		accessKey = cipherEntry.ID
-		var limiterErr error
-		clientReader, clientWriter, limiterErr = s.limiter.WrapReaderWriter(accessKey, clientReader, clientWriter)
-		if limiterErr != nil {
-			logger.Panicf("got unexpected error wrapping streams: %v", limiterErr)
-		}
+		clientReader, clientWriter = s.limiter.WrapReaderWriter(accessKey, clientReader, clientWriter)
 	}
 
 	connError := func() *onet.ConnectionError {
@@ -269,9 +265,10 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		clientTCPConn.SetReadDeadline(time.Time{})
 		if err != nil {
 			// Drain to prevent a close on cipher error.
-			io.Copy(ioutil.Discard, clientConn)
+			io.Copy(ioutil.Discard, clientReader)
 			return onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 		}
+		logger.Debugf("address %s", clientTCPConn.RemoteAddr().String())
 
 		tgtConn, dialErr := dialTarget(tgtAddr, &proxyMetrics, s.targetIPValidator)
 		if dialErr != nil {
@@ -287,9 +284,10 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		fromClientErrCh := make(chan error)
 		go func() {
 			_, fromClientErr := ssr.WriteTo(tgtConn)
+			logger.Debugf("fromClientErr: %v", fromClientErr)
 			if fromClientErr != nil {
 				// Drain to prevent a close in the case of a cipher error.
-				io.Copy(ioutil.Discard, clientConn)
+				io.Copy(ioutil.Discard, clientReader)
 			}
 			clientConn.CloseRead()
 			// Send FIN to target.
@@ -321,7 +319,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	}
 	s.m.AddClosedTCPConnection(clientLocation, accessKey, status, proxyMetrics, timeToCipher, connDuration)
 	clientConn.Close() // Closing after the metrics are added aids integration testing.
-	logger.Debugf("Done with status %v, duration %v", status, connDuration)
+	logger.Debugf("Done with status %v, duration %v, metrics: %v", status, connDuration, proxyMetrics)
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks

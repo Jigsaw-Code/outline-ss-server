@@ -277,9 +277,9 @@ func probe(serverAddr *net.TCPAddr, bytesToSend []byte) error {
 	return nil
 }
 
-func makeLimiter(cipherList CipherList) RateLimiter {
-	c := MakeTestRateLimiterConfig(cipherList)
-	return NewRateLimiter(&c)
+func makeLimiter(cipherList CipherList) TrafficLimiter {
+	c := MakeTestTrafficLimiterConfig(cipherList)
+	return NewTrafficLimiter(&c)
 }
 
 func TestProbeRandom(t *testing.T) {

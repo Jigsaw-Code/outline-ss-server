@@ -27,21 +27,21 @@ import (
 
 type KeyLimits struct {
 	LargeScalePeriod time.Duration
-	LargeScaleLimit int64
+	LargeScaleLimit  int64
 	SmallScalePeriod time.Duration
-	SmallScaleLimit int64
+	SmallScaleLimit  int64
 }
 
-type RateLimiterConfig struct {
+type TrafficLimiterConfig struct {
 	KeyToLimits map[string]KeyLimits
 }
 
-type RateLimiter interface {
-	WrapReaderWriter(accessKey string, reader io.Reader, writer io.Writer) (io.Reader, io.Writer, error)
+type TrafficLimiter interface {
+	WrapReaderWriter(accessKey string, reader io.Reader, writer io.Writer) (io.Reader, io.Writer)
 	Allow(accessKey string, n int) error
 }
 
-func NewRateLimiter(config *RateLimiterConfig) RateLimiter {
+func NewTrafficLimiter(config *TrafficLimiterConfig) TrafficLimiter {
 	keyToLimiter := make(map[string]*perKeyLimiter, 0)
 	for accessKey, limits := range config.KeyToLimits {
 		keyToLimiter[accessKey] = &perKeyLimiter{
@@ -49,10 +49,10 @@ func NewRateLimiter(config *RateLimiterConfig) RateLimiter {
 			smallScale: createLimiter(limits.SmallScalePeriod, limits.SmallScaleLimit),
 		}
 	}
-	return &rateLimiter{keyToLimiter: keyToLimiter}
+	return &trafficLimiter{keyToLimiter: keyToLimiter}
 }
 
-type rateLimiter struct {
+type trafficLimiter struct {
 	keyToLimiter map[string]*perKeyLimiter
 }
 
@@ -61,7 +61,7 @@ type perKeyLimiter struct {
 	largeScale *rate.Limiter
 }
 
-// We need larger granularity, because rate.RateLimiter
+// We need larger granularity, because rate.TrafficLimiter
 // works with ints.
 const tokenSizeBytes = 1024
 const maxSizeBytes = math.MaxInt32 * tokenSizeBytes
@@ -71,7 +71,7 @@ func bytesToTokens64(n int64) int {
 	if n >= maxSizeBytes {
 		log.Panicf("%v bytes cannot be converted to tokens", n)
 	}
-	return (int) ((n + tokenSizeBytes - 1) / tokenSizeBytes)
+	return (int)((n + tokenSizeBytes - 1) / tokenSizeBytes)
 }
 
 func bytesToTokens(n int) int {
@@ -92,13 +92,14 @@ func (l *perKeyLimiter) Wait(n int) error {
 	if !l.largeScale.AllowN(time.Now(), tokens) {
 		return fmt.Errorf("exceeds large scale limit")
 	}
-	for tokens > 0 {
+	waited := 0
+	for waited < tokens {
 		batch := min(tokens, int(l.smallScale.Burst()))
 		err := l.smallScale.WaitN(context.TODO(), batch)
 		if err != nil {
 			return err
 		}
-		tokens -= batch
+		waited += batch
 	}
 	return nil
 }
@@ -126,7 +127,7 @@ func (r *limitedReader) Read(b []byte) (int, error) {
 	}
 	waitErr := r.limiter.Wait(n)
 	if waitErr != nil {
-		return n, waitErr
+		return 0, waitErr
 	}
 	return n, err
 }
@@ -143,7 +144,7 @@ func (w *limitedWriter) Write(b []byte) (int, error) {
 	}
 	waitErr := w.limiter.Wait(n)
 	if waitErr != nil {
-		return n, waitErr
+		return 0, waitErr
 	}
 	return n, err
 }
@@ -154,18 +155,18 @@ func createLimiter(period time.Duration, limit int64) *rate.Limiter {
 	return rate.NewLimiter(r, b)
 }
 
-func (l *rateLimiter) WrapReaderWriter(accessKey string, reader io.Reader, writer io.Writer) (io.Reader, io.Writer, error) {
+func (l *trafficLimiter) WrapReaderWriter(accessKey string, reader io.Reader, writer io.Writer) (io.Reader, io.Writer) {
 	limiter, ok := l.keyToLimiter[accessKey]
 	if !ok {
-		return nil, nil, fmt.Errorf("Access key %v not found", accessKey)
+		logger.Panicf("Access key %v not found", accessKey)
 	}
-	return &limitedReader{reader: reader, limiter: limiter}, &limitedWriter{writer: writer, limiter: limiter}, nil
+	return &limitedReader{reader: reader, limiter: limiter}, &limitedWriter{writer: writer, limiter: limiter}
 }
 
-func (l *rateLimiter) Allow(accessKey string, n int) error {
+func (l *trafficLimiter) Allow(accessKey string, n int) error {
 	limiter, ok := l.keyToLimiter[accessKey]
 	if !ok {
-		return fmt.Errorf("Access key %v not found", accessKey)
+		logger.Panicf("Access key %v not found", accessKey)
 	}
 	return limiter.Allow(n)
 }

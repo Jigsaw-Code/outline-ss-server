@@ -19,18 +19,18 @@ import (
 	"time"
 )
 
-func MakeTestRateLimiterConfig(ciphers CipherList) RateLimiterConfig {
+func MakeTestTrafficLimiterConfig(ciphers CipherList) TrafficLimiterConfig {
 	elts := ciphers.SnapshotForClientIP(net.IP{})
 	keyLimits := KeyLimits{
 		LargeScalePeriod: 1000 * time.Hour,
-		LargeScaleLimit: 1 << 30,
+		LargeScaleLimit:  1 << 30,
 		SmallScalePeriod: 1000 * time.Hour,
-		SmallScaleLimit: 1 << 30,
+		SmallScaleLimit:  1 << 30,
 	}
 	keyToLimits := make(map[string]KeyLimits)
 	for _, elt := range elts {
 		entry := elt.Value.(*CipherEntry)
 		keyToLimits[entry.ID] = keyLimits
 	}
-	return RateLimiterConfig{KeyToLimits: keyToLimits}
+	return TrafficLimiterConfig{KeyToLimits: keyToLimits}
 }

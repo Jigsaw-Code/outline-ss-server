@@ -97,9 +97,9 @@ func startUDPEchoServer(t testing.TB) (*net.UDPConn, *sync.WaitGroup) {
 	return conn, &running
 }
 
-func makeLimiter(cipherList service.CipherList) service.RateLimiter {
-	c := service.MakeTestRateLimiterConfig(cipherList)
-	return service.NewRateLimiter(&c)
+func makeLimiter(cipherList service.CipherList) service.TrafficLimiter {
+	c := service.MakeTestTrafficLimiterConfig(cipherList)
+	return service.NewTrafficLimiter(&c)
 }
 
 func TestTCPEcho(t *testing.T) {
@@ -169,7 +169,7 @@ func TestTCPEcho(t *testing.T) {
 	echoRunning.Wait()
 }
 
-func TestRateLimiter(t *testing.T) {
+func TestTrafficLimiterTCP(t *testing.T) {
 	echoListener, echoRunning := startTCPEchoServer(t)
 
 	proxyListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
@@ -183,18 +183,21 @@ func TestRateLimiter(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 5 * time.Second
+
 	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*service.CipherEntry).ID
-	rateLimiter := service.NewRateLimiter(&service.RateLimiterConfig{
+	const tok = 1024
+	trafficLimiter := service.NewTrafficLimiter(&service.TrafficLimiterConfig{
 		KeyToLimits: map[string]service.KeyLimits{
 			key: service.KeyLimits{
-				LargeScaleLimit: 1000,
-				LargeScalePeriod: 5 * time.Second,
-				SmallScaleLimit: 100,
+				LargeScaleLimit:  80 * tok,
+				LargeScalePeriod: 60 * time.Second,
+				SmallScaleLimit:  10 * tok,
 				SmallScalePeriod: 100 * time.Millisecond,
 			},
 		},
 	})
-	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout, rateLimiter)
+
+	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout, trafficLimiter)
 	proxy.SetTargetIPValidator(allowAll)
 	go proxy.Serve(proxyListener)
 
@@ -211,12 +214,9 @@ func TestRateLimiter(t *testing.T) {
 		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}
 
-	const N = 500
-	up := make([]byte, N)
-	for i := 0; i < N; i++ {
-		up[i] = byte(i)
-	}
 	{
+		const N = 20 * tok
+		up := ss.MakeTestPayload(N)
 		conn, err := client.DialTCP(nil, echoListener.Addr().String())
 		if err != nil {
 			t.Fatalf("ShadowsocksClient.DialTCP failed: %v", err)
@@ -231,14 +231,14 @@ func TestRateLimiter(t *testing.T) {
 		}
 
 		down := make([]byte, N)
-		n, err = conn.Read(down)
+		n, err = io.ReadFull(conn, down)
 		if err != nil && err != io.EOF {
 			t.Fatal(err)
 		}
 		if n != N {
 			t.Fatalf("Expected to download %d bytes, but only received %d", N, n)
 		}
-		if time.Now().Sub(start) < 600 * time.Millisecond {
+		if time.Now().Sub(start) < 100*time.Millisecond {
 			t.Fatalf("Download too fast")
 		}
 
@@ -250,13 +250,24 @@ func TestRateLimiter(t *testing.T) {
 	}
 
 	{
+		const N = 50 * tok
+		up := ss.MakeTestPayload(N)
 		conn, err := client.DialTCP(nil, echoListener.Addr().String())
 		if err != nil {
 			t.Fatalf("ShadowsocksClient.DialTCP failed: %v", err)
 		}
+
 		_, err = conn.Write(up)
+		if err != nil {
+			// No write error is expected
+			// as proxy just discards all the input
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		down := make([]byte, N)
+		_, err = io.ReadFull(conn, down)
 		if err == nil {
-			t.Fatalf("Expected limit error when uploading")
+			t.Fatalf("Expected read error")
 		}
 		conn.Close()
 	}
@@ -264,6 +275,105 @@ func TestRateLimiter(t *testing.T) {
 	proxy.Stop()
 	echoListener.Close()
 	echoRunning.Wait()
+}
+
+func TestTrafficLimiterUDP(t *testing.T) {
+	echoConn, echoRunning := startUDPEchoServer(t)
+
+	proxyConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("ListenTCP failed: %v", err)
+	}
+	secrets := ss.MakeTestSecrets(1)
+	cipherList, err := service.MakeTestCiphers(secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testMetrics := &fakeUDPMetrics{fakeLocation: "QQ"}
+
+	const tok = 1024
+	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*service.CipherEntry).ID
+	smallScalePeriod := 100 * time.Millisecond
+	trafficLimiter := service.NewTrafficLimiter(&service.TrafficLimiterConfig{
+		KeyToLimits: map[string]service.KeyLimits{
+			key: service.KeyLimits{
+				LargeScaleLimit:  100 * tok,
+				LargeScalePeriod: 60 * time.Second,
+				SmallScaleLimit:  10 * tok,
+				SmallScalePeriod: smallScalePeriod,
+			},
+		},
+	})
+
+	proxy := service.NewUDPService(time.Hour, cipherList, testMetrics, trafficLimiter)
+	proxy.SetTargetIPValidator(allowAll)
+	go proxy.Serve(proxyConn)
+
+	proxyHost, proxyPort, err := net.SplitHostPort(proxyConn.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	portNum, err := strconv.Atoi(proxyPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := client.NewClient(proxyHost, portNum, secrets[0], ss.TestCipher)
+	if err != nil {
+		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
+	}
+	conn, err := client.ListenUDP(nil)
+	if err != nil {
+		t.Fatalf("ShadowsocksClient.ListenUDP failed: %v", err)
+	}
+
+	run := func(N int, expectReadError bool) {
+		up := ss.MakeTestPayload(N)
+		n, err := conn.WriteTo(up, echoConn.LocalAddr())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != N {
+			t.Fatalf("Tried to upload %d bytes, but only sent %d", N, n)
+		}
+
+		conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+
+		down := make([]byte, N)
+		n, addr, err := conn.ReadFrom(down)
+		if err != nil {
+			if !expectReadError {
+				t.Fatalf("Unexpected read error: %v", err)
+			}
+			return
+		} else {
+			if expectReadError {
+				t.Fatalf("Expected read error")
+			}
+		}
+		if n != N {
+			t.Fatalf("Tried to download %d bytes, but only sent %d", N, n)
+		}
+		if addr.String() != echoConn.LocalAddr().String() {
+			t.Errorf("Reported address mismatch: %s != %s", addr.String(), echoConn.LocalAddr().String())
+		}
+
+		if !bytes.Equal(up, down) {
+			t.Fatal("Echo mismatch")
+		}
+	}
+
+	for i := 0; i < 7; i++ {
+		run(5*tok, false)
+		run(5*tok, true)
+		time.Sleep(smallScalePeriod)
+	}
+
+	run(10*tok, true)
+
+	conn.Close()
+	echoConn.Close()
+	echoRunning.Wait()
+	proxy.GracefulStop()
 }
 
 type statusMetrics struct {

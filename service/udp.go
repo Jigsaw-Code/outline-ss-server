@@ -78,17 +78,17 @@ type udpService struct {
 	m                 metrics.ShadowsocksMetrics
 	running           sync.WaitGroup
 	targetIPValidator onet.TargetIPValidator
-	limiter           RateLimiter
+	limiter           TrafficLimiter
 }
 
 // NewUDPService creates a UDPService
-func NewUDPService(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics, limiter RateLimiter) UDPService {
+func NewUDPService(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics, limiter TrafficLimiter) UDPService {
 	return &udpService{
-		natTimeout: natTimeout,
-		ciphers: cipherList,
-		m: m,
+		natTimeout:        natTimeout,
+		ciphers:           cipherList,
+		m:                 m,
 		targetIPValidator: onet.RequirePublicIP,
-		limiter: limiter,
+		limiter:           limiter,
 	}
 }
 
@@ -126,7 +126,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 	s.mu.Unlock()
 	defer s.running.Done()
 
-	nm := newNATmap(s.natTimeout, s.m, &s.running)
+	nm := newNATmap(s.natTimeout, s.m, &s.running, s.limiter)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
@@ -354,10 +354,11 @@ type natmap struct {
 	timeout time.Duration
 	metrics metrics.ShadowsocksMetrics
 	running *sync.WaitGroup
+	limiter TrafficLimiter
 }
 
-func newNATmap(timeout time.Duration, sm metrics.ShadowsocksMetrics, running *sync.WaitGroup) *natmap {
-	m := &natmap{metrics: sm, running: running}
+func newNATmap(timeout time.Duration, sm metrics.ShadowsocksMetrics, running *sync.WaitGroup, limiter TrafficLimiter) *natmap {
+	m := &natmap{metrics: sm, running: running, limiter: limiter}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
 	return m
@@ -403,7 +404,7 @@ func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cipher *ss.
 	m.metrics.AddUDPNatEntry()
 	m.running.Add(1)
 	go func() {
-		timedCopy(clientAddr, clientConn, entry, keyID, m.metrics)
+		timedCopy(clientAddr, clientConn, entry, keyID, m.metrics, m.limiter)
 		m.metrics.RemoveUDPNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
@@ -433,7 +434,7 @@ var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
 func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn,
-	keyID string, sm metrics.ShadowsocksMetrics) {
+	keyID string, sm metrics.ShadowsocksMetrics, limiter TrafficLimiter) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
@@ -467,6 +468,13 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			}
 
 			debugUDPAddr(clientAddr, "Got response from %v", raddr)
+
+			limitErr := limiter.Allow(keyID, bodyLen)
+			if limitErr != nil {
+				debugUDPAddr(clientAddr, "Rate limite exceeded: %v", limitErr)
+				return onet.NewConnectionError("ERR_LIMIT", "Rate limit exceeded", limitErr)
+			}
+
 			srcAddr := socks.ParseAddr(raddr.String())
 			addrStart := bodyStart - len(srcAddr)
 			// `plainTextBuf` concatenates the SOCKS address and body:
