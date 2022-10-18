@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"time"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
@@ -57,7 +56,6 @@ type shadowsocksMetrics struct {
 	timeToCipherMs *prometheus.HistogramVec
 	// TODO: Add time to first byte.
 
-	tcpProbes               *prometheus.HistogramVec
 	tcpOpenConnections      *prometheus.CounterVec
 	tcpClosedConnections    *prometheus.CounterVec
 	tcpConnectionDurationMs *prometheus.HistogramVec
@@ -117,12 +115,6 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 				Name:      "data_bytes",
 				Help:      "Bytes transferred by the proxy",
 			}, []string{"dir", "proto", "location", "status", "access_key"}),
-		tcpProbes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: "shadowsocks",
-			Name:      "tcp_probes",
-			Buckets:   []float64{0, 49, 50, 51, 73, 91},
-			Help:      "Histogram of number of bytes from client to proxy, for detecting possible probes",
-		}, []string{"location", "port", "status", "error"}),
 		timeToCipherMs: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "shadowsocks",
@@ -154,7 +146,7 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 func NewPrometheusShadowsocksMetrics(ipCountryDB *geoip2.Reader, registerer prometheus.Registerer) ShadowsocksMetrics {
 	m := newShadowsocksMetrics(ipCountryDB)
 	// TODO: Is it possible to pass where to register the collectors?
-	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpOpenConnections, m.tcpProbes, m.tcpClosedConnections, m.tcpConnectionDurationMs,
+	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
 		m.dataBytes, m.timeToCipherMs, m.udpAddedNatEntries, m.udpRemovedNatEntries)
 	return m
 }
@@ -233,7 +225,7 @@ func (m *shadowsocksMetrics) AddClosedTCPConnection(clientLocation, accessKey, s
 }
 
 func (m *shadowsocksMetrics) AddTCPProbe(clientLocation, status, drainResult string, port int, data ProxyMetrics) {
-	m.tcpProbes.WithLabelValues(clientLocation, strconv.Itoa(port), status, drainResult).Observe(float64(data.ClientProxy))
+	// We no longer track probe metrics, as it takes too much memory.
 }
 
 func (m *shadowsocksMetrics) AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration) {
