@@ -208,9 +208,9 @@ func isFound(accessKey string) string {
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.
-func addIfNonZero(counter prometheus.Counter, value int64) {
+func addIfNonZero(value int64, counterVec *prometheus.CounterVec, lvs ...string) {
 	if value > 0 {
-		counter.Add(float64(value))
+		counterVec.WithLabelValues(lvs...).Add(float64(value))
 	}
 }
 
@@ -218,10 +218,10 @@ func (m *shadowsocksMetrics) AddClosedTCPConnection(clientLocation, accessKey, s
 	m.tcpClosedConnections.WithLabelValues(clientLocation, status, accessKey).Inc()
 	m.tcpConnectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 	m.timeToCipherMs.WithLabelValues("tcp", isFound(accessKey)).Observe(timeToCipher.Seconds() * 1000)
-	addIfNonZero(m.dataBytes.WithLabelValues("c>p", "tcp", clientLocation, status, accessKey), data.ClientProxy)
-	addIfNonZero(m.dataBytes.WithLabelValues("p>t", "tcp", clientLocation, status, accessKey), data.ProxyTarget)
-	addIfNonZero(m.dataBytes.WithLabelValues("p<t", "tcp", clientLocation, status, accessKey), data.TargetProxy)
-	addIfNonZero(m.dataBytes.WithLabelValues("c<p", "tcp", clientLocation, status, accessKey), data.ProxyClient)
+	addIfNonZero(data.ClientProxy, m.dataBytes, "c>p", "tcp", clientLocation, status, accessKey)
+	addIfNonZero(data.ProxyTarget, m.dataBytes, "p>t", "tcp", clientLocation, status, accessKey)
+	addIfNonZero(data.TargetProxy, m.dataBytes, "p<t", "tcp", clientLocation, status, accessKey)
+	addIfNonZero(data.ProxyClient, m.dataBytes, "c<p", "tcp", clientLocation, status, accessKey)
 }
 
 func (m *shadowsocksMetrics) AddTCPProbe(clientLocation, status, drainResult string, port int, data ProxyMetrics) {
@@ -230,13 +230,13 @@ func (m *shadowsocksMetrics) AddTCPProbe(clientLocation, status, drainResult str
 
 func (m *shadowsocksMetrics) AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration) {
 	m.timeToCipherMs.WithLabelValues("udp", isFound(accessKey)).Observe(timeToCipher.Seconds() * 1000)
-	addIfNonZero(m.dataBytes.WithLabelValues("c>p", "udp", clientLocation, status, accessKey), int64(clientProxyBytes))
-	addIfNonZero(m.dataBytes.WithLabelValues("p>t", "udp", clientLocation, status, accessKey), int64(proxyTargetBytes))
+	addIfNonZero(int64(clientProxyBytes), m.dataBytes, "c>p", "udp", clientLocation, status, accessKey)
+	addIfNonZero(int64(proxyTargetBytes), m.dataBytes, "p>t", "udp", clientLocation, status, accessKey)
 }
 
 func (m *shadowsocksMetrics) AddUDPPacketFromTarget(clientLocation, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
-	addIfNonZero(m.dataBytes.WithLabelValues("p<t", "udp", clientLocation, status, accessKey), int64(targetProxyBytes))
-	addIfNonZero(m.dataBytes.WithLabelValues("c<p", "udp", clientLocation, status, accessKey), int64(proxyClientBytes))
+	addIfNonZero(int64(targetProxyBytes), m.dataBytes, "p<t", "udp", clientLocation, status, accessKey)
+	addIfNonZero(int64(proxyClientBytes), m.dataBytes, "c<p", "udp", clientLocation, status, accessKey)
 }
 
 func (m *shadowsocksMetrics) AddUDPNatEntry() {
