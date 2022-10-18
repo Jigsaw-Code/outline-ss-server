@@ -116,13 +116,13 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 			prometheus.CounterOpts{
 				Namespace: "shadowsocks",
 				Name:      "data_bytes",
-				Help:      "Bytes transferred by the proxy",
+				Help:      "Bytes transferred by the proxy, per access key",
 			}, []string{"dir", "proto", "access_key"}),
 		dataBytesPerLocation: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "shadowsocks",
 				Name:      "data_bytes_per_location",
-				Help:      "Bytes transferred by the proxy",
+				Help:      "Bytes transferred by the proxy, per location",
 			}, []string{"dir", "proto", "location"}),
 		timeToCipherMs: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -136,7 +136,7 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 				Namespace: "shadowsocks",
 				Subsystem: "udp",
 				Name:      "packets_from_client_per_location",
-				Help:      "Packets received from the client",
+				Help:      "Packets received from the client, per location and status",
 			}, []string{"location", "status"}),
 		udpAddedNatEntries: prometheus.NewCounter(
 			prometheus.CounterOpts{
