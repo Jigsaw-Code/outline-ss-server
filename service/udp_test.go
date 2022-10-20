@@ -102,7 +102,7 @@ type natTestMetrics struct {
 	upstreamPackets []udpReport
 }
 
-func (m *natTestMetrics) AddTCPProbe(clientLocation, status, drainResult string, port int, data metrics.ProxyMetrics) {
+func (m *natTestMetrics) AddTCPProbe(status, drainResult string, port int, data metrics.ProxyMetrics) {
 }
 func (m *natTestMetrics) AddClosedTCPConnection(clientLocation, accessKey, status string, data metrics.ProxyMetrics, timeToCipher, duration time.Duration) {
 }

@@ -321,7 +321,7 @@ func (s *tcpService) absorbProbe(listenerPort int, clientConn io.ReadCloser, cli
 	_, drainErr := io.Copy(ioutil.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	s.m.AddTCPProbe(clientLocation, status, drainResult, listenerPort, *proxyMetrics)
+	s.m.AddTCPProbe(status, drainResult, listenerPort, *proxyMetrics)
 }
 
 func drainErrToString(drainErr error) string {

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"time"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
@@ -37,7 +38,7 @@ type ShadowsocksMetrics interface {
 	// TCP metrics
 	AddOpenTCPConnection(clientLocation string)
 	AddClosedTCPConnection(clientLocation, accessKey, status string, data ProxyMetrics, timeToCipher, duration time.Duration)
-	AddTCPProbe(clientLocation, status, drainResult string, port int, data ProxyMetrics)
+	AddTCPProbe(status, drainResult string, port int, data ProxyMetrics)
 
 	// UDP metrics
 	AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration)
@@ -57,6 +58,7 @@ type shadowsocksMetrics struct {
 	timeToCipherMs       *prometheus.HistogramVec
 	// TODO: Add time to first byte.
 
+	tcpProbes               *prometheus.HistogramVec
 	tcpOpenConnections      *prometheus.CounterVec
 	tcpClosedConnections    *prometheus.CounterVec
 	tcpConnectionDurationMs *prometheus.HistogramVec
@@ -85,6 +87,12 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 			Name:      "ports",
 			Help:      "Count of open Shadowsocks ports",
 		}),
+		tcpProbes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "shadowsocks",
+			Name:      "tcp_probes",
+			Buckets:   []float64{0, 49, 50, 51, 73, 91},
+			Help:      "Histogram of number of bytes from client to proxy, for detecting possible probes",
+		}, []string{"port", "status", "error"}),
 		tcpOpenConnections: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "shadowsocks",
 			Subsystem: "tcp",
@@ -162,7 +170,7 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 func NewPrometheusShadowsocksMetrics(ipCountryDB *geoip2.Reader, registerer prometheus.Registerer) ShadowsocksMetrics {
 	m := newShadowsocksMetrics(ipCountryDB)
 	// TODO: Is it possible to pass where to register the collectors?
-	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
+	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
 		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries)
 	return m
 }
@@ -244,8 +252,8 @@ func (m *shadowsocksMetrics) AddClosedTCPConnection(clientLocation, accessKey, s
 	addIfNonZero(data.ProxyClient, m.dataBytesPerLocation, "c<p", "tcp", clientLocation)
 }
 
-func (m *shadowsocksMetrics) AddTCPProbe(clientLocation, status, drainResult string, port int, data ProxyMetrics) {
-	// We no longer track probe metrics, as it takes too much memory.
+func (m *shadowsocksMetrics) AddTCPProbe(status, drainResult string, port int, data ProxyMetrics) {
+	m.tcpProbes.WithLabelValues(strconv.Itoa(port), status, drainResult).Observe(float64(data.ClientProxy))
 }
 
 func (m *shadowsocksMetrics) AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration) {
@@ -327,7 +335,7 @@ func MeasureConn(conn onet.DuplexConn, bytesSent, bytesReceived *int64) onet.Dup
 type NoOpMetrics struct{}
 
 func (m *NoOpMetrics) SetBuildInfo(version string) {}
-func (m *NoOpMetrics) AddTCPProbe(clientLocation, status, drainResult string, port int, data ProxyMetrics) {
+func (m *NoOpMetrics) AddTCPProbe(status, drainResult string, port int, data ProxyMetrics) {
 }
 func (m *NoOpMetrics) AddClosedTCPConnection(clientLocation, accessKey, status string, data ProxyMetrics, timeToCipher, duration time.Duration) {
 }

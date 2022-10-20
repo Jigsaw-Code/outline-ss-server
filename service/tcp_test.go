@@ -224,7 +224,7 @@ type probeTestMetrics struct {
 	closeStatus []string
 }
 
-func (m *probeTestMetrics) AddTCPProbe(clientLocation, status, drainResult string, port int, data metrics.ProxyMetrics) {
+func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, data metrics.ProxyMetrics) {
 	m.mu.Lock()
 	m.probeData = append(m.probeData, data)
 	m.probeStatus = append(m.probeStatus, status)
