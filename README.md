@@ -132,10 +132,9 @@ You can inspect the CPU or memory profiles with `go tool pprof cpu.prof` or `go 
 We use [GoReleaser](https://goreleaser.com/) to build and upload binaries to our [GitHub releases](https://github.com/Jigsaw-Code/outline-ss-server/releases).
 
 Summary:
-- [Install GoReleaser](https://goreleaser.com/install/).
 - Test the build locally:
   ```
-  goreleaser --rm-dist --snapshot
+  make release-local
   ```
 - Export an environment variable named `GITHUB_TOKEN` with a repo-scoped GitHub token ([create one here](https://github.com/settings/tokens/new)):
   ```bash
