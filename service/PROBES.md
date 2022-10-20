@@ -29,3 +29,7 @@ This feature is on by default in Outline.  Admins who are using outline-ss-serve
 Shadowsocks uses the same Key Derivation Function for both upstream and downstream flows, so in principle an attacker could record data sent from the server to the client, and use it in a "reflected replay" attack as simulated client->server data.  The data would appear to be valid and authenticated to the server, but the connection would most likely fail when attempting to parse the destination address header, perhaps leading to a distinctive failure behavior.
 
 To avoid this class of attacks, outline-ss-server uses an [HMAC](https://en.wikipedia.org/wiki/HMAC) with a 32-bit tag to mark all server handshakes, and checks for the presence of this tag in all incoming handshakes.  If the tag is present, the connection is a reflected replay, with a false positive probability of 1 in 4 billion.
+
+## Metrics
+
+Outline provides server operators with metrics on a variety of aspects of server activity, including any detected attacks.  To observe attacks detected by your server, look at the `tcp_probes` histogram vector in Prometheus.  The `status` field will be `"ERR_CIPHER"` (indicating invalid probe data), `"ERR_REPLAY_CLIENT"`, or `"ERR_REPLAY_SERVER"`, depending on the kind of attack your server observed.  You can also see approximately how many bytes were sent before giving up.
