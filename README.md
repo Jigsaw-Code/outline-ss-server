@@ -1,7 +1,10 @@
 # Outline ss-server
-[![Build Status](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml/badge.svg)
 
-This repository has the Shadowsocks service used by Outline servers. It uses components from [go-shadowsocks2](https://github.com/shadowsocks/go-shadowsocks2), and adds a number of improvements to meet the needs of the Outline users.
+![Build Status](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml/badge.svg)
+[![Mattermost](https://badgen.net/badge/Mattermost/Outline%20Community/blue)](https://community.internetfreedomfestival.org/community/channels/outline-community)
+[![Reddit](https://badgen.net/badge/Reddit/r%2Foutlinevpn/orange)](https://www.reddit.com/r/outlinevpn/)
+
+This repository has the Shadowsocks service used by Outline servers. It was inspired by [go-shadowsocks2](https://github.com/shadowsocks/go-shadowsocks2), and adds a number of improvements to meet the needs of the Outline users.
 
 The Outline Shadowsocks service allows for:
 - Multiple users on a single port.
