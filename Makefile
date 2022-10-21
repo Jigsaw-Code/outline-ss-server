@@ -23,3 +23,4 @@ clean:
 
 clean-all: clean
 	rm -rf $(GOBIN)
+	
