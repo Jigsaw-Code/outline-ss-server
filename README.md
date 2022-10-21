@@ -114,13 +114,9 @@ You can mix and match the libev and go servers and clients.
 
 ## Tests and Benchmarks
 
-Before running tests, you should first run
+To run the tests and benchmarks, call:
 ```
-git submodule update --init
-```
-to download test data used by the GeoIP metrics tests.  To run all tests, you can use
-```
-go test -v ./...
+make test
 ```
 
 You can benchmark the cipher finding code with
