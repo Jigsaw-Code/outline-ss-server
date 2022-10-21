@@ -74,7 +74,7 @@ type SSServer struct {
 	ports       map[int]*ssPort
 }
 
-func (s *SSServer) startPort(portNum int) error {
+func (s *SSServer) startPort(portNum int, trafficLimiterConfig *service.TrafficLimiterConfig) error {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
 	if err != nil {
 		return fmt.Errorf("Failed to start TCP on port %v: %v", portNum, err)
@@ -85,9 +85,11 @@ func (s *SSServer) startPort(portNum int) error {
 	}
 	logger.Infof("Listening TCP and UDP on port %v", portNum)
 	port := &ssPort{cipherList: service.NewCipherList()}
+
+	limiter := service.NewTrafficLimiter(trafficLimiterConfig)
 	// TODO: Register initial data metrics at zero.
-	port.tcpService = service.NewTCPService(port.cipherList, &s.replayCache, s.m, tcpReadTimeout)
-	port.udpService = service.NewUDPService(s.natTimeout, port.cipherList, s.m)
+	port.tcpService = service.NewTCPService(port.cipherList, &s.replayCache, s.m, tcpReadTimeout, limiter)
+	port.udpService = service.NewUDPService(s.natTimeout, port.cipherList, s.m, limiter)
 	s.ports[portNum] = port
 	go port.tcpService.Serve(listener)
 	go port.udpService.Serve(packetConn)
@@ -120,6 +122,7 @@ func (s *SSServer) loadConfig(filename string) error {
 
 	portChanges := make(map[int]int)
 	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
+	portKeyLimits := make(map[int]map[string]int)
 	for _, keyConfig := range config.Keys {
 		portChanges[keyConfig.Port] = 1
 		cipherList, ok := portCiphers[keyConfig.Port]
@@ -133,6 +136,13 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		entry := service.MakeCipherEntry(keyConfig.ID, cipher, keyConfig.Secret)
 		cipherList.PushBack(&entry)
+		var keyLimits map[string]int
+		keyLimits, ok = portKeyLimits[keyConfig.Port]
+		if !ok {
+			keyLimits = make(map[string]int)
+			portKeyLimits[keyConfig.Port] = keyLimits
+		}
+		keyLimits[keyConfig.ID] = keyConfig.RateLimit
 	}
 	for port := range s.ports {
 		portChanges[port] = portChanges[port] - 1
@@ -143,7 +153,8 @@ func (s *SSServer) loadConfig(filename string) error {
 				return fmt.Errorf("Failed to remove port %v: %v", portNum, err)
 			}
 		} else if count == +1 {
-			if err := s.startPort(portNum); err != nil {
+			trafficLimiterConfig := &service.TrafficLimiterConfig{KeyToRateLimit: portKeyLimits[portNum]}
+			if err := s.startPort(portNum, trafficLimiterConfig); err != nil {
 				return fmt.Errorf("Failed to start port %v: %v", portNum, err)
 			}
 		}
@@ -193,10 +204,11 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 
 type Config struct {
 	Keys []struct {
-		ID     string
-		Port   int
-		Cipher string
-		Secret string
+		ID        string
+		Port      int
+		Cipher    string
+		Secret    string
+		RateLimit int
 	}
 }
 
@@ -207,6 +219,9 @@ func readConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 	err = yaml.Unmarshal(configData, &config)
+	if err != nil {
+		return nil, err
+	}
 	return &config, err
 }
 

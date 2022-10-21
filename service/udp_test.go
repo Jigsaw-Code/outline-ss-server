@@ -130,7 +130,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(nil)[0].Value.(*CipherEntry).Cipher
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	service := NewUDPService(timeout, ciphers, metrics)
+	service := NewUDPService(timeout, ciphers, metrics, makeLimiter(ciphers))
 	service.SetTargetIPValidator(validator)
 	go service.Serve(clientConn)
 
@@ -202,17 +202,22 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, makeLimiter(NewCipherList()))
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	if err != nil {
+		logger.Fatal(err)
+	}
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, makeLimiter(cipherList))
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCipher, targetConn, "ZZ", "key id")
+	key := cipherList.SnapshotForClientIP(net.IP{})[0].Value.(*CipherEntry).ID
+	nat.Add(&clientAddr, clientConn, natCipher, targetConn, "ZZ", key)
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }
@@ -474,7 +479,7 @@ func TestUDPDoubleServe(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewUDPService(testTimeout, cipherList, testMetrics)
+	s := NewUDPService(testTimeout, cipherList, testMetrics, makeLimiter(cipherList))
 
 	c := make(chan error)
 	for i := 0; i < 2; i++ {
@@ -508,7 +513,7 @@ func TestUDPEarlyStop(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewUDPService(testTimeout, cipherList, testMetrics)
+	s := NewUDPService(testTimeout, cipherList, testMetrics, makeLimiter(cipherList))
 
 	if err := s.Stop(); err != nil {
 		t.Error(err)
