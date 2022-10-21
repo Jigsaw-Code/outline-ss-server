@@ -4,11 +4,14 @@ GORELEASER=$(GOBIN)/goreleaser
 
 .PHONY: release-local test clean clean-all
 
-release-local:
+release-local: $(GORELEASER)
 	$(GORELEASER) --rm-dist --snapshot
 
-test:
-	go test -v ./...
+test: third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb
+	go test -v -race -bench=. ./... -benchtime=100ms
+
+third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb:
+	git submodule update --init
 
 $(GORELEASER): go.mod
 	env GOBIN=$(GOBIN) go install github.com/goreleaser/goreleaser
@@ -22,5 +25,5 @@ clean:
 	go clean
 
 clean-all: clean
+	rm -rf $(CURDIR)/third_party/maxmind
 	rm -rf $(GOBIN)
-	
