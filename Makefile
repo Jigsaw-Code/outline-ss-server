@@ -29,5 +29,5 @@ clean:
 	go clean
 
 clean-all: clean
-	rm -rf $(CURDIR)/third_party/maxmind
+	rm -rf $(CURDIR)/third_party/maxmind/*
 	rm -rf $(GOBIN)
