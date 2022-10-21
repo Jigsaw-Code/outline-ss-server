@@ -150,7 +150,7 @@ Summary:
   ```
 - Build and upload:
   ```bash
-  goreleaser
+  make release
   ```
 - Go to https://github.com/Jigsaw-Code/outline-ss-server/releases, review and publish the release.
 

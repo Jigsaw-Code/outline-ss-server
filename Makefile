@@ -2,7 +2,11 @@ BUILDDIR=$(CURDIR)/build
 GOBIN=$(CURDIR)/bin
 GORELEASER=$(GOBIN)/goreleaser
 
-.PHONY: release-local test clean clean-all
+.PHONY: release release-local test clean clean-all
+
+# This requires GITHUB_TOKEN to be set.
+release: clean-all $(GORELEASER)
+	$(GORELEASER)
 
 release-local: $(GORELEASER)
 	$(GORELEASER) --rm-dist --snapshot
