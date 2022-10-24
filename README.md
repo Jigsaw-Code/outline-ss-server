@@ -135,7 +135,7 @@ Summary:
   ```
   make release-local
   ```
-- Export an environment variable named `GITHUB_TOKEN` with a repo-scoped GitHub token ([create one here](https://github.com/settings/tokens/new)):
+- Export an environment variable named `GITHUB_TOKEN` with a temporary repo-scoped GitHub token ([create one here](https://github.com/settings/tokens/new)):
   ```bash
   export GITHUB_TOKEN=yournewtoken
   ```
@@ -149,5 +149,7 @@ Summary:
   make release
   ```
 - Go to https://github.com/Jigsaw-Code/outline-ss-server/releases, review and publish the release.
+
+- Delete the Github token you created for the release on the [Personal Access Tokens page](https://github.com/settings/tokens).
 
 Full instructions in [GoReleaser's Quick Start](https://goreleaser.com/quick-start) (jump to the section starting "You’ll need to export a GITHUB_TOKEN environment variable").
