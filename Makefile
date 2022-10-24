@@ -1,4 +1,4 @@
-BUILDDIR=$(CURDIR)/build
+BUILDDIR=$(CURDIR)/dist
 GOBIN=$(CURDIR)/bin
 GORELEASER=$(GOBIN)/goreleaser
 
