@@ -212,19 +212,25 @@ func readConfig(filename string) (*Config, error) {
 
 func main() {
 	var flags struct {
-		ConfigFile    string
-		MetricsAddr   string
-		IPCountryDB   string
-		natTimeout    time.Duration
-		replayHistory int
-		Verbose       bool
-		Version       bool
+		ConfigFile      string
+		MetricsAddr     string
+		IPCountryDB     string
+		natTimeout      time.Duration
+		replayHistory   int
+		Verbose         bool
+		Version         bool
+		WebsocketServer bool
+		TLSCert         string
+		TLSKey          string
 	}
 	flag.StringVar(&flags.ConfigFile, "config", "", "Configuration filename")
 	flag.StringVar(&flags.MetricsAddr, "metrics", "", "Address for the Prometheus metrics")
 	flag.StringVar(&flags.IPCountryDB, "ip_country_db", "", "Path to the ip-to-country mmdb file")
 	flag.DurationVar(&flags.natTimeout, "udptimeout", defaultNatTimeout, "UDP tunnel timeout")
 	flag.IntVar(&flags.replayHistory, "replay_history", 0, "Replay buffer size (# of handshakes)")
+	flag.BoolVar(&flags.WebsocketServer, "websocket", false, "Enables the websocket serve")
+	flag.StringVar(&flags.TLSCert, "tls-cert", "ssl.crt", "Path to tls certificate to use for the websocket server")
+	flag.StringVar(&flags.TLSKey, "tls-key", "ssl.key", "Path to tls key to use for the websocket server")
 	flag.BoolVar(&flags.Verbose, "verbose", false, "Enables verbose logging output")
 	flag.BoolVar(&flags.Version, "version", false, "The version of the server")
 
@@ -266,9 +272,17 @@ func main() {
 	}
 	m := metrics.NewPrometheusShadowsocksMetrics(ipCountryDB, prometheus.DefaultRegisterer)
 	m.SetBuildInfo(version)
-	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
+	ssServer, err := RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
 	if err != nil {
 		logger.Fatal(err)
+	}
+
+	if flags.WebsocketServer {
+		if flags.TLSCert == "" || flags.TLSKey == "" {
+			log.Fatalln("TLS cert and key not specified")
+			flag.Usage()
+		}
+		RunWebsocketServer(ssServer, 443, flags.TLSCert, flags.TLSKey)
 	}
 
 	sigCh := make(chan os.Signal, 1)

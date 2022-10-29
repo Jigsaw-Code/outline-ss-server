@@ -143,6 +143,8 @@ type TCPService interface {
 	Stop() error
 	// GracefulStop calls Stop(), and then blocks until all resources have been cleaned up.
 	GracefulStop() error
+	// HandleConnection takes a shadowsocks client connection and starts a relay to the destination address.
+	HandleConnection(listenerPort int, clientTCPConn onet.DuplexConn)
 }
 
 func (s *tcpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
@@ -207,12 +209,12 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 					logger.Errorf("Panic in TCP handler: %v", r)
 				}
 			}()
-			s.handleConnection(listener.Addr().(*net.TCPAddr).Port, clientTCPConn)
+			s.HandleConnection(listener.Addr().(*net.TCPAddr).Port, clientTCPConn)
 		}()
 	}
 }
 
-func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPConn) {
+func (s *tcpService) HandleConnection(listenerPort int, clientTCPConn onet.DuplexConn) {
 	clientLocation, err := s.m.GetLocation(clientTCPConn.RemoteAddr())
 	if err != nil {
 		logger.Warningf("Failed location lookup: %v", err)
@@ -221,7 +223,9 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	s.m.AddOpenTCPConnection(clientLocation)
 
 	connStart := time.Now()
-	clientTCPConn.SetKeepAlive(true)
+	if tcp, ok := clientTCPConn.(*net.TCPConn); ok {
+		tcp.SetKeepAlive(true)
+	}
 	// Set a deadline to receive the address to the target.
 	clientTCPConn.SetReadDeadline(connStart.Add(s.readTimeout))
 	var proxyMetrics metrics.ProxyMetrics

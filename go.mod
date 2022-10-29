@@ -2,6 +2,7 @@ module github.com/Jigsaw-Code/outline-ss-server
 
 require (
 	github.com/goreleaser/goreleaser v1.12.3
+	github.com/gorilla/websocket v1.5.0
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.8.0
 	github.com/prometheus/client_golang v1.13.0
@@ -104,7 +105,6 @@ require (
 	github.com/goreleaser/chglog v0.2.2 // indirect
 	github.com/goreleaser/fileglob v1.3.0 // indirect
 	github.com/goreleaser/nfpm/v2 v2.20.0 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.1 // indirect
 	github.com/hashicorp/go-version v1.2.1 // indirect
