@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -48,41 +47,46 @@ func init() {
 	logger = logging.MustGetLogger("")
 }
 
-type serverConfig struct {
+type sessionConfig struct {
 	host   string
 	port   int
 	cipher string
 	secret string
 }
 
-func parseKey(k string) (serverConfig, error) {
+func parseAccessKey(k string) (sessionConfig, error) {
 	u, err := url.Parse(k)
 	if err != nil {
-		return serverConfig{}, err
+		return sessionConfig{}, err
 	}
 
 	port, err := strconv.Atoi(u.Port())
 	if err != nil {
-		return serverConfig{}, fmt.Errorf("invalid port: %v", err)
+		return sessionConfig{}, fmt.Errorf("invalid port: %v", err)
 	}
 
-	secret := u.User.String()
-	if !strings.Contains(secret, ":") {
-		b, err := base64.StdEncoding.DecodeString(secret)
+	cipherAndSecret := u.User.String()
+
+	// If we see a ":" in the string, assume its not base64 encoded and skip decoding
+	if !strings.Contains(cipherAndSecret, ":") {
+		// Attempt to decode with padding
+		b, err := base64.StdEncoding.DecodeString(cipherAndSecret)
 		if err != nil {
-			b, err = base64.RawStdEncoding.DecodeString(u.User.String())
+			// Attempt to decode without padding
+			b, err = base64.RawStdEncoding.DecodeString(cipherAndSecret)
 			if err != nil {
-				return serverConfig{}, fmt.Errorf("invalid password in key: %v", err)
+				return sessionConfig{}, fmt.Errorf("invalid password in key: %v", err)
 			}
 		}
-		secret = string(bytes.TrimSpace(b))
-	}
-	p := strings.Split(secret, ":")
-	if len(p) != 2 {
-		return serverConfig{}, fmt.Errorf("invalid password in key")
+		cipherAndSecret = string(b)
 	}
 
-	return serverConfig{
+	p := strings.Split(cipherAndSecret, ":")
+	if len(p) != 2 {
+		return sessionConfig{}, fmt.Errorf("invalid password in key")
+	}
+
+	return sessionConfig{
 		host:   u.Hostname(),
 		port:   port,
 		cipher: p[0],
@@ -90,32 +94,20 @@ func parseKey(k string) (serverConfig, error) {
 	}, nil
 }
 
-func resolveHostPort(addr string) (string, error) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "", err
-	}
-	ip, err := net.ResolveIPAddr("ip", host)
-	if err != nil {
-		return "", fmt.Errorf("resolving hostname failed: %v", err)
-	}
-	return net.JoinHostPort(ip.String(), port), err
-}
-
-type SocksSSClient struct {
-	config   serverConfig
+type SocksToSS struct {
+	config   sessionConfig
 	listener *net.TCPListener
 }
 
-// RunSocksSSClient starts a SOCKS server which proxies connections to the specified shadowsocks server.
-func RunSocksSSClient(bindAddr string, listenPort int, config serverConfig) (*SocksSSClient, error) {
+// RunSocksToSS starts a SOCKS server which proxies connections to the specified shadowsocks server.
+func RunSocksToSS(bindAddr string, listenPort int, config sessionConfig) (*SocksToSS, error) {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(bindAddr), Port: listenPort})
 	if err != nil {
 		return nil, fmt.Errorf("listenTCP failed: %v", err)
 	}
 	logger.Infof("Listenting at %v", listener.Addr())
 
-	d, err := client.NewClient(config.host, config.port, config.secret, config.cipher)
+	ssClient, err := client.NewClient(config.host, config.port, config.secret, config.cipher)
 	if err != nil {
 		return nil, fmt.Errorf("failed connecting to server: %v", err)
 	}
@@ -139,14 +131,9 @@ func RunSocksSSClient(bindAddr string, listenPort int, config serverConfig) (*So
 					logger.Errorf("SOCKS handshake failed: %v", err)
 					return
 				}
-				addr, err := resolveHostPort(tgtAddr.String())
-				if err != nil {
-					logger.Errorf("Failed to resolve target address: %v", err)
-					return
-				}
 
-				logger.Debugf("Opening connection for %s", addr)
-				targetConn, err := d.DialTCP(nil, addr)
+				logger.Debugf("Opening connection for %s", tgtAddr)
+				targetConn, err := ssClient.DialTCP(nil, tgtAddr.String())
 				if err != nil {
 					logger.Errorf("Failed to dial: %v", err)
 					return
@@ -157,20 +144,20 @@ func RunSocksSSClient(bindAddr string, listenPort int, config serverConfig) (*So
 					logger.Errorf("Relay failed: %v", err)
 					return
 				}
-				logger.Debugf("Connection closed %s", addr)
+				logger.Debugf("Connection closed %s", tgtAddr)
 			}()
 		}
 	}()
-	return &SocksSSClient{listener: listener}, nil
+	return &SocksToSS{listener: listener}, nil
 }
 
 // ListenAddr returns the listening address used by the SOCKS server
-func (s *SocksSSClient) ListenAddr() net.Addr {
+func (s *SocksToSS) ListenAddr() net.Addr {
 	return s.listener.Addr()
 }
 
 // Stop stops the SOCKS server
-func (s *SocksSSClient) Stop() error {
+func (s *SocksToSS) Stop() error {
 	return s.listener.Close()
 }
 
@@ -178,13 +165,13 @@ func main() {
 	var flags struct {
 		BindAddr   string
 		ListenPort int
-		ServerKey  string
+		AccessKey  string
 		Verbose    bool
 	}
 
-	flag.StringVar(&flags.BindAddr, "bind", "127.0.0.1", "")
-	flag.IntVar(&flags.ListenPort, "port", 1080, "")
-	flag.StringVar(&flags.ServerKey, "key", "", "")
+	flag.StringVar(&flags.BindAddr, "bind", "127.0.0.1", "Local address to bind to.")
+	flag.IntVar(&flags.ListenPort, "port", 1080, "Local port to listen on.")
+	flag.StringVar(&flags.AccessKey, "key", "", "Access key specifying how to connect to the server. Only ss:// links are accepted.")
 	flag.BoolVar(&flags.Verbose, "verbose", false, "Enables verbose logging output")
 
 	flag.Parse()
@@ -195,17 +182,18 @@ func main() {
 		logging.SetLevel(logging.INFO, "")
 	}
 
-	if flags.ServerKey == "" {
+	if flags.AccessKey == "" {
 		flag.Usage()
 		return
 	}
 
-	sc, err := parseKey(flags.ServerKey)
+	sc, err := parseAccessKey(flags.AccessKey)
 	if err != nil {
 		logger.Fatalf("Invalid key: %v", err)
 	}
 
-	_, err = RunSocksSSClient(flags.BindAddr, flags.ListenPort, sc)
+	// TODO: add UDP support for ScoksToSS
+	_, err = RunSocksToSS(flags.BindAddr, flags.ListenPort, sc)
 	if err != nil {
 		logger.Fatalf("Failed running client: %v", err)
 	}

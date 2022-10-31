@@ -36,32 +36,32 @@ const (
 	testSecret = "secret"
 )
 
-func TestParseKey(t *testing.T) {
+func TestParseAccessKey(t *testing.T) {
 	testCases := []struct {
 		name    string
 		key     string
-		want    serverConfig
+		want    sessionConfig
 		wantErr bool
 	}{
 		{
 			name: "with b64 padding",
-			key:  "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpteXBhc3N3b3JkCg==@127.0.0.1:9000/",
-			want: serverConfig{host: "127.0.0.1", port: 9000, cipher: "chacha20-ietf-poly1305", secret: "mypassword"},
+			key:  "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNzd29yZA==@127.0.0.1:9000/",
+			want: sessionConfig{host: "127.0.0.1", port: 9000, cipher: "chacha20-ietf-poly1305", secret: "password"},
 		},
 		{
 			name: "without b64 padding",
-			key:  "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpteXBhc3N3b3JkCg@1.2.3.4:8080",
-			want: serverConfig{host: "1.2.3.4", port: 8080, cipher: "chacha20-ietf-poly1305", secret: "mypassword"},
+			key:  "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNzd29yZA@1.2.3.4:8080",
+			want: sessionConfig{host: "1.2.3.4", port: 8080, cipher: "chacha20-ietf-poly1305", secret: "password"},
 		},
 		{
 			name: "without b64",
-			key:  "ss://chacha20-ietf-poly1305:mypassword@1.2.3.4:9000/",
-			want: serverConfig{host: "1.2.3.4", port: 9000, cipher: "chacha20-ietf-poly1305", secret: "mypassword"},
+			key:  "ss://chacha20-ietf-poly1305:password@1.2.3.4:9000/",
+			want: sessionConfig{host: "1.2.3.4", port: 9000, cipher: "chacha20-ietf-poly1305", secret: "password"},
 		},
 		{
 			name: "with tag",
-			key:  "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpteXBhc3N3b3JkCg@1.2.3.4:8080#TAG",
-			want: serverConfig{host: "1.2.3.4", port: 8080, cipher: "chacha20-ietf-poly1305", secret: "mypassword"},
+			key:  "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNzd29yZA@1.2.3.4:8080#TAG",
+			want: sessionConfig{host: "1.2.3.4", port: 8080, cipher: "chacha20-ietf-poly1305", secret: "password"},
 		},
 		{
 			name:    "fail on no secret",
@@ -70,14 +70,14 @@ func TestParseKey(t *testing.T) {
 		},
 		{
 			name:    "fail on no port",
-			key:     "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpteXBhc3N3b3JkCg@1.2.3.4#TAG",
+			key:     "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNzd29yZA@1.2.3.4#TAG",
 			wantErr: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseKey(tc.key)
+			got, err := parseAccessKey(tc.key)
 			if err != nil {
 				if !tc.wantErr {
 					t.Errorf("parseKey('%s') got unexpected error: %v", tc.key, err)
@@ -89,14 +89,14 @@ func TestParseKey(t *testing.T) {
 	}
 }
 
-func TestSSSocksClient(t *testing.T) {
+func TestSocksToSS(t *testing.T) {
 	ssSrvListener, ssSrv := startSSServer(t)
 	defer ssSrv.Stop()
 
 	echoListener, echoCloseCh := startEchoServer(t)
 	defer echoListener.Close()
 
-	ssCli, err := RunSocksSSClient("127.0.0.1", 0, serverConfig{
+	ssCli, err := RunSocksToSS("127.0.0.1", 0, sessionConfig{
 		host:   "127.0.0.1",
 		port:   addrPort(t, ssSrvListener.Addr()),
 		cipher: ss.TestCipher,
@@ -128,7 +128,7 @@ func TestSSSocksClient(t *testing.T) {
 	// Check that target connection closes after closing SOCKS connection
 	select {
 	case <-echoCloseCh:
-		t.Fatalf("SSServer<->EchoServer connection closed before SOCKS connection")
+		t.Fatalf("SSServer<->EchoServer connection closed before SOCKS connection closed")
 	default:
 	}
 	socksCon.Close()
@@ -179,12 +179,12 @@ func startEchoServer(t *testing.T) (net.Listener, chan struct{}) {
 	go func() {
 		c, err := l.Accept()
 		if err != nil {
-			t.Fatalf("Accepting connection failed: %v\n", err)
+			t.Logf("Accepting connection failed: %v\n", err)
 			return
 		}
 		_, err = io.Copy(c, c)
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Logf(err.Error())
 		}
 		close(closeCh)
 	}()
