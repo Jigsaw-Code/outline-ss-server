@@ -17,28 +17,37 @@ The Outline Shadowsocks service allows for:
 
 ![Graphana Dashboard](https://user-images.githubusercontent.com/113565/44177062-419d7700-a0ba-11e8-9621-db519692ff6c.png "Graphana Dashboard")
 
+
 ## Try it!
 
 Fetch dependencies for this demo:
 ```
 GO111MODULE=off go get github.com/shadowsocks/go-shadowsocks2 github.com/prometheus/prometheus/cmd/...
 ```
+If that doesn't work, download the [prometheus](https://prometheus.io/download/) or [go-shadowsocks2](https://github.com/shadowsocks/go-shadowsocks2/releases) binaries directly.
 
+
+### Run the server
 On Terminal 1, from the repository directory, build and start the SS server:
 ```
-go run . -config config_example.yml -metrics localhost:9091
+go run . -config config_example.yml -metrics localhost:9091 --replay_history=10000
 ```
+In production, you may want to specify `-ip_country_db` to get per-country metrics. See [how the Outline Server calls outline-ss-server](https://github.com/Jigsaw-Code/outline-server/blob/master/src/shadowbox/server/outline_shadowsocks_server.ts).
 
+
+### Run the Prometheus scraper for metrics collection
 On Terminal 2, start prometheus scraper for metrics collection:
 ```
 $(go env GOPATH)/bin/prometheus --config.file=prometheus_example.yml
 ```
 
+### Run the SOCKS-to-Shadowsocks client
 On Terminal 3, start the SS client:
 ```
 $(go env GOPATH)/bin/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose  -socks localhost:1080
 ```
 
+### Fetch a page over Shadowsocks
 On Terminal 4, fetch a page using the SS client:
 ```
 curl --proxy socks5h://localhost:1080 example.com
@@ -46,6 +55,7 @@ curl --proxy socks5h://localhost:1080 example.com
 
 Stop and restart the client on Terminal 3 with "Secret1" as the password and try to fetch the page again on Terminal 4.
 
+### Check the metrics
 Open http://localhost:9091/metrics and see the exported Prometheus variables.
 
 Open http://localhost:9090/ and see the Prometheus server dashboard.
