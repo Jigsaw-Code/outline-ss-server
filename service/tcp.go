@@ -271,7 +271,8 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 
-		fromClientErrCh := make(chan error)
+		fromClientErrCh := make(chan error, 1)
+		fromTargetErrCh := make(chan error, 1)
 		go func() {
 			_, fromClientErr := ssr.WriteTo(tgtConn)
 			if fromClientErr != nil {
@@ -285,19 +286,27 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 			tgtConn.CloseWrite()
 			fromClientErrCh <- fromClientErr
 		}()
-		_, fromTargetErr := ssw.ReadFrom(tgtConn)
-		// Send FIN to client.
-		clientConn.CloseWrite()
-		tgtConn.CloseRead()
 
-		fromClientErr := <-fromClientErrCh
-		if fromClientErr != nil {
+		go func() {
+			_, fromTargetErr := ssw.ReadFrom(tgtConn)
+			// Send FIN to client.
+			clientConn.CloseWrite()
+			tgtConn.CloseRead()
+			fromTargetErrCh <- fromTargetErr
+		}()
+
+		select {
+		case fromClientErr := <-fromClientErrCh:
+			if fromClientErr == nil {
+				return nil
+			}
 			return onet.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
-		}
-		if fromTargetErr != nil {
+		case fromTargetErr := <-fromClientErrCh:
+			if fromTargetErr == nil {
+				return nil
+			}
 			return onet.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
 		}
-		return nil
 	}()
 
 	connDuration := time.Now().Sub(connStart)
