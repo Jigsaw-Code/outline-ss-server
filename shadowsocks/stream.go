@@ -215,7 +215,7 @@ func (sw *Writer) ReadFrom(r io.Reader) (int64, error) {
 	if err == io.EOF { // ignore EOF as per io.ReaderFrom contract
 		return written, nil
 	}
-	return written, fmt.Errorf("Failed to read payload: %v", err)
+	return written, fmt.Errorf("Failed to read payload: %w", err)
 }
 
 // Adds as much of `plaintext` into the buffer as will fit, and increases
@@ -300,7 +300,7 @@ func (cr *chunkReader) init() (err error) {
 		salt := make([]byte, cr.ssCipher.SaltSize())
 		if _, err := io.ReadFull(cr.reader, salt); err != nil {
 			if err != io.EOF && err != io.ErrUnexpectedEOF {
-				err = fmt.Errorf("failed to read salt: %v", err)
+				err = fmt.Errorf("failed to read salt: %w", err)
 			}
 			return err
 		}
@@ -347,7 +347,7 @@ func (cr *chunkReader) ReadChunk() ([]byte, error) {
 	// block here until the next chunk.
 	if err := cr.readMessage(cr.payloadSizeBuf); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
-			err = fmt.Errorf("failed to read payload size: %v", err)
+			err = fmt.Errorf("failed to read payload size: %w", err)
 		}
 		return nil, err
 	}
