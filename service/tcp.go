@@ -108,6 +108,8 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 	return nil, nil
 }
 
+type TargetDialer func(tgtAddr string, clientAddr net.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (onet.DuplexConn, *onet.ConnectionError)
+
 type tcpService struct {
 	mu          sync.RWMutex // Protects .listeners and .stopped
 	listener    *net.TCPListener
@@ -119,17 +121,23 @@ type tcpService struct {
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 	replayCache       *ReplayCache
 	targetIPValidator onet.TargetIPValidator
+	dialTarget        TargetDialer
 }
 
-// NewTCPService creates a TCPService
+// NewTCPService creates a default TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 func NewTCPService(ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPService {
+	return NewTCPServiceOptions(ciphers, replayCache, m, timeout, DefaultDialTarget, onet.RequirePublicIP)
+}
+
+func NewTCPServiceOptions(ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration, dialTarget TargetDialer, targetIPValidator onet.TargetIPValidator) TCPService {
 	return &tcpService{
 		ciphers:           ciphers,
 		m:                 m,
 		readTimeout:       timeout,
 		replayCache:       replayCache,
-		targetIPValidator: onet.RequirePublicIP,
+		targetIPValidator: targetIPValidator,
+		dialTarget:        dialTarget,
 	}
 }
 
@@ -149,7 +157,7 @@ func (s *tcpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidat
 	s.targetIPValidator = targetIPValidator
 }
 
-func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (onet.DuplexConn, *onet.ConnectionError) {
+func DefaultDialTarget(tgtAddr string, clientAddr net.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (onet.DuplexConn, *onet.ConnectionError) {
 	var ipError *onet.ConnectionError
 	dialer := net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)
@@ -159,7 +167,7 @@ func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIP
 		}
 		return nil
 	}}
-	tgtConn, err := dialer.Dial("tcp", tgtAddr.String())
+	tgtConn, err := dialer.Dial("tcp", tgtAddr)
 	if ipError != nil {
 		return nil, ipError
 	} else if err != nil {
@@ -260,7 +268,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 			return onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 		}
 
-		tgtConn, dialErr := dialTarget(tgtAddr, &proxyMetrics, s.targetIPValidator)
+		tgtConn, dialErr := s.dialTarget(tgtAddr.String(), clientTCPConn.RemoteAddr(), &proxyMetrics, s.targetIPValidator)
 		if dialErr != nil {
 			// We don't drain so dial errors and invalid addresses are communicated quickly.
 			return dialErr
