@@ -471,10 +471,12 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 				const N = 1000
 				buf := make([]byte, N)
 				n, err := conn.Write(buf)
+				require.Nil(b, err)
 				if n != N {
 					b.Errorf("Tried to upload %d bytes, but only sent %d", N, n)
 				}
 				n, err = conn.Read(buf)
+				require.Nil(b, err)
 				if n != N {
 					b.Errorf("Tried to download %d bytes, but only received %d: %v", N, n, err)
 				}
