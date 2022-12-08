@@ -56,10 +56,10 @@ type serverSaltGenerator struct {
 	key []byte
 }
 
-// ServerSaltMarkLen is the number of bytes of salt to use as a marker.
+// serverSaltMarkLen is the number of bytes of salt to use as a marker.
 // Increasing this value reduces the false positive rate, but increases
 // the likelihood of salt collisions.
-const ServerSaltMarkLen = 4 // Must be less than or equal to SHA1.Size()
+const serverSaltMarkLen = 4 // Must be less than or equal to SHA1.Size()
 
 // Constant to identify this marking scheme.
 var serverSaltLabel = []byte("outline-server-salt")
@@ -79,9 +79,9 @@ func NewServerSaltGenerator(secret string) ServerSaltGenerator {
 }
 
 func (sg serverSaltGenerator) splitSalt(salt []byte) (prefix, mark []byte, err error) {
-	prefixLen := len(salt) - ServerSaltMarkLen
+	prefixLen := len(salt) - serverSaltMarkLen
 	if prefixLen < 0 {
-		return nil, nil, fmt.Errorf("Salt is too short: %d < %d", len(salt), ServerSaltMarkLen)
+		return nil, nil, fmt.Errorf("Salt is too short: %d < %d", len(salt), serverSaltMarkLen)
 	}
 	return salt[:prefixLen], salt[prefixLen:], nil
 }
@@ -116,5 +116,5 @@ func (sg serverSaltGenerator) IsServerSalt(salt []byte) bool {
 		return false
 	}
 	tag := sg.getTag(prefix)
-	return bytes.Equal(tag[:ServerSaltMarkLen], mark)
+	return bytes.Equal(tag[:serverSaltMarkLen], mark)
 }
