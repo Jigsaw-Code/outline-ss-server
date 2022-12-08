@@ -22,7 +22,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/Jigsaw-Code/outline-ss-server/slicepool"
+	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
 )
 
 // payloadSizeMask is the maximum size of payload in bytes.

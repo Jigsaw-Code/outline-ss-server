@@ -176,7 +176,7 @@ func TestShadowsocksClient_ListenUDP(t *testing.T) {
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-	pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: NewAddr(testTargetAddr, "udp")}
+	pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: newAddr(testTargetAddr, "udp")}
 	expectEchoPayload(pcrw, ss.MakeTestPayload(1024), make([]byte, 1024), t)
 
 	proxy.Close()
@@ -236,7 +236,7 @@ func BenchmarkShadowsocksClient_ListenUDP(b *testing.B) {
 	buf := make([]byte, clientUDPBufferSize)
 	for n := 0; n < b.N; n++ {
 		payload := ss.MakeTestPayload(1024)
-		pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: NewAddr(testTargetAddr, "udp")}
+		pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: newAddr(testTargetAddr, "udp")}
 		b.StartTimer()
 		expectEchoPayload(pcrw, payload, buf, b)
 		b.StopTimer()

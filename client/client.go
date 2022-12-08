@@ -6,9 +6,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/slicepool"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -156,7 +156,7 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if socksSrcAddr == nil {
 		return 0, nil, errors.New("Failed to read source address")
 	}
-	srcAddr := NewAddr(socksSrcAddr.String(), "udp")
+	srcAddr := newAddr(socksSrcAddr.String(), "udp")
 	n = copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address
 	if len(b) < len(buf)-len(socksSrcAddr) {
 		return n, srcAddr, io.ErrShortBuffer
@@ -177,8 +177,8 @@ func (a *addr) Network() string {
 	return a.network
 }
 
-// NewAddr returns a net.Addr that holds an address of the form `host:port` with a domain name or IP as host.
+// newAddr returns a net.Addr that holds an address of the form `host:port` with a domain name or IP as host.
 // Used for SOCKS addressing.
-func NewAddr(address, network string) net.Addr {
+func newAddr(address, network string) net.Addr {
 	return &addr{address: address, network: network}
 }
