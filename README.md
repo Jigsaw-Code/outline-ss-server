@@ -22,15 +22,15 @@ The Outline Shadowsocks service allows for:
 
 Fetch dependencies for this demo:
 ```
-GO111MODULE=off go get github.com/shadowsocks/go-shadowsocks2 github.com/prometheus/prometheus/cmd/...
+GO111MODULE=off go get github.com/prometheus/prometheus/cmd/...
 ```
-If that doesn't work, download the [prometheus](https://prometheus.io/download/) or [go-shadowsocks2](https://github.com/shadowsocks/go-shadowsocks2/releases) binaries directly.
+If that doesn't work, download the [prometheus](https://prometheus.io/download/) binary directly.
 
 
 ### Run the server
 On Terminal 1, from the repository directory, build and start the SS server:
 ```
-go run . -config config_example.yml -metrics localhost:9091 --replay_history=10000
+go run github.com/Jigsaw-Code/outline-ss-server/cmd/server -config cmd/server/config_example.yml -metrics localhost:9091 --replay_history=10000
 ```
 In production, you may want to specify `-ip_country_db` to get per-country metrics. See [how the Outline Server calls outline-ss-server](https://github.com/Jigsaw-Code/outline-server/blob/master/src/shadowbox/server/outline_shadowsocks_server.ts).
 
@@ -38,13 +38,13 @@ In production, you may want to specify `-ip_country_db` to get per-country metri
 ### Run the Prometheus scraper for metrics collection
 On Terminal 2, start prometheus scraper for metrics collection:
 ```
-$(go env GOPATH)/bin/prometheus --config.file=prometheus_example.yml
+$(go env GOPATH)/bin/prometheus --config.file=cmd/server/prometheus_example.yml
 ```
 
 ### Run the SOCKS-to-Shadowsocks client
 On Terminal 3, start the SS client:
 ```
-$(go env GOPATH)/bin/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose  -socks localhost:1080
+go run github.com/shadowsocks/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose  -socks localhost:1080
 ```
 
 ### Fetch a page over Shadowsocks
@@ -70,12 +70,12 @@ iperf3 -s
 
 Start the SS server (listening on port 9000):
 ```
-go run . -config config_example.yml
+go run github.com/Jigsaw-Code/outline-ss-server/cmd/server -config cmd/server/config_example.yml
 ```
 
 Start the SS tunnel to redirect port 8000 -> localhost:5201 via the proxy on 9000:
 ```
-$(go env GOPATH)/bin/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -tcptun ":8000=localhost:5201" -udptun ":8000=localhost:5201" -verbose
+go run github.com/shadowsocks/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -tcptun ":8000=localhost:5201" -udptun ":8000=localhost:5201" -verbose
 ```
 
 Test TCP upload (client -> server):
@@ -102,7 +102,7 @@ iperf3 -c localhost -p 8000 --udp -b 0 --reverse
 
 Run the commands above, but start the SS server with
 ```
-$(go env GOPATH)/bin/go-shadowsocks2 -s ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose
+go run github.com/shadowsocks/go-shadowsocks2 -s ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose
 ```
 
 
