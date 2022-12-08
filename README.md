@@ -1,6 +1,9 @@
 # Outline ss-server
 
 ![Build Status](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Jigsaw-Code/outline-ss-server)](https://goreportcard.com/report/github.com/Jigsaw-Code/outline-ss-server)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Jigsaw-Code/outline-ss-server.svg)](https://pkg.go.dev/github.com/Jigsaw-Code/outline-ss-server)
+
 [![Mattermost](https://badgen.net/badge/Mattermost/Outline%20Community/blue)](https://community.internetfreedomfestival.org/community/channels/outline-community)
 [![Reddit](https://badgen.net/badge/Reddit/r%2Foutlinevpn/orange)](https://www.reddit.com/r/outlinevpn/)
 
