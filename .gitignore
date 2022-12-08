@@ -21,3 +21,6 @@
 
 # Git submodules
 /third_party/maxmind/
+
+# Prometheus
+/data/
