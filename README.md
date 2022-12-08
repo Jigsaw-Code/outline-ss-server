@@ -30,7 +30,7 @@ If that doesn't work, download the [prometheus](https://prometheus.io/download/)
 ### Run the server
 On Terminal 1, from the repository directory, build and start the SS server:
 ```
-go run github.com/Jigsaw-Code/outline-ss-server/cmd/server -config cmd/server/config_example.yml -metrics localhost:9091 --replay_history=10000
+go run ./cmd/outline-ss-server -config cmd/outline-ss-server/config_example.yml -metrics localhost:9091 --replay_history=10000
 ```
 In production, you may want to specify `-ip_country_db` to get per-country metrics. See [how the Outline Server calls outline-ss-server](https://github.com/Jigsaw-Code/outline-server/blob/master/src/shadowbox/server/outline_shadowsocks_server.ts).
 
@@ -38,7 +38,7 @@ In production, you may want to specify `-ip_country_db` to get per-country metri
 ### Run the Prometheus scraper for metrics collection
 On Terminal 2, start prometheus scraper for metrics collection:
 ```
-$(go env GOPATH)/bin/prometheus --config.file=cmd/server/prometheus_example.yml
+$(go env GOPATH)/bin/prometheus --config.file=cmd/outline-ss-server/prometheus_example.yml
 ```
 
 ### Run the SOCKS-to-Shadowsocks client
@@ -70,7 +70,7 @@ iperf3 -s
 
 Start the SS server (listening on port 9000):
 ```
-go run github.com/Jigsaw-Code/outline-ss-server/cmd/server -config cmd/server/config_example.yml
+go run ./cmd/outline-ss-server -config cmd/outline-ss-server/config_example.yml
 ```
 
 Start the SS tunnel to redirect port 8000 -> localhost:5201 via the proxy on 9000:
