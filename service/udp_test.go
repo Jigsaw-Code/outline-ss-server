@@ -295,7 +295,8 @@ func TestNATFastClose(t *testing.T) {
 	// Send one DNS query.
 	query := []byte{1}
 	entry.WriteTo(query, &dnsAddr)
-	_ = <-targetConn.send
+	sent := <-targetConn.send
+	require.Len(t, sent.payload, 1)
 	// Send the response.
 	response := []byte{1, 2, 3, 4, 5}
 	received := packet{addr: &dnsAddr, payload: response}
@@ -321,7 +322,8 @@ func TestNATNoFastClose_NotDNS(t *testing.T) {
 	// Send one non-DNS packet.
 	query := []byte{1}
 	entry.WriteTo(query, &targetAddr)
-	_ = <-targetConn.send
+	sent := <-targetConn.send
+	require.Len(t, sent.payload, 1)
 	// Send the response.
 	response := []byte{1, 2, 3, 4, 5}
 	received := packet{addr: &targetAddr, payload: response}
