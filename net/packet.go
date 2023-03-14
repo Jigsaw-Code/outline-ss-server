@@ -16,7 +16,7 @@ package net
 
 import "net"
 
-type PacketDialer interface {
+type PacketListener interface {
 	// ListenPacket created a PacketConn that can be used to relays UDP packets though a Shadowsocks proxy.
 	ListenPacket() (net.PacketConn, error)
 }
