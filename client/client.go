@@ -26,10 +26,14 @@ type Client interface {
 	// DialTCP connects to `raddr` over TCP though a Shadowsocks proxy.
 	// `laddr` is a local bind address, a local address is automatically chosen if nil.
 	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
+	//
+	// Deprecated: use StreamDialer.Dial instead.
 	DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error)
 
 	// ListenUDP relays UDP packets though a Shadowsocks proxy.
 	// `laddr` is a local bind address, a local address is automatically chosen if nil.
+	//
+	// Deprecated: use PacketDialer.ListenPacket instead.
 	ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error)
 
 	// SetTCPSaltGenerator controls the SaltGenerator used for TCP upstream.
