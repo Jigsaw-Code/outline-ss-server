@@ -14,7 +14,7 @@ test: third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb
 	go test -v -race -bench=. ./... -benchtime=100ms
 
 third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb:
-	git submodule update --init
+	git submodule update --init --depth=1
 
 go.mod: tools.go
 	go mod tidy

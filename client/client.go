@@ -20,6 +20,9 @@ var udpPool = slicepool.MakePool(clientUDPBufferSize)
 
 // Client is a client for Shadowsocks TCP and UDP connections.
 type Client interface {
+	onet.StreamDialer
+	onet.PacketDialer
+
 	// DialTCP connects to `raddr` over TCP though a Shadowsocks proxy.
 	// `laddr` is a local bind address, a local address is automatically chosen if nil.
 	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
@@ -75,6 +78,10 @@ func (c *ssClient) SetTCPSaltGenerator(salter ss.SaltGenerator) {
 // was ~1 ms.)  If no client payload is received by this time, we connect without it.
 const helloWait = 10 * time.Millisecond
 
+func (c *ssClient) Dial(addr string) (onet.DuplexConn, error) {
+	return c.DialTCP(nil, addr)
+}
+
 func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
 	socksTargetAddr := socks.ParseAddr(raddr)
 	if socksTargetAddr == nil {
@@ -99,6 +106,10 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	})
 	ssr := ss.NewShadowsocksReader(proxyConn, c.cipher)
 	return onet.WrapConn(proxyConn, ssr, ssw), nil
+}
+
+func (c *ssClient) ListenPacket() (net.PacketConn, error) {
+	return c.ListenUDP(nil)
 }
 
 func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
