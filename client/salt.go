@@ -15,36 +15,11 @@
 package client
 
 import (
-	"crypto/rand"
-	"errors"
-
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	ss_client "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
 )
 
-type prefixSaltGenerator struct {
-	prefix []byte
-}
-
-func (g prefixSaltGenerator) GetSalt(salt []byte) error {
-	n := copy(salt, g.prefix)
-	if n != len(g.prefix) {
-		return errors.New("prefix is too long")
-	}
-	_, err := rand.Read(salt[n:])
-	return err
-}
-
-// NewPrefixSaltGenerator returns a SaltGenerator whose output consists of
-// the provided prefix, followed by random bytes. This is useful to change
-// how shadowsocks traffic is classified by middleboxes.
-//
-// Note: Prefixes steal entropy from the initialization vector. This weakens
-// security by increasing the likelihood that the same IV is used in two
-// different connections (which becomes likely once 2^(N/2) connections are
-// made, due to the birthday attack).  If an IV is reused, the attacker can
-// not only decrypt the ciphertext of those two connections; they can also
-// easily recover the shadowsocks key and decrypt all other connections to
-// this server.  Use with care!
+// Deprecated: Prefer github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client.NewPrefixSaltGenerator
 func NewPrefixSaltGenerator(prefix []byte) ss.SaltGenerator {
-	return prefixSaltGenerator{prefix}
+	return ss_client.NewPrefixSaltGenerator(prefix)
 }
