@@ -15,6 +15,7 @@
 package net
 
 import (
+	"context"
 	"io"
 	"net"
 )
@@ -31,7 +32,29 @@ type DuplexConn interface {
 	CloseWrite() error
 }
 
-// StreamDialer provides a way to establish stream connections (like TCP).
+// StreamEndpoint represents an endpoint that can be used to established stream connections (like TCP)
+type StreamEndpoint interface {
+	// Connect establishes a connection with the endpoint, returning the connection.
+	Connect() (DuplexConn, error)
+}
+
+// TCPEndpoint is a StreamEndpoint that connects to the given address via DialTCP
+type TCPEndpoint struct {
+	// The local address to pass to DialTCP. If nil, the address is picked by the system.
+	Dialer net.Dialer
+	// The remote address to pass to DialTCP.
+	RemoteAddr net.TCPAddr
+}
+
+func (e TCPEndpoint) Connect() (DuplexConn, error) {
+	conn, err := e.Dialer.DialContext(context.Background(), "tcp", e.RemoteAddr.String())
+	if err != nil {
+		return nil, err
+	}
+	return conn.(*net.TCPConn), nil
+}
+
+// StreamDialer provides a way to establish stream connections to a destination.
 type StreamDialer interface {
 	// Dial connects to `raddr`.
 	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.

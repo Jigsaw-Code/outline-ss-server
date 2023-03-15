@@ -16,6 +16,13 @@ package net
 
 import "net"
 
+// PacketEndpoint represents an endpoint that can be used to established packet connections (like UDP)
+type PacketEndpoint interface {
+	// Connect creates a connection bound to an endpoint, returning the connection.
+	Connect() (net.Conn, error)
+}
+
+// PacketListener provides a way to create a local unbound packet connection to send packets to different destinations.
 type PacketListener interface {
 	// ListenPacket created a PacketConn that can be used to relays UDP packets though a Shadowsocks proxy.
 	ListenPacket() (net.PacketConn, error)

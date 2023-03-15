@@ -16,7 +16,6 @@ package client
 
 import (
 	"errors"
-	"net"
 	"time"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
@@ -36,21 +35,21 @@ type StreamDialer interface {
 // NewStreamDialer creates a client that routes connections to a Shadowsocks proxy listening at
 // `host:port`, with authentication parameters `cipher` (AEAD) and `password`.
 // TODO: add a dialer argument to support proxy chaining and transport changes.
-func NewStreamDialer(host string, port int, cipher *ss.Cipher) (StreamDialer, error) {
-	// TODO: consider using net.LookupIP to get a list of IPs, and add logic for optimal selection.
-	proxyIP, err := net.ResolveIPAddr("ip", host)
-	if err != nil {
-		return nil, errors.New("Failed to resolve proxy address")
+func NewStreamDialer(endpoint onet.StreamEndpoint, cipher *ss.Cipher) (StreamDialer, error) {
+	if endpoint == nil {
+		return nil, errors.New("Argument endpoint must not be nil")
 	}
-	d := streamDialer{proxyIP: proxyIP.IP, proxyPort: port, cipher: cipher}
+	if cipher == nil {
+		return nil, errors.New("Argument cipher must not be nil")
+	}
+	d := streamDialer{endpoint: endpoint, cipher: cipher}
 	return &d, nil
 }
 
 type streamDialer struct {
-	proxyIP   net.IP
-	proxyPort int
-	cipher    *ss.Cipher
-	salter    ss.SaltGenerator
+	endpoint onet.StreamEndpoint
+	cipher   *ss.Cipher
+	salter   ss.SaltGenerator
 }
 
 func (c *streamDialer) SetTCPSaltGenerator(salter ss.SaltGenerator) {
@@ -74,8 +73,7 @@ func (c *streamDialer) Dial(remoteAddr string) (onet.DuplexConn, error) {
 	if socksTargetAddr == nil {
 		return nil, errors.New("Failed to parse target address")
 	}
-	proxyAddr := &net.TCPAddr{IP: c.proxyIP, Port: c.proxyPort}
-	proxyConn, err := net.DialTCP("tcp", nil, proxyAddr)
+	proxyConn, err := c.endpoint.Connect()
 	if err != nil {
 		return nil, err
 	}

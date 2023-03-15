@@ -19,6 +19,7 @@ import (
 	"net"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	ss_client "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
 )
@@ -56,34 +57,48 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	if err != nil {
 		return nil, fmt.Errorf("Failed to resolve proxy address: %w", err)
 	}
+	tcpEndpoint := onet.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
+
 	cipher, err := ss.NewCipher(cipherName, password)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create Shadowsocks cipher: %w", err)
 	}
-	streamDialer, err := ss_client.NewStreamDialer(proxyIP.String(), port, cipher)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
-	}
+
 	packetListener, err := ss_client.NewPacketListener(proxyIP.String(), port, cipher)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
 	}
-	d := ssClient{StreamDialer: streamDialer, PacketListener: packetListener}
-	return &d, nil
+
+	return &ssClient{
+		tcpEndpoint:    tcpEndpoint,
+		cipher:         cipher,
+		PacketListener: packetListener,
+	}, nil
 }
 
 type ssClient struct {
-	ss_client.StreamDialer
+	tcpEndpoint onet.TCPEndpoint
+	cipher      *shadowsocks.Cipher
+	salter      ss.SaltGenerator
 	onet.PacketListener
 }
 
 func (c *ssClient) SetTCPSaltGenerator(salter ss.SaltGenerator) {
-	c.StreamDialer.SetTCPSaltGenerator(salter)
+	c.salter = salter
 }
 
 func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
-	// TODO: restore laddr support
-	return c.Dial(raddr)
+	// Local copy
+	endpointCopy := c.tcpEndpoint
+	if laddr != nil {
+		endpointCopy.Dialer.LocalAddr = laddr
+	}
+	streamDialer, err := ss_client.NewStreamDialer(endpointCopy, c.cipher)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
+	}
+	streamDialer.SetTCPSaltGenerator(c.salter)
+	return streamDialer.Dial(raddr)
 }
 
 func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
