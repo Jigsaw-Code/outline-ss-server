@@ -37,7 +37,7 @@ type packetListener struct {
 	cipher   *ss.Cipher
 }
 
-func NewPacketListener(endpoint onet.PacketEndpoint, cipher *ss.Cipher) (onet.PacketListener, error) {
+func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *ss.Cipher) (onet.PacketListener, error) {
 	if endpoint == nil {
 		return nil, errors.New("Argument endpoint must not be nil")
 	}

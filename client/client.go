@@ -85,7 +85,7 @@ func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
 	}
-	packetListener, err := ss_client.NewPacketListener(endpointCopy, c.cipher)
+	packetListener, err := ss_client.NewShadowsocksPacketListener(endpointCopy, c.cipher)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
 	}
@@ -102,7 +102,7 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
 	}
-	streamDialer, err := ss_client.NewStreamDialer(endpointCopy, c.cipher)
+	streamDialer, err := ss_client.NewShadowsocksStreamDialer(endpointCopy, c.cipher)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
 	}

@@ -26,17 +26,17 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
-func TestShadowsocksClient_ListenUDP(t *testing.T) {
+func TestShadowsocksPacketListener_ListenPacket(t *testing.T) {
 	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, t)
 	proxyEndpoint := onet.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
-	d, err := NewPacketListener(proxyEndpoint, cipher)
+	d, err := NewShadowsocksPacketListener(proxyEndpoint, cipher)
 	if err != nil {
-		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
+		t.Fatalf("Failed to create PacketListener: %v", err)
 	}
 	conn, err := d.ListenPacket()
 	if err != nil {
-		t.Fatalf("ShadowsocksClient.ListenUDP failed: %v", err)
+		t.Fatalf("PacketListener.ListenPacket failed: %v", err)
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
@@ -47,20 +47,20 @@ func TestShadowsocksClient_ListenUDP(t *testing.T) {
 	running.Wait()
 }
 
-func BenchmarkShadowsocksClient_ListenUDP(b *testing.B) {
+func BenchmarkShadowsocksPacketListener_ListenPacket(b *testing.B) {
 	b.StopTimer()
 	b.ResetTimer()
 
 	cipher := makeTestCipher(b)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, b)
 	proxyEndpoint := onet.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
-	d, err := NewPacketListener(proxyEndpoint, cipher)
+	d, err := NewShadowsocksPacketListener(proxyEndpoint, cipher)
 	if err != nil {
-		b.Fatalf("Failed to create ShadowsocksClient: %v", err)
+		b.Fatalf("Failed to create PacketListener: %v", err)
 	}
 	conn, err := d.ListenPacket()
 	if err != nil {
-		b.Fatalf("ShadowsocksClient.ListenUDP failed: %v", err)
+		b.Fatalf("PacketListener.ListenPacket failed: %v", err)
 	}
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))

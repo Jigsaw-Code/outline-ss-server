@@ -32,10 +32,9 @@ type StreamDialer interface {
 	SetTCPSaltGenerator(ss.SaltGenerator)
 }
 
-// NewStreamDialer creates a client that routes connections to a Shadowsocks proxy listening at
-// `host:port`, with authentication parameters `cipher` (AEAD) and `password`.
-// TODO: add a dialer argument to support proxy chaining and transport changes.
-func NewStreamDialer(endpoint onet.StreamEndpoint, cipher *ss.Cipher) (StreamDialer, error) {
+// NewShadowsocksStreamDialer creates a client that routes connections to a Shadowsocks proxy listening at
+// the given StreamEndpoint, with `cipher` as the Shadowsocks crypto.
+func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *ss.Cipher) (StreamDialer, error) {
 	if endpoint == nil {
 		return nil, errors.New("Argument endpoint must not be nil")
 	}
