@@ -28,10 +28,7 @@ import (
 )
 
 func TestShadowsocksClient_DialTCP(t *testing.T) {
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		t.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksTCPEchoProxy(cipher, testTargetAddr, t)
 	proxyAddr := netip.MustParseAddrPort(proxy.Addr().String())
 	d, err := NewStreamDialer(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
@@ -51,10 +48,7 @@ func TestShadowsocksClient_DialTCP(t *testing.T) {
 }
 
 func TestShadowsocksClient_DialTCPNoPayload(t *testing.T) {
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		t.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksTCPEchoProxy(cipher, testTargetAddr, t)
 	proxyAddr := netip.MustParseAddrPort(proxy.Addr().String())
 	d, err := NewStreamDialer(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
@@ -98,10 +92,7 @@ func TestShadowsocksClient_DialTCPFastClose(t *testing.T) {
 		close(done)
 	}()
 
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		t.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(t)
 	proxyAddr := netip.MustParseAddrPort(listener.Addr().String())
 	d, err := NewStreamDialer(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
 	if err != nil {
@@ -151,10 +142,7 @@ func TestShadowsocksClient_TCPPrefix(t *testing.T) {
 		}
 	}()
 
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		t.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(t)
 	proxyAddr := netip.MustParseAddrPort(listener.Addr().String())
 	d, err := NewStreamDialer(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
 	if err != nil {
@@ -174,10 +162,7 @@ func BenchmarkShadowsocksClient_DialTCP(b *testing.B) {
 	b.StopTimer()
 	b.ResetTimer()
 
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		b.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(b)
 	proxy, running := startShadowsocksTCPEchoProxy(cipher, testTargetAddr, b)
 	proxyAddr := netip.MustParseAddrPort(proxy.Addr().String())
 	d, err := NewStreamDialer(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)

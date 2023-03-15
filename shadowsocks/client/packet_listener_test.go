@@ -27,10 +27,7 @@ import (
 )
 
 func TestShadowsocksClient_ListenUDP(t *testing.T) {
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		t.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, t)
 	proxyAddr := netip.MustParseAddrPort(proxy.LocalAddr().String())
 	d, err := NewPacketListener(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
@@ -54,10 +51,7 @@ func BenchmarkShadowsocksClient_ListenUDP(b *testing.B) {
 	b.StopTimer()
 	b.ResetTimer()
 
-	cipher, err := ss.NewCipher(ss.TestCipher, testPassword)
-	if err != nil {
-		b.Fatalf("Failed to create cipher: %v", err)
-	}
+	cipher := makeTestCipher(b)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, b)
 	proxyAddr := netip.MustParseAddrPort(proxy.LocalAddr().String())
 	d, err := NewPacketListener(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)

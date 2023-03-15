@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"io"
 	"testing"
+
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 )
 
 const (
-	testPassword   = "testPassword"
 	testTargetAddr = "test.local:1111"
 )
 
@@ -25,4 +26,12 @@ func expectEchoPayload(conn io.ReadWriter, payload, buf []byte, t testing.TB) {
 	if !bytes.Equal(payload, buf[:n]) {
 		t.Fatalf("Expected output '%v'. Got '%v'", payload, buf[:n])
 	}
+}
+
+func makeTestCipher(tb testing.TB) *shadowsocks.Cipher {
+	cipher, err := shadowsocks.NewCipher(shadowsocks.TestCipher, "testPassword")
+	if err != nil {
+		tb.Fatalf("Failed to create cipher: %v", err)
+	}
+	return cipher
 }
