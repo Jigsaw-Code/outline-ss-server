@@ -22,13 +22,13 @@ import (
 // PacketEndpoint represents an endpoint that can be used to established packet connections (like UDP)
 type PacketEndpoint interface {
 	// Connect creates a connection bound to an endpoint, returning the connection.
-	Connect() (net.Conn, error)
+	Connect(ctx context.Context) (net.Conn, error)
 }
 
 // PacketListener provides a way to create a local unbound packet connection to send packets to different destinations.
 type PacketListener interface {
 	// ListenPacket created a PacketConn that can be used to relays UDP packets though a Shadowsocks proxy.
-	ListenPacket() (net.PacketConn, error)
+	ListenPacket(ctx context.Context) (net.PacketConn, error)
 }
 
 // UDPEndpoint is a PacketListener that connects to the given address via UDP
@@ -39,8 +39,8 @@ type UDPEndpoint struct {
 	RemoteAddr net.UDPAddr
 }
 
-func (e UDPEndpoint) Connect() (net.Conn, error) {
-	conn, err := e.Dialer.DialContext(context.Background(), "udp", e.RemoteAddr.String())
+func (e UDPEndpoint) Connect(ctx context.Context) (net.Conn, error) {
+	conn, err := e.Dialer.DialContext(ctx, "udp", e.RemoteAddr.String())
 	if err != nil {
 		return nil, err
 	}

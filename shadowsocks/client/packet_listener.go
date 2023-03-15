@@ -15,6 +15,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -47,8 +48,8 @@ func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *ss.Ciphe
 	return &packetListener{endpoint: endpoint, cipher: cipher}, nil
 }
 
-func (c *packetListener) ListenPacket() (net.PacketConn, error) {
-	proxyConn, err := c.endpoint.Connect()
+func (c *packetListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
+	proxyConn, err := c.endpoint.Connect(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Could not connect to endpoint: %x", err)
 	}

@@ -15,6 +15,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -89,7 +90,7 @@ func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
 	}
-	return packetListener.ListenPacket()
+	return packetListener.ListenPacket(context.Background())
 }
 
 func (c *ssClient) SetTCPSaltGenerator(salter ss.SaltGenerator) {
@@ -107,5 +108,5 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
 	}
 	streamDialer.SetTCPSaltGenerator(c.salter)
-	return streamDialer.Dial(raddr)
+	return streamDialer.Dial(context.Background(), raddr)
 }

@@ -15,6 +15,7 @@
 package net
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -59,7 +60,7 @@ func TestNewTCPEndpointIPv4(t *testing.T) {
 	}()
 
 	e := TCPEndpoint{RemoteAddr: *listener.Addr().(*net.TCPAddr)}
-	serverConn, err := e.Connect()
+	serverConn, err := e.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}

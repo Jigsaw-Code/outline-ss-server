@@ -35,14 +35,14 @@ type DuplexConn interface {
 // StreamEndpoint represents an endpoint that can be used to established stream connections (like TCP)
 type StreamEndpoint interface {
 	// Connect establishes a connection with the endpoint, returning the connection.
-	Connect() (DuplexConn, error)
+	Connect(ctx context.Context) (DuplexConn, error)
 }
 
 // StreamDialer provides a way to establish stream connections to a destination.
 type StreamDialer interface {
 	// Dial connects to `raddr`.
 	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
-	Dial(raddr string) (DuplexConn, error)
+	Dial(ctx context.Context, raddr string) (DuplexConn, error)
 }
 
 // TCPEndpoint is a StreamEndpoint that connects to the given address via TCP
@@ -53,8 +53,8 @@ type TCPEndpoint struct {
 	RemoteAddr net.TCPAddr
 }
 
-func (e TCPEndpoint) Connect() (DuplexConn, error) {
-	conn, err := e.Dialer.DialContext(context.Background(), "tcp", e.RemoteAddr.String())
+func (e TCPEndpoint) Connect(ctx context.Context) (DuplexConn, error) {
+	conn, err := e.Dialer.DialContext(ctx, "tcp", e.RemoteAddr.String())
 	if err != nil {
 		return nil, err
 	}

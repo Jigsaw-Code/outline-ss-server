@@ -15,6 +15,7 @@
 package client
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
@@ -34,7 +35,7 @@ func TestShadowsocksStreamDialer_Dial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
 	}
-	conn, err := d.Dial(testTargetAddr)
+	conn, err := d.Dial(context.Background(), testTargetAddr)
 	if err != nil {
 		t.Fatalf("StreamDialer.Dial failed: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestShadowsocksStreamDialer_DialNoPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
 	}
-	conn, err := d.Dial(testTargetAddr)
+	conn, err := d.Dial(context.Background(), testTargetAddr)
 	if err != nil {
 		t.Fatalf("StreamDialer.Dial failed: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestShadowsocksStreamDialer_DialFastClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
 	}
-	conn, err := d.Dial(testTargetAddr)
+	conn, err := d.Dial(context.Background(), testTargetAddr)
 	if err != nil {
 		t.Fatalf("StreamDialer.Dial failed: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestShadowsocksStreamDialer_TCPPrefix(t *testing.T) {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
 	}
 	d.SetTCPSaltGenerator(NewPrefixSaltGenerator(prefix))
-	conn, err := d.Dial(testTargetAddr)
+	conn, err := d.Dial(context.Background(), testTargetAddr)
 	if err != nil {
 		t.Fatalf("StreamDialer.Dial failed: %v", err)
 	}
@@ -167,7 +168,7 @@ func BenchmarkShadowsocksStreamDialer_Dial(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create StreamDialer: %v", err)
 	}
-	conn, err := d.Dial(testTargetAddr)
+	conn, err := d.Dial(context.Background(), testTargetAddr)
 	if err != nil {
 		b.Fatalf("StreamDialer.Dial failed: %v", err)
 	}

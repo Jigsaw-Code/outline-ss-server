@@ -15,6 +15,7 @@
 package client
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
@@ -34,7 +35,7 @@ func TestShadowsocksPacketListener_ListenPacket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create PacketListener: %v", err)
 	}
-	conn, err := d.ListenPacket()
+	conn, err := d.ListenPacket(context.Background())
 	if err != nil {
 		t.Fatalf("PacketListener.ListenPacket failed: %v", err)
 	}
@@ -58,7 +59,7 @@ func BenchmarkShadowsocksPacketListener_ListenPacket(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create PacketListener: %v", err)
 	}
-	conn, err := d.ListenPacket()
+	conn, err := d.ListenPacket(context.Background())
 	if err != nil {
 		b.Fatalf("PacketListener.ListenPacket failed: %v", err)
 	}

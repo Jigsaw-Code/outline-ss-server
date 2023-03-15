@@ -15,6 +15,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -67,12 +68,12 @@ func (c *streamDialer) SetTCPSaltGenerator(salter ss.SaltGenerator) {
 // was ~1 ms.)  If no client payload is received by this time, we connect without it.
 const helloWait = 10 * time.Millisecond
 
-func (c *streamDialer) Dial(remoteAddr string) (onet.DuplexConn, error) {
+func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.DuplexConn, error) {
 	socksTargetAddr := socks.ParseAddr(remoteAddr)
 	if socksTargetAddr == nil {
 		return nil, errors.New("Failed to parse target address")
 	}
-	proxyConn, err := c.endpoint.Connect()
+	proxyConn, err := c.endpoint.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
