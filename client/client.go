@@ -57,6 +57,7 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	if err != nil {
 		return nil, fmt.Errorf("Failed to resolve proxy address: %w", err)
 	}
+	udpEndpoint := onet.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: proxyIP.IP, Port: port}}
 	tcpEndpoint := onet.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
 
 	cipher, err := ss.NewCipher(cipherName, password)
@@ -64,23 +65,31 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 		return nil, fmt.Errorf("Failed to create Shadowsocks cipher: %w", err)
 	}
 
-	packetListener, err := ss_client.NewPacketListener(proxyIP.String(), port, cipher)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
-	}
-
 	return &ssClient{
-		tcpEndpoint:    tcpEndpoint,
-		cipher:         cipher,
-		PacketListener: packetListener,
+		cipher:      cipher,
+		udpEndpoint: udpEndpoint,
+		tcpEndpoint: tcpEndpoint,
 	}, nil
 }
 
 type ssClient struct {
-	tcpEndpoint onet.TCPEndpoint
 	cipher      *shadowsocks.Cipher
+	udpEndpoint onet.UDPEndpoint
+	tcpEndpoint onet.TCPEndpoint
 	salter      ss.SaltGenerator
-	onet.PacketListener
+}
+
+func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
+	// Local copy
+	endpointCopy := c.udpEndpoint
+	if laddr != nil {
+		endpointCopy.Dialer.LocalAddr = laddr
+	}
+	packetListener, err := ss_client.NewPacketListener(endpointCopy, c.cipher)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
+	}
+	return packetListener.ListenPacket()
 }
 
 func (c *ssClient) SetTCPSaltGenerator(salter ss.SaltGenerator) {
@@ -99,9 +108,4 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	}
 	streamDialer.SetTCPSaltGenerator(c.salter)
 	return streamDialer.Dial(raddr)
-}
-
-func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
-	// TODO: restore laddr support
-	return c.ListenPacket()
 }

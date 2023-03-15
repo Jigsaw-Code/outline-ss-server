@@ -17,11 +17,11 @@ package client
 import (
 	"io"
 	"net"
-	"net/netip"
 	"sync"
 	"testing"
 	"time"
 
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
@@ -29,8 +29,8 @@ import (
 func TestShadowsocksClient_ListenUDP(t *testing.T) {
 	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, t)
-	proxyAddr := netip.MustParseAddrPort(proxy.LocalAddr().String())
-	d, err := NewPacketListener(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
+	proxyEndpoint := onet.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
+	d, err := NewPacketListener(proxyEndpoint, cipher)
 	if err != nil {
 		t.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}
@@ -53,8 +53,8 @@ func BenchmarkShadowsocksClient_ListenUDP(b *testing.B) {
 
 	cipher := makeTestCipher(b)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, b)
-	proxyAddr := netip.MustParseAddrPort(proxy.LocalAddr().String())
-	d, err := NewPacketListener(proxyAddr.Addr().String(), int(proxyAddr.Port()), cipher)
+	proxyEndpoint := onet.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
+	d, err := NewPacketListener(proxyEndpoint, cipher)
 	if err != nil {
 		b.Fatalf("Failed to create ShadowsocksClient: %v", err)
 	}

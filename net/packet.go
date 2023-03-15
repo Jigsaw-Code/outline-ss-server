@@ -14,7 +14,10 @@
 
 package net
 
-import "net"
+import (
+	"context"
+	"net"
+)
 
 // PacketEndpoint represents an endpoint that can be used to established packet connections (like UDP)
 type PacketEndpoint interface {
@@ -26,4 +29,20 @@ type PacketEndpoint interface {
 type PacketListener interface {
 	// ListenPacket created a PacketConn that can be used to relays UDP packets though a Shadowsocks proxy.
 	ListenPacket() (net.PacketConn, error)
+}
+
+// UDPEndpoint is a PacketListener that connects to the given address via UDP
+type UDPEndpoint struct {
+	// The local address to pass to Dial. If nil, the address is picked by the system.
+	Dialer net.Dialer
+	// The remote address to pass to Dial.
+	RemoteAddr net.UDPAddr
+}
+
+func (e UDPEndpoint) Connect() (net.Conn, error) {
+	conn, err := e.Dialer.DialContext(context.Background(), "udp", e.RemoteAddr.String())
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }

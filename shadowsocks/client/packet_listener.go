@@ -16,6 +16,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 
@@ -32,33 +33,31 @@ const clientUDPBufferSize = 16 * 1024
 var udpPool = slicepool.MakePool(clientUDPBufferSize)
 
 type packetListener struct {
-	proxyIP   net.IP
-	proxyPort int
-	cipher    *ss.Cipher
+	endpoint onet.PacketEndpoint
+	cipher   *ss.Cipher
 }
 
-func NewPacketListener(host string, port int, cipher *ss.Cipher) (onet.PacketListener, error) {
-	// TODO: consider using net.LookupIP to get a list of IPs, and add logic for optimal selection.
-	proxyIP, err := net.ResolveIPAddr("ip", host)
-	if err != nil {
-		return nil, errors.New("Failed to resolve proxy address")
+func NewPacketListener(endpoint onet.PacketEndpoint, cipher *ss.Cipher) (onet.PacketListener, error) {
+	if endpoint == nil {
+		return nil, errors.New("Argument endpoint must not be nil")
 	}
-	d := packetListener{proxyIP: proxyIP.IP, proxyPort: port, cipher: cipher}
-	return &d, nil
+	if cipher == nil {
+		return nil, errors.New("Argument cipher must not be nil")
+	}
+	return &packetListener{endpoint: endpoint, cipher: cipher}, nil
 }
 
 func (c *packetListener) ListenPacket() (net.PacketConn, error) {
-	proxyAddr := &net.UDPAddr{IP: c.proxyIP, Port: c.proxyPort}
-	pc, err := net.DialUDP("udp", nil, proxyAddr)
+	proxyConn, err := c.endpoint.Connect()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Could not connect to endpoint: %x", err)
 	}
-	conn := packetConn{UDPConn: pc, cipher: c.cipher}
+	conn := packetConn{Conn: proxyConn, cipher: c.cipher}
 	return &conn, nil
 }
 
 type packetConn struct {
-	*net.UDPConn
+	net.Conn
 	cipher *ss.Cipher
 }
 
@@ -80,7 +79,7 @@ func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	_, err = c.UDPConn.Write(buf)
+	_, err = c.Conn.Write(buf)
 	return len(b), err
 }
 
@@ -89,7 +88,7 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	lazySlice := udpPool.LazySlice()
 	cipherBuf := lazySlice.Acquire()
 	defer lazySlice.Release()
-	n, err := c.UDPConn.Read(cipherBuf)
+	n, err := c.Conn.Read(cipherBuf)
 	if err != nil {
 		return 0, nil, err
 	}

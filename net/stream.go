@@ -38,7 +38,14 @@ type StreamEndpoint interface {
 	Connect() (DuplexConn, error)
 }
 
-// TCPEndpoint is a StreamEndpoint that connects to the given address via DialTCP
+// StreamDialer provides a way to establish stream connections to a destination.
+type StreamDialer interface {
+	// Dial connects to `raddr`.
+	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
+	Dial(raddr string) (DuplexConn, error)
+}
+
+// TCPEndpoint is a StreamEndpoint that connects to the given address via TCP
 type TCPEndpoint struct {
 	// The local address to pass to DialTCP. If nil, the address is picked by the system.
 	Dialer net.Dialer
@@ -52,13 +59,6 @@ func (e TCPEndpoint) Connect() (DuplexConn, error) {
 		return nil, err
 	}
 	return conn.(*net.TCPConn), nil
-}
-
-// StreamDialer provides a way to establish stream connections to a destination.
-type StreamDialer interface {
-	// Dial connects to `raddr`.
-	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
-	Dial(raddr string) (DuplexConn, error)
 }
 
 type duplexConnAdaptor struct {
