@@ -80,8 +80,9 @@ type ssClient struct {
 	salter      ss.SaltGenerator
 }
 
+// ListenUDP implements the Client.ListenUDP API.
 func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
-	// Local copy
+	// Make sure to make a copy so we don't modify the original endpoint.
 	endpointCopy := c.udpEndpoint
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
@@ -97,8 +98,9 @@ func (c *ssClient) SetTCPSaltGenerator(salter ss.SaltGenerator) {
 	c.salter = salter
 }
 
+// DialTCP implements the Client.DialTCP API.
 func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
-	// Local copy
+	// Make sure to make a copy so we don't modify the original endpoint.
 	endpointCopy := c.tcpEndpoint
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
