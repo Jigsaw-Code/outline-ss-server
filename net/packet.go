@@ -27,13 +27,13 @@ type PacketEndpoint interface {
 
 // PacketListener provides a way to create a local unbound packet connection to send packets to different destinations.
 type PacketListener interface {
-	// ListenPacket created a PacketConn that can be used to relays UDP packets though a Shadowsocks proxy.
+	// ListenPacket creates a PacketConn that can be used to relay packets (such as UDP) though some proxy.
 	ListenPacket(ctx context.Context) (net.PacketConn, error)
 }
 
 // UDPEndpoint is a PacketListener that connects to the given address via UDP
 type UDPEndpoint struct {
-	// The local address to pass to Dial. If nil, the address is picked by the system.
+	// The Dialer used to create the net.Conn on Connect().
 	Dialer net.Dialer
 	// The remote address to pass to Dial.
 	RemoteAddr net.UDPAddr

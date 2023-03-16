@@ -47,7 +47,7 @@ type StreamDialer interface {
 
 // TCPEndpoint is a StreamEndpoint that connects to the given address via TCP
 type TCPEndpoint struct {
-	// The local address to pass to DialTCP. If nil, the address is picked by the system.
+	// The Dialer used to create the connection on Connect().
 	Dialer net.Dialer
 	// The remote address to pass to DialTCP.
 	RemoteAddr net.TCPAddr
