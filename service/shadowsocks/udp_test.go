@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/shadowsocks/metrics"
 	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	logging "github.com/op/go-logging"
@@ -126,7 +126,7 @@ func (m *natTestMetrics) RemoveUDPNatEntry() {}
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
-func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
+func sendToDiscard(payloads [][]byte, validator service.TargetIPValidator) *natTestMetrics {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(nil)[0].Value.(*CipherEntry).Cipher
 	clientConn := makePacketConn()
@@ -164,7 +164,7 @@ func TestIPFilter(t *testing.T) {
 	})
 
 	t.Run("Localhost not allowed", func(t *testing.T) {
-		metrics := sendToDiscard(payloads, onet.RequirePublicIP)
+		metrics := sendToDiscard(payloads, service.RequirePublicIP)
 		assert.Equal(t, 0, metrics.natEntriesAdded, "Unexpected NAT entry on rejected packet")
 		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
 		for _, report := range metrics.upstreamPackets {

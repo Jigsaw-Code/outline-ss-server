@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/shadowsocks/metrics"
 	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	logging "github.com/op/go-logging"
@@ -77,18 +77,18 @@ type udpService struct {
 	ciphers           CipherList
 	m                 metrics.ShadowsocksMetrics
 	running           sync.WaitGroup
-	targetIPValidator onet.TargetIPValidator
+	targetIPValidator service.TargetIPValidator
 }
 
 // NewUDPService creates a UDPService
 func NewUDPService(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics) UDPService {
-	return &udpService{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
+	return &udpService{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: service.RequirePublicIP}
 }
 
 // UDPService is a running UDP shadowsocks proxy that can be stopped.
 type UDPService interface {
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
-	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
+	SetTargetIPValidator(targetIPValidator service.TargetIPValidator)
 	// Serve adopts the clientConn, and will not return until it is closed by Stop().
 	Serve(clientConn net.PacketConn) error
 	// Stop closes the clientConn and prevents further forwarding of packets.
@@ -97,7 +97,7 @@ type UDPService interface {
 	GracefulStop() error
 }
 
-func (s *udpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
+func (s *udpService) SetTargetIPValidator(targetIPValidator service.TargetIPValidator) {
 	s.targetIPValidator = targetIPValidator
 }
 
@@ -126,7 +126,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 
 	stopped := false
 	for !stopped {
-		func() (connError *onet.ConnectionError) {
+		func() (connError *service.ConnectionError) {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Errorf("Panic in UDP loop: %v", r)
@@ -161,7 +161,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 			}()
 
 			if err != nil {
-				return onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
+				return service.NewConnectionError("ERR_READ", "Failed to read from client", err)
 			}
 			if logger.IsEnabledFor(logging.DEBUG) {
 				defer logger.Debugf("UDP(%v): done", clientAddr)
@@ -188,17 +188,17 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 				timeToCipher = time.Now().Sub(unpackStart)
 
 				if err != nil {
-					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
+					return service.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
 				}
 
-				var onetErr *onet.ConnectionError
+				var onetErr *service.ConnectionError
 				if payload, tgtUDPAddr, onetErr = s.validatePacket(textData); onetErr != nil {
 					return onetErr
 				}
 
 				udpConn, err := net.ListenPacket("udp", "")
 				if err != nil {
-					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
+					return service.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
 				}
 				targetConn = nm.Add(clientAddr, clientConn, cipher, udpConn, clientLocation, keyID)
 			} else {
@@ -208,13 +208,13 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 				textData, err := shadowsocks.Unpack(nil, cipherData, targetConn.cipher)
 				timeToCipher = time.Now().Sub(unpackStart)
 				if err != nil {
-					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
+					return service.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
 				}
 
 				// The key ID is known with confidence once decryption succeeds.
 				keyID = targetConn.keyID
 
-				var onetErr *onet.ConnectionError
+				var onetErr *service.ConnectionError
 				if payload, tgtUDPAddr, onetErr = s.validatePacket(textData); onetErr != nil {
 					return onetErr
 				}
@@ -223,7 +223,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 			debugUDPAddr(clientAddr, "Proxy exit %v", targetConn.LocalAddr())
 			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
 			if err != nil {
-				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
+				return service.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
 			}
 			return nil
 		}()
@@ -234,15 +234,15 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 // Given the decrypted contents of a UDP packet, return
 // the payload and the destination address, or an error if
 // this packet cannot or should not be forwarded.
-func (s *udpService) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+func (s *udpService) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *service.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
-		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
+		return nil, nil, service.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
 	}
 
 	tgtUDPAddr, err := net.ResolveUDPAddr("udp", tgtAddr.String())
 	if err != nil {
-		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
+		return nil, nil, service.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
 	}
 	if err := s.targetIPValidator(tgtUDPAddr.IP); err != nil {
 		return nil, nil, err
@@ -434,7 +434,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 	expired := false
 	for {
 		var bodyLen, proxyClientBytes int
-		connError := func() (connError *onet.ConnectionError) {
+		connError := func() (connError *service.ConnectionError) {
 			var (
 				raddr net.Addr
 				err   error
@@ -451,7 +451,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 						return nil
 					}
 				}
-				return onet.NewConnectionError("ERR_READ", "Failed to read from target", err)
+				return service.NewConnectionError("ERR_READ", "Failed to read from target", err)
 			}
 
 			debugUDPAddr(clientAddr, "Got response from %v", raddr)
@@ -473,11 +473,11 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			packBuf := pkt[saltStart:]
 			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, targetConn.cipher) // Encrypt in-place
 			if err != nil {
-				return onet.NewConnectionError("ERR_PACK", "Failed to pack data to client", err)
+				return service.NewConnectionError("ERR_PACK", "Failed to pack data to client", err)
 			}
 			proxyClientBytes, err = clientConn.WriteTo(buf, clientAddr)
 			if err != nil {
-				return onet.NewConnectionError("ERR_WRITE", "Failed to write to client", err)
+				return service.NewConnectionError("ERR_WRITE", "Failed to write to client", err)
 			}
 			return nil
 		}()

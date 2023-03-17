@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-ss-server/service"
-	onet "github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/shadowsocks/metrics"
 	"github.com/Jigsaw-Code/outline-ss-server/transport"
 	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
@@ -151,7 +150,7 @@ func (s *tcpService) SetTargetIPValidator(targetIPValidator service.TargetIPVali
 	s.targetIPValidator = targetIPValidator
 }
 
-func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (transport.DuplexConn, *service.ConnectionError) {
+func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator service.TargetIPValidator) (transport.DuplexConn, *service.ConnectionError) {
 	var ipError *service.ConnectionError
 	dialer := net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)
