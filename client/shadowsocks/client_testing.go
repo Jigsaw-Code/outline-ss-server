@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package shadowsocks
 
 import (
 	"bytes"
 	"io"
 	"testing"
 
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 )
 
 const (

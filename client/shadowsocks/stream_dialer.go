@@ -12,20 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package shadowsocks
 
 import (
 	"context"
 	"errors"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/client"
+	"github.com/Jigsaw-Code/outline-ss-server/transport"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 type StreamDialer interface {
-	onet.StreamDialer
+	client.StreamDialer
 
 	// SetTCPSaltGenerator controls the SaltGenerator used for TCP upstream.
 	// `salter` may be `nil`.
@@ -35,7 +36,7 @@ type StreamDialer interface {
 
 // NewShadowsocksStreamDialer creates a client that routes connections to a Shadowsocks proxy listening at
 // the given StreamEndpoint, with `cipher` as the Shadowsocks crypto.
-func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *shadowsocks.Cipher) (StreamDialer, error) {
+func NewShadowsocksStreamDialer(endpoint client.StreamEndpoint, cipher *shadowsocks.Cipher) (StreamDialer, error) {
 	if endpoint == nil {
 		return nil, errors.New("Argument endpoint must not be nil")
 	}
@@ -47,7 +48,7 @@ func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *shadowsock
 }
 
 type streamDialer struct {
-	endpoint onet.StreamEndpoint
+	endpoint client.StreamEndpoint
 	cipher   *shadowsocks.Cipher
 	salter   shadowsocks.SaltGenerator
 }
@@ -83,7 +84,7 @@ const helloWait = 10 * time.Millisecond
 // initial data from the application in order to send the Shadowsocks salt, SOCKS address and initial data
 // all in one packet. This makes the size of the initial packet hard to predict, avoiding packet size
 // fingerprinting. We can only get the application initial data if we return a connection first.
-func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.DuplexConn, error) {
+func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (transport.DuplexConn, error) {
 	socksTargetAddr := socks.ParseAddr(remoteAddr)
 	if socksTargetAddr == nil {
 		return nil, errors.New("Failed to parse target address")
@@ -105,5 +106,5 @@ func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.Duplex
 		ssw.Flush()
 	})
 	ssr := shadowsocks.NewShadowsocksReader(proxyConn, c.cipher)
-	return onet.WrapConn(proxyConn, ssr, ssw), nil
+	return transport.WrapConn(proxyConn, ssr, ssw), nil
 }

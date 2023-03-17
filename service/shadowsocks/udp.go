@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	onet "github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/Jigsaw-Code/outline-ss-server/service/shadowsocks/metrics"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
@@ -50,13 +50,13 @@ func debugUDPAddr(addr net.Addr, template string, val interface{}) {
 
 // Decrypts src into dst. It tries each cipher until it finds one that authenticates
 // correctly. dst and src must not overlap.
-func findAccessKeyUDP(clientIP net.IP, dst, src []byte, cipherList CipherList) ([]byte, string, *ss.Cipher, error) {
+func findAccessKeyUDP(clientIP net.IP, dst, src []byte, cipherList CipherList) ([]byte, string, *shadowsocks.Cipher, error) {
 	// Try each cipher until we find one that authenticates successfully. This assumes that all ciphers are AEAD.
 	// We snapshot the list because it may be modified while we use it.
 	snapshot := cipherList.SnapshotForClientIP(clientIP)
 	for ci, entry := range snapshot {
 		id, cipher := entry.Value.(*CipherEntry).ID, entry.Value.(*CipherEntry).Cipher
-		buf, err := ss.Unpack(dst, src, cipher)
+		buf, err := shadowsocks.Unpack(dst, src, cipher)
 		if err != nil {
 			debugUDP(id, "Failed to unpack: %v", err)
 			continue
@@ -182,7 +182,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 
 				ip := clientAddr.(*net.UDPAddr).IP
 				var textData []byte
-				var cipher *ss.Cipher
+				var cipher *shadowsocks.Cipher
 				unpackStart := time.Now()
 				textData, keyID, cipher, err = findAccessKeyUDP(ip, textBuf, cipherData, s.ciphers)
 				timeToCipher = time.Now().Sub(unpackStart)
@@ -205,7 +205,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 				clientLocation = targetConn.clientLocation
 
 				unpackStart := time.Now()
-				textData, err := ss.Unpack(nil, cipherData, targetConn.cipher)
+				textData, err := shadowsocks.Unpack(nil, cipherData, targetConn.cipher)
 				timeToCipher = time.Now().Sub(unpackStart)
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
@@ -275,7 +275,7 @@ func isDNS(addr net.Addr) bool {
 
 type natconn struct {
 	net.PacketConn
-	cipher *ss.Cipher
+	cipher *shadowsocks.Cipher
 	keyID  string
 	// We store the client location in the NAT map to avoid recomputing it
 	// for every downstream packet in a UDP-based connection.
@@ -357,7 +357,7 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cipher *ss.Cipher, keyID, clientLocation string) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, cipher *shadowsocks.Cipher, keyID, clientLocation string) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		cipher:         cipher,
@@ -385,7 +385,7 @@ func (m *natmap) del(key string) net.PacketConn {
 	return nil
 }
 
-func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cipher *ss.Cipher, targetConn net.PacketConn, clientLocation, keyID string) *natconn {
+func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cipher *shadowsocks.Cipher, targetConn net.PacketConn, clientLocation, keyID string) *natconn {
 	entry := m.set(clientAddr.String(), targetConn, cipher, keyID, clientLocation)
 
 	m.metrics.AddUDPNatEntry()
@@ -471,7 +471,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			//           [            packBuf             ]
 			//           [          buf           ]
 			packBuf := pkt[saltStart:]
-			buf, err := ss.Pack(packBuf, plaintextBuf, targetConn.cipher) // Encrypt in-place
+			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, targetConn.cipher) // Encrypt in-place
 			if err != nil {
 				return onet.NewConnectionError("ERR_PACK", "Failed to pack data to client", err)
 			}

@@ -26,9 +26,11 @@ import (
 	"syscall"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
+	onet "github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/Jigsaw-Code/outline-ss-server/service/shadowsocks/metrics"
+	"github.com/Jigsaw-Code/outline-ss-server/transport"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
@@ -96,7 +98,7 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 		salt := firstBytes[:saltsize]
 		cipherTextLength := 2 + cipher.TagSize()
 		cipherText := firstBytes[saltsize : saltsize+cipherTextLength]
-		_, err := ss.DecryptOnce(cipher, salt, chunkLenBuf[:0], cipherText)
+		_, err := shadowsocks.DecryptOnce(cipher, salt, chunkLenBuf[:0], cipherText)
 		if err != nil {
 			debugTCP(id, "Failed to decrypt length: %v", err)
 			continue
@@ -118,7 +120,7 @@ type tcpService struct {
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 	replayCache       *ReplayCache
-	targetIPValidator onet.TargetIPValidator
+	targetIPValidator service.TargetIPValidator
 }
 
 // NewTCPService creates a TCPService
@@ -129,14 +131,14 @@ func NewTCPService(ciphers CipherList, replayCache *ReplayCache, m metrics.Shado
 		m:                 m,
 		readTimeout:       timeout,
 		replayCache:       replayCache,
-		targetIPValidator: onet.RequirePublicIP,
+		targetIPValidator: service.RequirePublicIP,
 	}
 }
 
 // TCPService is a Shadowsocks TCP service that can be started and stopped.
 type TCPService interface {
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
-	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
+	SetTargetIPValidator(targetIPValidator service.TargetIPValidator)
 	// Serve adopts the listener, which will be closed before Serve returns.  Serve returns an error unless Stop() was called.
 	Serve(listener *net.TCPListener) error
 	// Stop closes the listener but does not interfere with existing connections.
@@ -145,12 +147,12 @@ type TCPService interface {
 	GracefulStop() error
 }
 
-func (s *tcpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
+func (s *tcpService) SetTargetIPValidator(targetIPValidator service.TargetIPValidator) {
 	s.targetIPValidator = targetIPValidator
 }
 
-func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (onet.DuplexConn, *onet.ConnectionError) {
-	var ipError *onet.ConnectionError
+func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (transport.DuplexConn, *service.ConnectionError) {
+	var ipError *service.ConnectionError
 	dialer := net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)
 		ipError = targetIPValidator(net.ParseIP(ip))
@@ -163,7 +165,7 @@ func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIP
 	if ipError != nil {
 		return nil, ipError
 	} else if err != nil {
-		return nil, onet.NewConnectionError("ERR_CONNECT", "Failed to connect to target", err)
+		return nil, service.NewConnectionError("ERR_CONNECT", "Failed to connect to target", err)
 	}
 	tgtTCPConn := tgtConn.(*net.TCPConn)
 	tgtTCPConn.SetKeepAlive(true)
@@ -228,12 +230,12 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	clientConn := metrics.MeasureConn(clientTCPConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientTCPConn), s.ciphers)
 
-	connError := func() *onet.ConnectionError {
+	connError := func() *service.ConnectionError {
 		if keyErr != nil {
 			logger.Debugf("Failed to find a valid cipher after reading %v bytes: %v", proxyMetrics.ClientProxy, keyErr)
 			const status = "ERR_CIPHER"
 			s.absorbProbe(listenerPort, clientConn, clientLocation, status, &proxyMetrics)
-			return onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
+			return service.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
 		}
 
 		isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
@@ -247,17 +249,17 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 			}
 			s.absorbProbe(listenerPort, clientConn, clientLocation, status, &proxyMetrics)
 			logger.Debugf(status+": %v in %s sent %d bytes", clientTCPConn.RemoteAddr(), clientLocation, proxyMetrics.ClientProxy)
-			return onet.NewConnectionError(status, "Replay detected", nil)
+			return service.NewConnectionError(status, "Replay detected", nil)
 		}
 
-		ssr := ss.NewShadowsocksReader(clientReader, cipherEntry.Cipher)
+		ssr := shadowsocks.NewShadowsocksReader(clientReader, cipherEntry.Cipher)
 		tgtAddr, err := socks.ReadAddr(ssr)
 		// Clear the deadline for the target address
 		clientTCPConn.SetReadDeadline(time.Time{})
 		if err != nil {
 			// Drain to prevent a close on cipher error.
 			io.Copy(ioutil.Discard, clientConn)
-			return onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
+			return service.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 		}
 
 		tgtConn, dialErr := dialTarget(tgtAddr, &proxyMetrics, s.targetIPValidator)
@@ -268,7 +270,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 		defer tgtConn.Close()
 
 		logger.Debugf("proxy %s <-> %s", clientTCPConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
-		ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
+		ssw := shadowsocks.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 
 		fromClientErrCh := make(chan error)
@@ -292,10 +294,10 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 
 		fromClientErr := <-fromClientErrCh
 		if fromClientErr != nil {
-			return onet.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
+			return service.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
 		}
 		if fromTargetErr != nil {
-			return onet.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
+			return service.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
 		}
 		return nil
 	}()

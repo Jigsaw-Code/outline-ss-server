@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package shadowsocks
 
 import (
 	"context"
@@ -22,15 +22,16 @@ import (
 	"testing"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/client"
+	"github.com/Jigsaw-Code/outline-ss-server/transport"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 func TestShadowsocksStreamDialer_Dial(t *testing.T) {
 	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksTCPEchoProxy(cipher, testTargetAddr, t)
-	proxyEndpoint := onet.TCPEndpoint{RemoteAddr: *proxy.Addr().(*net.TCPAddr)}
+	proxyEndpoint := client.TCPEndpoint{RemoteAddr: *proxy.Addr().(*net.TCPAddr)}
 	d, err := NewShadowsocksStreamDialer(proxyEndpoint, cipher)
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
@@ -50,7 +51,7 @@ func TestShadowsocksStreamDialer_Dial(t *testing.T) {
 func TestShadowsocksStreamDialer_DialNoPayload(t *testing.T) {
 	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksTCPEchoProxy(cipher, testTargetAddr, t)
-	proxyEndpoint := onet.TCPEndpoint{RemoteAddr: *proxy.Addr().(*net.TCPAddr)}
+	proxyEndpoint := client.TCPEndpoint{RemoteAddr: *proxy.Addr().(*net.TCPAddr)}
 	d, err := NewShadowsocksStreamDialer(proxyEndpoint, cipher)
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
@@ -93,7 +94,7 @@ func TestShadowsocksStreamDialer_DialFastClose(t *testing.T) {
 	}()
 
 	cipher := makeTestCipher(t)
-	proxyEndpoint := onet.TCPEndpoint{RemoteAddr: *listener.Addr().(*net.TCPAddr)}
+	proxyEndpoint := client.TCPEndpoint{RemoteAddr: *listener.Addr().(*net.TCPAddr)}
 	d, err := NewShadowsocksStreamDialer(proxyEndpoint, cipher)
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
@@ -142,7 +143,7 @@ func TestShadowsocksStreamDialer_TCPPrefix(t *testing.T) {
 	}()
 
 	cipher := makeTestCipher(t)
-	proxyEndpoint := onet.TCPEndpoint{RemoteAddr: *listener.Addr().(*net.TCPAddr)}
+	proxyEndpoint := client.TCPEndpoint{RemoteAddr: *listener.Addr().(*net.TCPAddr)}
 	d, err := NewShadowsocksStreamDialer(proxyEndpoint, cipher)
 	if err != nil {
 		t.Fatalf("Failed to create StreamDialer: %v", err)
@@ -163,7 +164,7 @@ func BenchmarkShadowsocksStreamDialer_Dial(b *testing.B) {
 
 	cipher := makeTestCipher(b)
 	proxy, running := startShadowsocksTCPEchoProxy(cipher, testTargetAddr, b)
-	proxyEndpoint := onet.TCPEndpoint{RemoteAddr: *proxy.Addr().(*net.TCPAddr)}
+	proxyEndpoint := client.TCPEndpoint{RemoteAddr: *proxy.Addr().(*net.TCPAddr)}
 	d, err := NewShadowsocksStreamDialer(proxyEndpoint, cipher)
 	if err != nil {
 		b.Fatalf("Failed to create StreamDialer: %v", err)
@@ -209,7 +210,7 @@ func startShadowsocksTCPEchoProxy(cipher *shadowsocks.Cipher, expectedTgtAddr st
 				defer clientConn.Close()
 				ssr := shadowsocks.NewShadowsocksReader(clientConn, cipher)
 				ssw := shadowsocks.NewShadowsocksWriter(clientConn, cipher)
-				ssClientConn := onet.WrapConn(clientConn, ssr, ssw)
+				ssClientConn := transport.WrapConn(clientConn, ssr, ssw)
 
 				tgtAddr, err := socks.ReadAddr(ssClientConn)
 				if err != nil {

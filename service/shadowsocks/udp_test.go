@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	onet "github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/Jigsaw-Code/outline-ss-server/service/shadowsocks/metrics"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/assert"
@@ -36,11 +36,11 @@ const timeout = 5 * time.Minute
 var clientAddr = net.UDPAddr{IP: []byte{192, 0, 2, 1}, Port: 12345}
 var targetAddr = net.UDPAddr{IP: []byte{192, 0, 2, 2}, Port: 54321}
 var dnsAddr = net.UDPAddr{IP: []byte{192, 0, 2, 3}, Port: 53}
-var natCipher *ss.Cipher
+var natCipher *shadowsocks.Cipher
 
 func init() {
 	logging.SetLevel(logging.INFO, "")
-	natCipher, _ = ss.NewCipher(ss.TestCipher, "test password")
+	natCipher, _ = shadowsocks.NewCipher(shadowsocks.TestCipher, "test password")
 }
 
 type packet struct {
@@ -140,7 +140,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	for _, payload := range payloads {
 		plaintext := append(targetAddr, payload...)
 		ciphertext := make([]byte, cipher.SaltSize()+len(plaintext)+cipher.TagSize())
-		ss.Pack(ciphertext, plaintext, cipher)
+		shadowsocks.Pack(ciphertext, plaintext, cipher)
 		clientConn.recv <- packet{
 			addr: &net.UDPAddr{
 				IP:   net.ParseIP("192.0.2.1"),
@@ -396,11 +396,11 @@ func TestNATTimeout(t *testing.T) {
 
 // Simulates receiving invalid UDP packets on a server with 100 ciphers.
 func BenchmarkUDPUnpackFail(b *testing.B) {
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(100))
+	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(100))
 	if err != nil {
 		b.Fatal(err)
 	}
-	testPayload := ss.MakeTestPayload(50)
+	testPayload := shadowsocks.MakeTestPayload(50)
 	textBuf := make([]byte, serverUDPBufferSize)
 	testIP := net.ParseIP("192.0.2.1")
 	b.ResetTimer()
@@ -413,7 +413,7 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 // their own cipher and IP address.
 func BenchmarkUDPUnpackRepeat(b *testing.B) {
 	const numCiphers = 100 // Must be <256
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(numCiphers))
+	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(numCiphers))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -423,8 +423,8 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	for i, element := range snapshot {
 		packets[i] = make([]byte, 0, serverUDPBufferSize)
-		plaintext := ss.MakeTestPayload(50)
-		packets[i], err = ss.Pack(make([]byte, serverUDPBufferSize), plaintext, element.Value.(*CipherEntry).Cipher)
+		plaintext := shadowsocks.MakeTestPayload(50)
+		packets[i], err = shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, element.Value.(*CipherEntry).Cipher)
 		if err != nil {
 			b.Error(err)
 		}
@@ -445,15 +445,15 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 // Simulates receiving valid UDP packets from 100 different IP addresses,
 // all using the same cipher.
 func BenchmarkUDPUnpackSharedKey(b *testing.B) {
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1)) // One widely shared key
+	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(1)) // One widely shared key
 	if err != nil {
 		b.Fatal(err)
 	}
 	testBuf := make([]byte, serverUDPBufferSize)
-	plaintext := ss.MakeTestPayload(50)
+	plaintext := shadowsocks.MakeTestPayload(50)
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	cipher := snapshot[0].Value.(*CipherEntry).Cipher
-	packet, err := ss.Pack(make([]byte, serverUDPBufferSize), plaintext, cipher)
+	packet, err := shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, cipher)
 	require.Nil(b, err)
 
 	const numIPs = 100 // Must be <256
@@ -472,7 +472,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 }
 
 func TestUDPDoubleServe(t *testing.T) {
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestUDPDoubleServe(t *testing.T) {
 }
 
 func TestUDPEarlyStop(t *testing.T) {
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(1))
 	if err != nil {
 		t.Fatal(err)
 	}

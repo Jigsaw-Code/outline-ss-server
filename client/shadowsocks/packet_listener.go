@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package shadowsocks
 
 import (
 	"context"
@@ -21,9 +21,9 @@ import (
 	"io"
 	"net"
 
+	"github.com/Jigsaw-Code/outline-ss-server/client"
 	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -34,11 +34,11 @@ const clientUDPBufferSize = 16 * 1024
 var udpPool = slicepool.MakePool(clientUDPBufferSize)
 
 type packetListener struct {
-	endpoint onet.PacketEndpoint
+	endpoint client.PacketEndpoint
 	cipher   *shadowsocks.Cipher
 }
 
-func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *shadowsocks.Cipher) (onet.PacketListener, error) {
+func NewShadowsocksPacketListener(endpoint client.PacketEndpoint, cipher *shadowsocks.Cipher) (client.PacketListener, error) {
 	if endpoint == nil {
 		return nil, errors.New("Argument endpoint must not be nil")
 	}

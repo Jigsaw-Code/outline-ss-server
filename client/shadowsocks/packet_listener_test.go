@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package shadowsocks
 
 import (
 	"context"
@@ -22,15 +22,15 @@ import (
 	"testing"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/client"
+	"github.com/Jigsaw-Code/outline-ss-server/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 func TestShadowsocksPacketListener_ListenPacket(t *testing.T) {
 	cipher := makeTestCipher(t)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, t)
-	proxyEndpoint := onet.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
+	proxyEndpoint := client.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
 	d, err := NewShadowsocksPacketListener(proxyEndpoint, cipher)
 	if err != nil {
 		t.Fatalf("Failed to create PacketListener: %v", err)
@@ -54,7 +54,7 @@ func BenchmarkShadowsocksPacketListener_ListenPacket(b *testing.B) {
 
 	cipher := makeTestCipher(b)
 	proxy, running := startShadowsocksUDPEchoServer(cipher, testTargetAddr, b)
-	proxyEndpoint := onet.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
+	proxyEndpoint := client.UDPEndpoint{RemoteAddr: *proxy.LocalAddr().(*net.UDPAddr)}
 	d, err := NewShadowsocksPacketListener(proxyEndpoint, cipher)
 	if err != nil {
 		b.Fatalf("Failed to create PacketListener: %v", err)

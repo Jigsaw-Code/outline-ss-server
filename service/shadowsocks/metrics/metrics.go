@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"github.com/Jigsaw-Code/outline-ss-server/transport"
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -295,7 +295,7 @@ func (m *ProxyMetrics) add(other ProxyMetrics) {
 }
 
 type measuredConn struct {
-	onet.DuplexConn
+	transport.DuplexConn
 	io.WriterTo
 	readCount *int64
 	io.ReaderFrom
@@ -326,7 +326,7 @@ func (c *measuredConn) ReadFrom(r io.Reader) (int64, error) {
 	return n, err
 }
 
-func MeasureConn(conn onet.DuplexConn, bytesSent, bytesReceived *int64) onet.DuplexConn {
+func MeasureConn(conn transport.DuplexConn, bytesSent, bytesReceived *int64) transport.DuplexConn {
 	return &measuredConn{DuplexConn: conn, writeCount: bytesSent, readCount: bytesReceived}
 }
 

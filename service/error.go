@@ -1,4 +1,4 @@
-// Copyright 2022 Jigsaw Operations LLC
+// Copyright 2019 Jigsaw Operations LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package service
 
-import (
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
-	ssclient "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
-)
+type ConnectionError struct {
+	// TODO: create status enums and move to metrics.go
+	Status  string
+	Message string
+	Cause   error
+}
 
-// Deprecated: Prefer github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client.NewPrefixSaltGenerator
-func NewPrefixSaltGenerator(prefix []byte) shadowsocks.SaltGenerator {
-	return ssclient.NewPrefixSaltGenerator(prefix)
+func NewConnectionError(status, message string, cause error) *ConnectionError {
+	return &ConnectionError{Status: status, Message: message, Cause: cause}
 }
