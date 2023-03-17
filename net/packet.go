@@ -27,11 +27,11 @@ type PacketEndpoint interface {
 
 // PacketListener provides a way to create a local unbound packet connection to send packets to different destinations.
 type PacketListener interface {
-	// ListenPacket creates a PacketConn that can be used to relay packets (such as UDP) though some proxy.
+	// ListenPacket creates a PacketConn that can be used to relay packets (such as UDP) through some proxy.
 	ListenPacket(ctx context.Context) (net.PacketConn, error)
 }
 
-// UDPEndpoint is a PacketListener that connects to the given address via UDP
+// UDPEndpoint is a PacketEndpoint that connects to the given address via UDP
 type UDPEndpoint struct {
 	// The Dialer used to create the net.Conn on Connect().
 	Dialer net.Dialer
