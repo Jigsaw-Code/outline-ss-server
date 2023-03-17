@@ -112,3 +112,24 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	streamDialer.SetTCPSaltGenerator(c.salter)
 	return streamDialer.Dial(context.Background(), raddr)
 }
+
+type addr struct {
+	address string
+	network string
+}
+
+func (a *addr) String() string {
+	return a.address
+}
+
+func (a *addr) Network() string {
+	return a.network
+}
+
+// newAddr returns a net.Addr that holds an address of the form `host:port` with a domain name or IP as host.
+// Used for SOCKS addressing.
+//
+// Deprecated: use [net.UDPAddr] or [net.TCPAddr] instead.
+func NewAddr(address, network string) net.Addr {
+	return &addr{address: address, network: network}
+}
