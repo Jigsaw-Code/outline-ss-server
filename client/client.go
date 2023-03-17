@@ -22,12 +22,12 @@ import (
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
-	ss_client "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
+	ssclient "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
 )
 
 // Client is a client for Shadowsocks TCP and UDP connections.
 //
-// Deprecated: Use ss_client.StreamDialer and ss_client.PacketListener instead.
+// Deprecated: Use ssclient.StreamDialer and ssclient.PacketListener instead.
 type Client interface {
 	// DialTCP connects to `raddr` over TCP though a Shadowsocks proxy.
 	// `laddr` is a local bind address, a local address is automatically chosen if nil.
@@ -51,7 +51,7 @@ type Client interface {
 // NewClient creates a client that routes connections to a Shadowsocks proxy listening at
 // `host:port`, with authentication parameters `cipher` (AEAD) and `password`.
 //
-// Deprecated: Use ss_client.StreamDialer and ss_client.PacketListener instead.
+// Deprecated: Use ssclient.StreamDialer and ssclient.PacketListener instead.
 func NewClient(host string, port int, password, cipherName string) (Client, error) {
 	// TODO: consider using net.LookupIP to get a list of IPs, and add logic for optimal selection.
 	proxyIP, err := net.ResolveIPAddr("ip", host)
@@ -87,7 +87,7 @@ func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
 	}
-	packetListener, err := ss_client.NewShadowsocksPacketListener(endpointCopy, c.cipher)
+	packetListener, err := ssclient.NewShadowsocksPacketListener(endpointCopy, c.cipher)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
 	}
@@ -105,7 +105,7 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
 	}
-	streamDialer, err := ss_client.NewShadowsocksStreamDialer(endpointCopy, c.cipher)
+	streamDialer, err := ssclient.NewShadowsocksStreamDialer(endpointCopy, c.cipher)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
 	}
