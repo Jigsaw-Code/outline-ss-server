@@ -68,6 +68,21 @@ func (c *streamDialer) SetTCPSaltGenerator(salter ss.SaltGenerator) {
 // was ~1 ms.)  If no client payload is received by this time, we connect without it.
 const helloWait = 10 * time.Millisecond
 
+// Dial implements StreamDialer.Dial via a Shadowsocks server.
+//
+// The Shadowsocks StreamDialer returns a connection after the connection to the proxy is established,
+// but before the connection to the target is established. That means we cannot signal "connection refused"
+// or "connection timeout" errors from the target to the application.
+//
+// This behavior breaks IPv6 Happy Eyeballs because the application IPv6 socket will connect successfully,
+// even if the proxy fails to connect to the IPv6 destination. The broken Happy Eyeballs behavior makes
+// IPv6 unusable if the proxy cannot use IPv6.
+//
+// We can't easily fix that issue because Shadowsocks, unlike SOCKS, does not have a way to indicate
+// whether the target connection is successful. Even if that was possible, we want to wait until we have
+// initial data from the application in order to send the Shadowsocks salt, SOCKS address and initial data
+// all in one packet. This makes the size of the initial packet hard to predict, avoiding packet size
+// fingerprinting. We can only get the application initial data if we return a connection first.
 func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.DuplexConn, error) {
 	socksTargetAddr := socks.ParseAddr(remoteAddr)
 	if socksTargetAddr == nil {
