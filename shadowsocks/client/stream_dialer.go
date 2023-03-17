@@ -20,7 +20,7 @@ import (
 	"time"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -30,12 +30,12 @@ type StreamDialer interface {
 	// SetTCPSaltGenerator controls the SaltGenerator used for TCP upstream.
 	// `salter` may be `nil`.
 	// This method is not thread-safe.
-	SetTCPSaltGenerator(ss.SaltGenerator)
+	SetTCPSaltGenerator(shadowsocks.SaltGenerator)
 }
 
 // NewShadowsocksStreamDialer creates a client that routes connections to a Shadowsocks proxy listening at
 // the given StreamEndpoint, with `cipher` as the Shadowsocks crypto.
-func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *ss.Cipher) (StreamDialer, error) {
+func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *shadowsocks.Cipher) (StreamDialer, error) {
 	if endpoint == nil {
 		return nil, errors.New("Argument endpoint must not be nil")
 	}
@@ -48,11 +48,11 @@ func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *ss.Cipher)
 
 type streamDialer struct {
 	endpoint onet.StreamEndpoint
-	cipher   *ss.Cipher
-	salter   ss.SaltGenerator
+	cipher   *shadowsocks.Cipher
+	salter   shadowsocks.SaltGenerator
 }
 
-func (c *streamDialer) SetTCPSaltGenerator(salter ss.SaltGenerator) {
+func (c *streamDialer) SetTCPSaltGenerator(salter shadowsocks.SaltGenerator) {
 	c.salter = salter
 }
 
@@ -92,7 +92,7 @@ func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.Duplex
 	if err != nil {
 		return nil, err
 	}
-	ssw := ss.NewShadowsocksWriter(proxyConn, c.cipher)
+	ssw := shadowsocks.NewShadowsocksWriter(proxyConn, c.cipher)
 	if c.salter != nil {
 		ssw.SetSaltGenerator(c.salter)
 	}
@@ -104,6 +104,6 @@ func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.Duplex
 	time.AfterFunc(helloWait, func() {
 		ssw.Flush()
 	})
-	ssr := ss.NewShadowsocksReader(proxyConn, c.cipher)
+	ssr := shadowsocks.NewShadowsocksReader(proxyConn, c.cipher)
 	return onet.WrapConn(proxyConn, ssr, ssw), nil
 }

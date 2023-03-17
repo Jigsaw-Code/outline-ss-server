@@ -23,7 +23,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -35,10 +35,10 @@ var udpPool = slicepool.MakePool(clientUDPBufferSize)
 
 type packetListener struct {
 	endpoint onet.PacketEndpoint
-	cipher   *ss.Cipher
+	cipher   *shadowsocks.Cipher
 }
 
-func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *ss.Cipher) (onet.PacketListener, error) {
+func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *shadowsocks.Cipher) (onet.PacketListener, error) {
 	if endpoint == nil {
 		return nil, errors.New("Argument endpoint must not be nil")
 	}
@@ -59,7 +59,7 @@ func (c *packetListener) ListenPacket(ctx context.Context) (net.PacketConn, erro
 
 type packetConn struct {
 	net.Conn
-	cipher *ss.Cipher
+	cipher *shadowsocks.Cipher
 }
 
 // WriteTo encrypts `b` and writes to `addr` through the proxy.
@@ -76,7 +76,7 @@ func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	// partially overlapping the plaintext and cipher slices since `Pack` skips the salt when calling
 	// `AEAD.Seal` (see https://golang.org/pkg/crypto/cipher/#AEAD).
 	plaintextBuf := append(append(cipherBuf[saltSize:saltSize], socksTargetAddr...), b...)
-	buf, err := ss.Pack(cipherBuf, plaintextBuf, c.cipher)
+	buf, err := shadowsocks.Pack(cipherBuf, plaintextBuf, c.cipher)
 	if err != nil {
 		return 0, err
 	}
@@ -94,7 +94,7 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 		return 0, nil, err
 	}
 	// Decrypt in-place.
-	buf, err := ss.Unpack(nil, cipherBuf[:n], c.cipher)
+	buf, err := shadowsocks.Unpack(nil, cipherBuf[:n], c.cipher)
 	if err != nil {
 		return 0, nil, err
 	}

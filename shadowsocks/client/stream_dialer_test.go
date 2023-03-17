@@ -23,7 +23,7 @@ import (
 	"time"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -40,7 +40,7 @@ func TestShadowsocksStreamDialer_Dial(t *testing.T) {
 		t.Fatalf("StreamDialer.Dial failed: %v", err)
 	}
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-	expectEchoPayload(conn, ss.MakeTestPayload(1024), make([]byte, 1024), t)
+	expectEchoPayload(conn, shadowsocks.MakeTestPayload(1024), make([]byte, 1024), t)
 	conn.Close()
 
 	proxy.Close()
@@ -175,7 +175,7 @@ func BenchmarkShadowsocksStreamDialer_Dial(b *testing.B) {
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 	buf := make([]byte, 1024)
 	for n := 0; n < b.N; n++ {
-		payload := ss.MakeTestPayload(1024)
+		payload := shadowsocks.MakeTestPayload(1024)
 		b.StartTimer()
 		expectEchoPayload(conn, payload, buf, b)
 		b.StopTimer()
@@ -186,7 +186,7 @@ func BenchmarkShadowsocksStreamDialer_Dial(b *testing.B) {
 	running.Wait()
 }
 
-func startShadowsocksTCPEchoProxy(cipher *ss.Cipher, expectedTgtAddr string, t testing.TB) (net.Listener, *sync.WaitGroup) {
+func startShadowsocksTCPEchoProxy(cipher *shadowsocks.Cipher, expectedTgtAddr string, t testing.TB) (net.Listener, *sync.WaitGroup) {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		t.Fatalf("ListenTCP failed: %v", err)
@@ -207,8 +207,8 @@ func startShadowsocksTCPEchoProxy(cipher *ss.Cipher, expectedTgtAddr string, t t
 			go func() {
 				defer running.Done()
 				defer clientConn.Close()
-				ssr := ss.NewShadowsocksReader(clientConn, cipher)
-				ssw := ss.NewShadowsocksWriter(clientConn, cipher)
+				ssr := shadowsocks.NewShadowsocksReader(clientConn, cipher)
+				ssw := shadowsocks.NewShadowsocksWriter(clientConn, cipher)
 				ssClientConn := onet.WrapConn(clientConn, ssr, ssw)
 
 				tgtAddr, err := socks.ReadAddr(ssClientConn)

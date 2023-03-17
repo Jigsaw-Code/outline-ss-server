@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Deprecated: Use the StreamDialer and PacketListener types under github.com/Jigsaw-Code/outline-ss-server/net instead.
 package client
 
 import (
@@ -21,7 +22,6 @@ import (
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	ss_client "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
 )
 
@@ -45,7 +45,7 @@ type Client interface {
 	// SetTCPSaltGenerator controls the SaltGenerator used for TCP upstream.
 	// `salter` may be `nil`.
 	// This method is not thread-safe.
-	SetTCPSaltGenerator(ss.SaltGenerator)
+	SetTCPSaltGenerator(shadowsocks.SaltGenerator)
 }
 
 // NewClient creates a client that routes connections to a Shadowsocks proxy listening at
@@ -61,7 +61,7 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	udpEndpoint := onet.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: proxyIP.IP, Port: port}}
 	tcpEndpoint := onet.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
 
-	cipher, err := ss.NewCipher(cipherName, password)
+	cipher, err := shadowsocks.NewCipher(cipherName, password)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create Shadowsocks cipher: %w", err)
 	}
@@ -77,7 +77,7 @@ type ssClient struct {
 	cipher      *shadowsocks.Cipher
 	udpEndpoint onet.UDPEndpoint
 	tcpEndpoint onet.TCPEndpoint
-	salter      ss.SaltGenerator
+	salter      shadowsocks.SaltGenerator
 }
 
 // ListenUDP implements the Client.ListenUDP API.
@@ -94,7 +94,7 @@ func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
 	return packetListener.ListenPacket(context.Background())
 }
 
-func (c *ssClient) SetTCPSaltGenerator(salter ss.SaltGenerator) {
+func (c *ssClient) SetTCPSaltGenerator(salter shadowsocks.SaltGenerator) {
 	c.salter = salter
 }
 

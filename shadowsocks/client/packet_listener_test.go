@@ -23,7 +23,7 @@ import (
 	"time"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -42,7 +42,7 @@ func TestShadowsocksPacketListener_ListenPacket(t *testing.T) {
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 	pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: newAddr(testTargetAddr, "udp")}
-	expectEchoPayload(pcrw, ss.MakeTestPayload(1024), make([]byte, 1024), t)
+	expectEchoPayload(pcrw, shadowsocks.MakeTestPayload(1024), make([]byte, 1024), t)
 
 	proxy.Close()
 	running.Wait()
@@ -67,7 +67,7 @@ func BenchmarkShadowsocksPacketListener_ListenPacket(b *testing.B) {
 	conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 	buf := make([]byte, clientUDPBufferSize)
 	for n := 0; n < b.N; n++ {
-		payload := ss.MakeTestPayload(1024)
+		payload := shadowsocks.MakeTestPayload(1024)
 		pcrw := &packetConnReadWriter{PacketConn: conn, targetAddr: newAddr(testTargetAddr, "udp")}
 		b.StartTimer()
 		expectEchoPayload(pcrw, payload, buf, b)
@@ -78,7 +78,7 @@ func BenchmarkShadowsocksPacketListener_ListenPacket(b *testing.B) {
 	running.Wait()
 }
 
-func startShadowsocksUDPEchoServer(cipher *ss.Cipher, expectedTgtAddr string, t testing.TB) (net.Conn, *sync.WaitGroup) {
+func startShadowsocksUDPEchoServer(cipher *shadowsocks.Cipher, expectedTgtAddr string, t testing.TB) (net.Conn, *sync.WaitGroup) {
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		t.Fatalf("Proxy ListenUDP failed: %v", err)
@@ -97,7 +97,7 @@ func startShadowsocksUDPEchoServer(cipher *ss.Cipher, expectedTgtAddr string, t 
 				t.Logf("Failed to read from UDP conn: %v", err)
 				return
 			}
-			buf, err := ss.Unpack(clientBuf, cipherBuf[:n], cipher)
+			buf, err := shadowsocks.Unpack(clientBuf, cipherBuf[:n], cipher)
 			if err != nil {
 				t.Fatalf("Failed to decrypt: %v", err)
 			}
@@ -109,7 +109,7 @@ func startShadowsocksUDPEchoServer(cipher *ss.Cipher, expectedTgtAddr string, t 
 				t.Fatalf("Expected target address '%v'. Got '%v'", expectedTgtAddr, tgtAddr)
 			}
 			// Echo both the payload and SOCKS address.
-			buf, err = ss.Pack(cipherBuf, buf, cipher)
+			buf, err = shadowsocks.Pack(cipherBuf, buf, cipher)
 			if err != nil {
 				t.Fatalf("Failed to encrypt: %v", err)
 			}

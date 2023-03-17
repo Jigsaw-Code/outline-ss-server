@@ -17,11 +17,11 @@ package client
 import (
 	"testing"
 
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 )
 
 // setRandomBitsToOne replaces any random bits in the output with 1.
-func setRandomBitsToOne(salter ss.SaltGenerator, output []byte) error {
+func setRandomBitsToOne(salter shadowsocks.SaltGenerator, output []byte) error {
 	salt := make([]byte, len(output))
 	// OR together 128 salts.  The probability that any random bit is
 	// 0 for all 128 random salts is 2^-128, which is close enough to zero.

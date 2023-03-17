@@ -18,7 +18,7 @@ import (
 	"crypto/rand"
 	"errors"
 
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 )
 
 type prefixSaltGenerator struct {
@@ -45,6 +45,6 @@ func (g prefixSaltGenerator) GetSalt(salt []byte) error {
 // not only decrypt the ciphertext of those two connections; they can also
 // easily recover the shadowsocks key and decrypt all other connections to
 // this server.  Use with care!
-func NewPrefixSaltGenerator(prefix []byte) ss.SaltGenerator {
+func NewPrefixSaltGenerator(prefix []byte) shadowsocks.SaltGenerator {
 	return prefixSaltGenerator{prefix}
 }

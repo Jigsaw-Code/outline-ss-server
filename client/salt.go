@@ -15,11 +15,11 @@
 package client
 
 import (
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	ss_client "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
 )
 
 // Deprecated: Prefer github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client.NewPrefixSaltGenerator
-func NewPrefixSaltGenerator(prefix []byte) ss.SaltGenerator {
+func NewPrefixSaltGenerator(prefix []byte) shadowsocks.SaltGenerator {
 	return ss_client.NewPrefixSaltGenerator(prefix)
 }
