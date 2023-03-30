@@ -15,8 +15,8 @@
 package client
 
 import (
-	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
-	ssclient "github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client"
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	ssclient "github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks/client"
 )
 
 // Deprecated: Prefer github.com/Jigsaw-Code/outline-ss-server/shadowsocks/client.NewPrefixSaltGenerator
