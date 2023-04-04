@@ -147,17 +147,16 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 
 			// An upstream packet should have been read.  Set up the metrics reporting
 			// for this forwarding event.
-			clientLocation := ""
+			var clientLocation metrics.CountryCode
 			keyID := ""
 			var proxyTargetBytes int
-			var timeToCipher time.Duration
 			defer func() {
 				status := "OK"
 				if connError != nil {
 					logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
 					status = connError.Status
 				}
-				s.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes, timeToCipher)
+				s.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes)
 			}()
 
 			if err != nil {
@@ -185,7 +184,8 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 				var cipher *ss.Cipher
 				unpackStart := time.Now()
 				textData, keyID, cipher, err = findAccessKeyUDP(ip, textBuf, cipherData, s.ciphers)
-				timeToCipher = time.Now().Sub(unpackStart)
+				timeToCipher := time.Now().Sub(unpackStart)
+				s.m.AddUDPCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
@@ -206,7 +206,9 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 
 				unpackStart := time.Now()
 				textData, err := ss.Unpack(nil, cipherData, targetConn.cipher)
-				timeToCipher = time.Now().Sub(unpackStart)
+				timeToCipher := time.Now().Sub(unpackStart)
+				s.m.AddUDPCipherSearch(err == nil, timeToCipher)
+
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
 				}
@@ -279,7 +281,7 @@ type natconn struct {
 	keyID  string
 	// We store the client location in the NAT map to avoid recomputing it
 	// for every downstream packet in a UDP-based connection.
-	clientLocation string
+	clientLocation metrics.CountryCode
 	// NAT timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
 	// Current read deadline of PacketConn.  Used to avoid decreasing the
@@ -357,7 +359,7 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cipher *ss.Cipher, keyID, clientLocation string) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, cipher *ss.Cipher, keyID string, clientLocation metrics.CountryCode) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		cipher:         cipher,
@@ -385,7 +387,7 @@ func (m *natmap) del(key string) net.PacketConn {
 	return nil
 }
 
-func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cipher *ss.Cipher, targetConn net.PacketConn, clientLocation, keyID string) *natconn {
+func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cipher *ss.Cipher, targetConn net.PacketConn, clientLocation metrics.CountryCode, keyID string) *natconn {
 	entry := m.set(clientAddr.String(), targetConn, cipher, keyID, clientLocation)
 
 	m.metrics.AddUDPNatEntry()

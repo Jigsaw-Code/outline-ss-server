@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
@@ -207,121 +208,125 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 					logger.Errorf("Panic in TCP handler: %v", r)
 				}
 			}()
-			s.handleConnection(listener.Addr().(*net.TCPAddr).Port, clientTCPConn)
+
+			clientTCPConn.SetKeepAlive(true)
+			clientLocation, err := s.m.GetLocation(clientTCPConn.RemoteAddr())
+			if err != nil {
+				logger.Warningf("Failed location lookup: %v", err)
+			}
+			logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientTCPConn.RemoteAddr().String())
+			s.m.AddOpenTCPConnection(clientLocation)
+			var proxyMetrics metrics.ProxyMetrics
+			clientConn := metrics.MeasureConn(clientTCPConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
+			connStart := time.Now()
+
+			id, connError := s.handleConnection(listener.Addr().(*net.TCPAddr).Port, clientConn, &proxyMetrics)
+
+			connDuration := time.Now().Sub(connStart)
+			status := "OK"
+			if connError != nil {
+				status = connError.Status
+				logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
+			}
+			s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
+			clientConn.Close() // Closing after the metrics are added aids integration testing.
+			logger.Debugf("Done with status %v, duration %v", status, connDuration)
 		}()
 	}
 }
 
-func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPConn) {
-	clientLocation, err := s.m.GetLocation(clientTCPConn.RemoteAddr())
-	if err != nil {
-		logger.Warningf("Failed location lookup: %v", err)
-	}
-	logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientTCPConn.RemoteAddr().String())
-	s.m.AddOpenTCPConnection(clientLocation)
-
-	connStart := time.Now()
-	clientTCPConn.SetKeepAlive(true)
+func (s *tcpService) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
-	clientTCPConn.SetReadDeadline(connStart.Add(s.readTimeout))
-	var proxyMetrics metrics.ProxyMetrics
-	clientConn := metrics.MeasureConn(clientTCPConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
-	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientTCPConn), s.ciphers)
+	clientConn.SetReadDeadline(time.Now().Add(s.readTimeout))
 
-	connError := func() *onet.ConnectionError {
-		if keyErr != nil {
-			logger.Debugf("Failed to find a valid cipher after reading %v bytes: %v", proxyMetrics.ClientProxy, keyErr)
-			const status = "ERR_CIPHER"
-			s.absorbProbe(listenerPort, clientConn, clientLocation, status, &proxyMetrics)
-			return onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
-		}
-
-		isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
-		// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
-		if isServerSalt || !s.replayCache.Add(cipherEntry.ID, clientSalt) {
-			var status string
-			if isServerSalt {
-				status = "ERR_REPLAY_SERVER"
-			} else {
-				status = "ERR_REPLAY_CLIENT"
-			}
-			s.absorbProbe(listenerPort, clientConn, clientLocation, status, &proxyMetrics)
-			logger.Debugf(status+": %v in %s sent %d bytes", clientTCPConn.RemoteAddr(), clientLocation, proxyMetrics.ClientProxy)
-			return onet.NewConnectionError(status, "Replay detected", nil)
-		}
-
-		ssr := ss.NewShadowsocksReader(clientReader, cipherEntry.Cipher)
-		tgtAddr, err := socks.ReadAddr(ssr)
-		// Clear the deadline for the target address
-		clientTCPConn.SetReadDeadline(time.Time{})
-		if err != nil {
-			// Drain to prevent a close on cipher error.
-			io.Copy(ioutil.Discard, clientConn)
-			return onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
-		}
-
-		tgtConn, dialErr := dialTarget(tgtAddr, &proxyMetrics, s.targetIPValidator)
-		if dialErr != nil {
-			// We don't drain so dial errors and invalid addresses are communicated quickly.
-			return dialErr
-		}
-		defer tgtConn.Close()
-
-		logger.Debugf("proxy %s <-> %s", clientTCPConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
-		ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
-		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
-
-		fromClientErrCh := make(chan error)
-		go func() {
-			_, fromClientErr := ssr.WriteTo(tgtConn)
-			if fromClientErr != nil {
-				// Drain to prevent a close in the case of a cipher error.
-				io.Copy(ioutil.Discard, clientConn)
-			}
-			clientConn.CloseRead()
-			// Send FIN to target.
-			// We must do this after the drain is completed, otherwise the target will close its
-			// connection with the proxy, which will, in turn, close the connection with the client.
-			tgtConn.CloseWrite()
-			fromClientErrCh <- fromClientErr
-		}()
-		_, fromTargetErr := ssw.ReadFrom(tgtConn)
-		// Send FIN to client.
-		clientConn.CloseWrite()
-		tgtConn.CloseRead()
-
-		fromClientErr := <-fromClientErrCh
-		if fromClientErr != nil {
-			return onet.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
-		}
-		if fromTargetErr != nil {
-			return onet.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
-		}
-		return nil
-	}()
-
-	connDuration := time.Now().Sub(connStart)
-	status := "OK"
-	if connError != nil {
-		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
-		status = connError.Status
+	// 1. Find the cipher and acess key id.
+	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), s.ciphers)
+	s.m.AddTCPCipherSearch(keyErr == nil, timeToCipher)
+	if keyErr != nil {
+		logger.Debugf("Failed to find a valid cipher after reading %v bytes: %v", proxyMetrics.ClientProxy, keyErr)
+		const status = "ERR_CIPHER"
+		s.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
+		return "", onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
 	}
 	var id string
 	if cipherEntry != nil {
 		id = cipherEntry.ID
 	}
-	s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, timeToCipher, connDuration)
-	clientConn.Close() // Closing after the metrics are added aids integration testing.
-	logger.Debugf("Done with status %v, duration %v", status, connDuration)
+
+	// 2. Check if the connection is a replay.
+	isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
+	// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
+	if isServerSalt || !s.replayCache.Add(cipherEntry.ID, clientSalt) {
+		var status string
+		if isServerSalt {
+			status = "ERR_REPLAY_SERVER"
+		} else {
+			status = "ERR_REPLAY_CLIENT"
+		}
+		s.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
+		logger.Debugf(status+": %v sent %d bytes", clientConn.RemoteAddr(), proxyMetrics.ClientProxy)
+		return id, onet.NewConnectionError(status, "Replay detected", nil)
+	}
+
+	// 3. Read target address and dial it.
+	ssr := ss.NewShadowsocksReader(clientReader, cipherEntry.Cipher)
+	tgtAddr, err := socks.ReadAddr(ssr)
+	// Clear the deadline for the target address
+	clientConn.SetReadDeadline(time.Time{})
+	if err != nil {
+		// Drain to prevent a close on cipher error.
+		io.Copy(ioutil.Discard, clientConn)
+		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
+	}
+	tgtConn, dialErr := dialTarget(tgtAddr, proxyMetrics, s.targetIPValidator)
+	if dialErr != nil {
+		// We don't drain so dial errors and invalid addresses are communicated quickly.
+		return id, dialErr
+	}
+	defer tgtConn.Close()
+
+	// 4. Bridge the client and target connections
+	logger.Debugf("proxy %s <-> %s", clientConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
+	ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
+	ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
+
+	fromClientErrCh := make(chan error)
+	go func() {
+		_, fromClientErr := ssr.WriteTo(tgtConn)
+		if fromClientErr != nil {
+			// Drain to prevent a close in the case of a cipher error.
+			io.Copy(ioutil.Discard, clientConn)
+		}
+		clientConn.CloseRead()
+		// Send FIN to target.
+		// We must do this after the drain is completed, otherwise the target will close its
+		// connection with the proxy, which will, in turn, close the connection with the client.
+		tgtConn.CloseWrite()
+		fromClientErrCh <- fromClientErr
+	}()
+	_, fromTargetErr := ssw.ReadFrom(tgtConn)
+	// Send FIN to client.
+	clientConn.CloseWrite()
+	tgtConn.CloseRead()
+
+	fromClientErr := <-fromClientErrCh
+	if fromClientErr != nil {
+		return id, onet.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
+	}
+	if fromTargetErr != nil {
+		return id, onet.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
+	}
+	return id, nil
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (s *tcpService) absorbProbe(listenerPort int, clientConn io.ReadCloser, clientLocation, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (s *tcpService) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
+	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(ioutil.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	s.m.AddTCPProbe(status, drainResult, listenerPort, *proxyMetrics)
+	s.m.AddTCPProbe(status, drainResult, listenerPort, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {

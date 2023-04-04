@@ -92,7 +92,8 @@ func (conn *fakePacketConn) Close() error {
 }
 
 type udpReport struct {
-	clientLocation, accessKey, status  string
+	clientLocation                     metrics.CountryCode
+	accessKey, status                  string
 	clientProxyBytes, proxyTargetBytes int
 }
 
@@ -103,26 +104,28 @@ type natTestMetrics struct {
 	upstreamPackets []udpReport
 }
 
-func (m *natTestMetrics) AddTCPProbe(status, drainResult string, port int, data metrics.ProxyMetrics) {
+func (m *natTestMetrics) AddClosedTCPConnection(clientLocation metrics.CountryCode, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
-func (m *natTestMetrics) AddClosedTCPConnection(clientLocation, accessKey, status string, data metrics.ProxyMetrics, timeToCipher, duration time.Duration) {
-}
-func (m *natTestMetrics) GetLocation(net.Addr) (string, error) {
+func (m *natTestMetrics) GetLocation(net.Addr) (metrics.CountryCode, error) {
 	return "", nil
 }
 func (m *natTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
 }
-func (m *natTestMetrics) AddOpenTCPConnection(clientLocation string) {
+func (m *natTestMetrics) AddOpenTCPConnection(clientLocation metrics.CountryCode) {
 }
-func (m *natTestMetrics) AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration) {
+func (m *natTestMetrics) AddUDPPacketFromClient(clientLocation metrics.CountryCode, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientLocation, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *natTestMetrics) AddUDPPacketFromTarget(clientLocation, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *natTestMetrics) AddUDPPacketFromTarget(clientLocation metrics.CountryCode, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *natTestMetrics) AddUDPNatEntry() {
 	m.natEntriesAdded++
 }
 func (m *natTestMetrics) RemoveUDPNatEntry() {}
+func (m *natTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+}
+func (m *natTestMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
+func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
