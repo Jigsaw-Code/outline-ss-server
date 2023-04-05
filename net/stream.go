@@ -15,87 +15,12 @@
 package net
 
 import (
-	"context"
 	"io"
-	"net"
+
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 )
 
-// DuplexConn is a net.Conn that allows for closing only the reader or writer end of
-// it, supporting half-open state.
-type DuplexConn interface {
-	net.Conn
-	// Closes the Read end of the connection, allowing for the release of resources.
-	// No more reads should happen.
-	CloseRead() error
-	// Closes the Write end of the connection. An EOF or FIN signal may be
-	// sent to the connection target.
-	CloseWrite() error
-}
-
-// StreamEndpoint represents an endpoint that can be used to established stream connections (like TCP)
-type StreamEndpoint interface {
-	// Connect establishes a connection with the endpoint, returning the connection.
-	Connect(ctx context.Context) (DuplexConn, error)
-}
-
-// StreamDialer provides a way to establish stream connections to a destination.
-type StreamDialer interface {
-	// Dial connects to `raddr`.
-	// `raddr` has the form `host:port`, where `host` can be a domain name or IP address.
-	Dial(ctx context.Context, raddr string) (DuplexConn, error)
-}
-
-// TCPEndpoint is a StreamEndpoint that connects to the given address via TCP
-type TCPEndpoint struct {
-	// The Dialer used to create the connection on Connect().
-	Dialer net.Dialer
-	// The remote address to pass to DialTCP.
-	RemoteAddr net.TCPAddr
-}
-
-func (e TCPEndpoint) Connect(ctx context.Context) (DuplexConn, error) {
-	conn, err := e.Dialer.DialContext(ctx, "tcp", e.RemoteAddr.String())
-	if err != nil {
-		return nil, err
-	}
-	return conn.(*net.TCPConn), nil
-}
-
-type duplexConnAdaptor struct {
-	DuplexConn
-	r io.Reader
-	w io.Writer
-}
-
-func (dc *duplexConnAdaptor) Read(b []byte) (int, error) {
-	return dc.r.Read(b)
-}
-func (dc *duplexConnAdaptor) WriteTo(w io.Writer) (int64, error) {
-	return io.Copy(w, dc.r)
-}
-func (dc *duplexConnAdaptor) CloseRead() error {
-	return dc.DuplexConn.CloseRead()
-}
-func (dc *duplexConnAdaptor) Write(b []byte) (int, error) {
-	return dc.w.Write(b)
-}
-func (dc *duplexConnAdaptor) ReadFrom(r io.Reader) (int64, error) {
-	return io.Copy(dc.w, r)
-}
-func (dc *duplexConnAdaptor) CloseWrite() error {
-	return dc.DuplexConn.CloseWrite()
-}
-
-// WrapDuplexConn wraps an existing DuplexConn with new Reader and Writer, but
-// preserving the original CloseRead() and CloseWrite().
-func WrapConn(c DuplexConn, r io.Reader, w io.Writer) DuplexConn {
-	conn := c
-	// We special-case duplexConnAdaptor to avoid multiple levels of nesting.
-	if a, ok := c.(*duplexConnAdaptor); ok {
-		conn = a.DuplexConn
-	}
-	return &duplexConnAdaptor{DuplexConn: conn, r: r, w: w}
-}
+type DuplexConn = transport.StreamConn
 
 func copyOneWay(leftConn, rightConn DuplexConn) (int64, error) {
 	n, err := io.Copy(leftConn, rightConn)
