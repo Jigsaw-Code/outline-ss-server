@@ -56,14 +56,14 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	// TODO: consider using net.LookupIP to get a list of IPs, and add logic for optimal selection.
 	proxyIP, err := net.ResolveIPAddr("ip", host)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to resolve proxy address: %w", err)
+		return nil, fmt.Errorf("failed to resolve proxy address: %w", err)
 	}
 	udpEndpoint := onet.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: proxyIP.IP, Port: port}}
 	tcpEndpoint := onet.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
 
 	cipher, err := shadowsocks.NewCipher(cipherName, password)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create Shadowsocks cipher: %w", err)
+		return nil, fmt.Errorf("failed to create Shadowsocks cipher: %w", err)
 	}
 
 	return &ssClient{
@@ -89,7 +89,7 @@ func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
 	}
 	packetListener, err := ssclient.NewShadowsocksPacketListener(endpointCopy, c.cipher)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
+		return nil, fmt.Errorf("failed to create PacketListener: %w", err)
 	}
 	return packetListener.ListenPacket(context.Background())
 }
@@ -107,7 +107,7 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	}
 	streamDialer, err := ssclient.NewShadowsocksStreamDialer(endpointCopy, c.cipher)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
+		return nil, fmt.Errorf("failed to create StreamDialer: %w", err)
 	}
 	streamDialer.SetTCPSaltGenerator(c.salter)
 	return streamDialer.Dial(context.Background(), raddr)

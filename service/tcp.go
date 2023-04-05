@@ -68,7 +68,7 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
 	firstBytes := make([]byte, bytesForKeyFinding)
 	if n, err := io.ReadFull(clientReader, firstBytes); err != nil {
-		return nil, clientReader, nil, 0, fmt.Errorf("Reading header failed after %d bytes: %v", n, err)
+		return nil, clientReader, nil, 0, fmt.Errorf("reading header failed after %d bytes: %w", n, err)
 	}
 
 	findStartTime := time.Now()
@@ -76,7 +76,7 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 	timeToCipher := time.Now().Sub(findStartTime)
 	if entry == nil {
 		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
-		return nil, clientReader, nil, timeToCipher, fmt.Errorf("Could not find valid TCP cipher")
+		return nil, clientReader, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
 	}
 
 	// Move the active cipher to the front, so that the search is quicker next time.
@@ -175,7 +175,7 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 	if s.listener != nil {
 		s.mu.Unlock()
 		listener.Close()
-		return errors.New("Serve can only be called once")
+		return errors.New("Serve called twice. It must be called only once")
 	}
 	if s.stopped {
 		s.mu.Unlock()
@@ -195,7 +195,7 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 			if stopped {
 				return nil
 			}
-			logger.Errorf("Accept failed: %v", err)
+			logger.Warningf("AcceptTCP failed: %v. Continuing.", err)
 			continue
 		}
 
@@ -204,7 +204,7 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 			defer s.running.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("Panic in TCP handler: %v", r)
+					logger.Warningf("Panic in TCP handler: %v. Continuing.", r)
 				}
 			}()
 			s.handleConnection(listener.Addr().(*net.TCPAddr).Port, clientTCPConn)
@@ -312,7 +312,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientTCPConn *net.TCPCo
 	}
 	s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, timeToCipher, connDuration)
 	clientConn.Close() // Closing after the metrics are added aids integration testing.
-	logger.Debugf("Done with status %v, duration %v", status, connDuration)
+	logger.Debugf("Done with connection: status %v, duration %v", status, connDuration)
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks

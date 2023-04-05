@@ -65,7 +65,7 @@ func encryptBlocks(cipher *Cipher, salt []byte, blocks [][]byte) (io.Reader, err
 	var ssText bytes.Buffer
 	aead, err := cipher.NewAEAD(salt)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create AEAD: %v", err)
+		return nil, fmt.Errorf("failed to create AEAD: %w", err)
 	}
 	ssText.Write(salt)
 	// buf must fit the larges block ciphertext

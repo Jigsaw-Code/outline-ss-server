@@ -40,10 +40,10 @@ type packetListener struct {
 
 func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *shadowsocks.Cipher) (onet.PacketListener, error) {
 	if endpoint == nil {
-		return nil, errors.New("Argument endpoint must not be nil")
+		return nil, errors.New("endpoint must not be nil")
 	}
 	if cipher == nil {
-		return nil, errors.New("Argument cipher must not be nil")
+		return nil, errors.New("cipher must not be nil")
 	}
 	return &packetListener{endpoint: endpoint, cipher: cipher}, nil
 }
@@ -51,7 +51,7 @@ func NewShadowsocksPacketListener(endpoint onet.PacketEndpoint, cipher *shadowso
 func (c *packetListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	proxyConn, err := c.endpoint.Connect(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Could not connect to endpoint: %x", err)
+		return nil, fmt.Errorf("could not connect to endpoint: %w", err)
 	}
 	conn := packetConn{Conn: proxyConn, cipher: c.cipher}
 	return &conn, nil
@@ -66,7 +66,7 @@ type packetConn struct {
 func (c *packetConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	socksTargetAddr := socks.ParseAddr(addr.String())
 	if socksTargetAddr == nil {
-		return 0, errors.New("Failed to parse target address")
+		return 0, fmt.Errorf("failed to parse target address \"%v\"", addr)
 	}
 	lazySlice := udpPool.LazySlice()
 	cipherBuf := lazySlice.Acquire()
@@ -100,7 +100,7 @@ func (c *packetConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	}
 	socksSrcAddr := socks.SplitAddr(buf)
 	if socksSrcAddr == nil {
-		return 0, nil, errors.New("Failed to read source address")
+		return 0, nil, fmt.Errorf("failed to read source address")
 	}
 	srcAddr := newAddr(socksSrcAddr.String(), "udp")
 	n = copy(b, buf[len(socksSrcAddr):]) // Strip the SOCKS source address

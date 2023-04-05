@@ -192,11 +192,11 @@ func (m *shadowsocksMetrics) GetLocation(addr net.Addr) (string, error) {
 	}
 	hostname, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
-		return errParseAddr, errors.New("Failed to split hostname and port")
+		return errParseAddr, fmt.Errorf("failed to split hostname and port: %w", err)
 	}
 	ip := net.ParseIP(hostname)
 	if ip == nil {
-		return errParseAddr, errors.New("Failed to parse address as IP")
+		return errParseAddr, errors.New("failed to parse address as IP")
 	}
 	if ip.IsLoopback() {
 		return localLocation, nil
@@ -206,7 +206,7 @@ func (m *shadowsocksMetrics) GetLocation(addr net.Addr) (string, error) {
 	}
 	record, err := m.ipCountryDB.Country(ip)
 	if err != nil {
-		return errDbLookupError, errors.New("IP lookup failed")
+		return errDbLookupError, fmt.Errorf("IP lookup failed: %w", err)
 	}
 	if record == nil {
 		return unknownLocation, errors.New("IP lookup returned nil")

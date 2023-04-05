@@ -81,7 +81,7 @@ func NewServerSaltGenerator(secret string) ServerSaltGenerator {
 func (sg serverSaltGenerator) splitSalt(salt []byte) (prefix, mark []byte, err error) {
 	prefixLen := len(salt) - serverSaltMarkLen
 	if prefixLen < 0 {
-		return nil, nil, fmt.Errorf("Salt is too short: %d < %d", len(salt), serverSaltMarkLen)
+		return nil, nil, fmt.Errorf("salt is too short: %d < %d", len(salt), serverSaltMarkLen)
 	}
 	return salt[:prefixLen], salt[prefixLen:], nil
 }

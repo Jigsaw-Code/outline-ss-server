@@ -76,11 +76,11 @@ func (conn *fakePacketConn) WriteTo(payload []byte, addr net.Addr) (int, error) 
 func (conn *fakePacketConn) ReadFrom(buffer []byte) (int, net.Addr, error) {
 	pkt, ok := <-conn.recv
 	if !ok {
-		return 0, nil, errors.New("Receive closed")
+		return 0, nil, errors.New("receive closed")
 	}
 	n := copy(buffer, pkt.payload)
 	if n < len(pkt.payload) {
-		return n, pkt.addr, errors.New("Buffer was too short")
+		return n, pkt.addr, errors.New("buffer was too short")
 	}
 	return n, pkt.addr, pkt.err
 }

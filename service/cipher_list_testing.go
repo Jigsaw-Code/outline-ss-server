@@ -29,7 +29,7 @@ func MakeTestCiphers(secrets []string) (CipherList, error) {
 		cipherID := fmt.Sprintf("id-%v", i)
 		cipher, err := ss.NewCipher(ss.TestCipher, secrets[i])
 		if err != nil {
-			return nil, fmt.Errorf("Failed to create cipher %v: %v", i, err)
+			return nil, fmt.Errorf("failed to create cipher %v: %w", i, err)
 		}
 		entry := MakeCipherEntry(cipherID, cipher, secrets[i])
 		l.PushBack(&entry)

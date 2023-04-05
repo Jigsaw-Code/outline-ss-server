@@ -266,13 +266,13 @@ func probe(serverAddr *net.TCPAddr, bytesToSend []byte) error {
 
 	n, err := conn.Write(bytesToSend)
 	if err != nil || n != len(bytesToSend) {
-		return fmt.Errorf("Write failed. bytes written: %v, err: %v", n, err)
+		return fmt.Errorf("Write failed. bytes written: %v, err: %w", n, err)
 	}
 	conn.CloseWrite()
 
 	nRead, err := conn.Read(make([]byte, 1))
 	if err != io.EOF || nRead != 0 {
-		return fmt.Errorf("Read not EOF. bytes read: %v, err: %v", nRead, err)
+		return fmt.Errorf("Read not EOF. bytes read: %v, err: %w", nRead, err)
 	}
 	return nil
 }

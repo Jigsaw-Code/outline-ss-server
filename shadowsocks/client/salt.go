@@ -16,7 +16,7 @@ package client
 
 import (
 	"crypto/rand"
-	"errors"
+	"fmt"
 
 	"github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 )
@@ -28,7 +28,7 @@ type prefixSaltGenerator struct {
 func (g prefixSaltGenerator) GetSalt(salt []byte) error {
 	n := copy(salt, g.prefix)
 	if n != len(g.prefix) {
-		return errors.New("prefix is too long")
+		return fmt.Errorf("prefix (%v bytes) is longer than the salt (%v bytes). Specify a shorter prefix", len(g.prefix), len(salt))
 	}
 	_, err := rand.Read(salt[n:])
 	return err

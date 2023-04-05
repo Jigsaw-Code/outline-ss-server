@@ -67,7 +67,7 @@ func getAEADSpec(name string) (*aeadSpec, error) {
 			return &aeadSpec, nil
 		}
 	}
-	return nil, fmt.Errorf("Unknown cipher %v", name)
+	return nil, fmt.Errorf("unknown cipher %v", name)
 }
 
 func newAesGCM(key []byte) (cipher.AEAD, error) {

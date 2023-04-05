@@ -37,10 +37,10 @@ type StreamDialer interface {
 // the given StreamEndpoint, with `cipher` as the Shadowsocks crypto.
 func NewShadowsocksStreamDialer(endpoint onet.StreamEndpoint, cipher *shadowsocks.Cipher) (StreamDialer, error) {
 	if endpoint == nil {
-		return nil, errors.New("Argument endpoint must not be nil")
+		return nil, errors.New("argument endpoint must not be nil")
 	}
 	if cipher == nil {
-		return nil, errors.New("Argument cipher must not be nil")
+		return nil, errors.New("argument cipher must not be nil")
 	}
 	d := streamDialer{endpoint: endpoint, cipher: cipher}
 	return &d, nil
@@ -86,7 +86,7 @@ const helloWait = 10 * time.Millisecond
 func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.DuplexConn, error) {
 	socksTargetAddr := socks.ParseAddr(remoteAddr)
 	if socksTargetAddr == nil {
-		return nil, errors.New("Failed to parse target address")
+		return nil, errors.New("failed to parse target address")
 	}
 	proxyConn, err := c.endpoint.Connect(ctx)
 	if err != nil {
@@ -99,7 +99,7 @@ func (c *streamDialer) Dial(ctx context.Context, remoteAddr string) (onet.Duplex
 	_, err = ssw.LazyWrite(socksTargetAddr)
 	if err != nil {
 		proxyConn.Close()
-		return nil, errors.New("Failed to write target address")
+		return nil, errors.New("failed to write target address")
 	}
 	time.AfterFunc(helloWait, func() {
 		ssw.Flush()
