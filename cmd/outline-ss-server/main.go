@@ -177,7 +177,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 	}
 	err := server.loadConfig(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config file %v: %w", filename, err)
+		return nil, fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 	sigHup := make(chan os.Signal, 1)
 	signal.Notify(sigHup, syscall.SIGHUP)
@@ -185,7 +185,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 		for range sigHup {
 			logger.Infof("SIGHUP received. Loading config from %v", filename)
 			if err := server.loadConfig(filename); err != nil {
-				logger.Errorf("failed to load config file %v: %w", filename, err)
+				logger.Errorf("failed to load config (%v): %w", filename, err)
 			}
 		}
 	}()
@@ -250,7 +250,7 @@ func main() {
 	if flags.MetricsAddr != "" {
 		http.Handle("/metrics", promhttp.Handler())
 		go func() {
-			logger.Fatal(http.ListenAndServe(flags.MetricsAddr, nil))
+			logger.Fatalf("Failed to run metrics server: %v. Aborting.", http.ListenAndServe(flags.MetricsAddr, nil))
 		}()
 		logger.Infof("Prometheus metrics available at http://%v/metrics", flags.MetricsAddr)
 	}
