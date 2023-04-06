@@ -108,7 +108,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 	if s.clientConn != nil {
 		s.mu.Unlock()
 		clientConn.Close()
-		return errors.New("Serve called twice. It must be called only once")
+		return errors.New("Serve called again. It must be called only once")
 	}
 	if s.stopped {
 		s.mu.Unlock()
@@ -129,7 +129,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 		func() (connError *onet.ConnectionError) {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("Panic in UDP loop: %v. Continuing.", r)
+					logger.Errorf("Panic in UDP loop: %v. Continuing to listen.", r)
 					debug.PrintStack()
 				}
 			}()

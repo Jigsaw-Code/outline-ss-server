@@ -176,7 +176,7 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 	if s.listener != nil {
 		s.mu.Unlock()
 		listener.Close()
-		return errors.New("Serve called twice. It must be called only once")
+		return errors.New("Serve called again. It must be called only once")
 	}
 	if s.stopped {
 		s.mu.Unlock()
@@ -196,7 +196,7 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 			if stopped {
 				return nil
 			}
-			logger.Warningf("AcceptTCP failed: %v. Continuing.", err)
+			logger.Warningf("AcceptTCP failed: %v. Continuing to listen.", err)
 			continue
 		}
 
@@ -205,7 +205,7 @@ func (s *tcpService) Serve(listener *net.TCPListener) error {
 			defer s.running.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Warningf("Panic in TCP handler: %v. Continuing.", r)
+					logger.Warningf("Panic in TCP handler: %v. Continuing to listen.", r)
 				}
 			}()
 
