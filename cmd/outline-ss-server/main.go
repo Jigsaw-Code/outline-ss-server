@@ -116,7 +116,7 @@ func (s *SSServer) removePort(portNum int) error {
 func (s *SSServer) loadConfig(filename string) error {
 	config, err := readConfig(filename)
 	if err != nil {
-		return fmt.Errorf("failed to read config file %v: %w", filename, err)
+		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 
 	portChanges := make(map[int]int)
@@ -145,7 +145,7 @@ func (s *SSServer) loadConfig(filename string) error {
 			}
 		} else if count == +1 {
 			if err := s.startPort(portNum); err != nil {
-				return fmt.Errorf("failed to start port %v: %w", portNum, err)
+				return err
 			}
 		}
 	}
@@ -177,7 +177,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 	}
 	err := server.loadConfig(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config (%v): %w", filename, err)
+		return nil, fmt.Errorf("failed configure server: %w", err)
 	}
 	sigHup := make(chan os.Signal, 1)
 	signal.Notify(sigHup, syscall.SIGHUP)
@@ -185,7 +185,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 		for range sigHup {
 			logger.Infof("SIGHUP received. Loading config from %v", filename)
 			if err := server.loadConfig(filename); err != nil {
-				logger.Errorf("failed to update config (%v): %w", filename, err)
+				logger.Errorf("failed to update server: %w. Server state may be invalid. Fix the error and try the update again", filename, err)
 			}
 		}
 	}()
@@ -205,10 +205,13 @@ func readConfig(filename string) (*Config, error) {
 	config := Config{}
 	configData, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 	err = yaml.Unmarshal(configData, &config)
-	return &config, err
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+	return &config, nil
 }
 
 func main() {
