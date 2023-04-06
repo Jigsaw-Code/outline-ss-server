@@ -17,14 +17,17 @@ func TestMethodsDontPanic(t *testing.T) {
 		TargetProxy: 3,
 		ProxyClient: 4,
 	}
+	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
 	ssMetrics.AddOpenTCPConnection("US")
-	ssMetrics.AddClosedTCPConnection("US", "1", "OK", proxyMetrics, 10*time.Millisecond, 100*time.Millisecond)
-	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics)
-	ssMetrics.AddUDPPacketFromClient("US", "2", "OK", 10, 20, 10*time.Millisecond)
+	ssMetrics.AddClosedTCPConnection("US", "1", "OK", proxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddUDPPacketFromClient("US", "2", "OK", 10, 20)
 	ssMetrics.AddUDPPacketFromTarget("US", "3", "OK", 10, 20)
 	ssMetrics.AddUDPNatEntry()
 	ssMetrics.RemoveUDPNatEntry()
+	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
+	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
+	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
 }
 
 func BenchmarkGetLocation(b *testing.B) {
@@ -59,7 +62,7 @@ func BenchmarkOpenTCP(b *testing.B) {
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientLocation := "ZZ"
+	clientLocation := CountryCode("ZZ")
 	accessKey := "key 1"
 	status := "OK"
 	data := ProxyMetrics{}
@@ -67,7 +70,8 @@ func BenchmarkCloseTCP(b *testing.B) {
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddClosedTCPConnection(clientLocation, accessKey, status, data, timeToCipher, duration)
+		ssMetrics.AddClosedTCPConnection(clientLocation, accessKey, status, data, duration)
+		ssMetrics.AddTCPCipherSearch(true, timeToCipher)
 	}
 }
 
@@ -79,26 +83,27 @@ func BenchmarkProbe(b *testing.B) {
 	data := ProxyMetrics{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddTCPProbe(status, drainResult, port, data)
+		ssMetrics.AddTCPProbe(status, drainResult, port, data.ClientProxy)
 	}
 }
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientLocation := "ZZ"
+	clientLocation := CountryCode("ZZ")
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
 	timeToCipher := time.Microsecond
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPPacketFromClient(clientLocation, accessKey, status, size, size, timeToCipher)
+		ssMetrics.AddUDPPacketFromClient(clientLocation, accessKey, status, size, size)
+		ssMetrics.AddUDPCipherSearch(true, timeToCipher)
 	}
 }
 
 func BenchmarkTargetUDP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientLocation := "ZZ"
+	clientLocation := CountryCode("ZZ")
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000

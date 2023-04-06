@@ -219,36 +219,40 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 type probeTestMetrics struct {
 	metrics.ShadowsocksMetrics
 	mu          sync.Mutex
-	probeData   []metrics.ProxyMetrics
+	probeData   []int64
 	probeStatus []string
 	closeStatus []string
 }
 
-func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, data metrics.ProxyMetrics) {
-	m.mu.Lock()
-	m.probeData = append(m.probeData, data)
-	m.probeStatus = append(m.probeStatus, status)
-	m.mu.Unlock()
-}
-func (m *probeTestMetrics) AddClosedTCPConnection(clientLocation, accessKey, status string, data metrics.ProxyMetrics, timeToCipher, duration time.Duration) {
+func (m *probeTestMetrics) AddClosedTCPConnection(clientLocation metrics.CountryCode, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()
 }
 
-func (m *probeTestMetrics) GetLocation(net.Addr) (string, error) {
+func (m *probeTestMetrics) GetLocation(net.Addr) (metrics.CountryCode, error) {
 	return "", nil
 }
 func (m *probeTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
 }
-func (m *probeTestMetrics) AddOpenTCPConnection(clientLocation string) {
+func (m *probeTestMetrics) AddOpenTCPConnection(clientLocation metrics.CountryCode) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration) {
+func (m *probeTestMetrics) AddUDPPacketFromClient(clientLocation metrics.CountryCode, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromTarget(clientLocation, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *probeTestMetrics) AddUDPPacketFromTarget(clientLocation metrics.CountryCode, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *probeTestMetrics) AddUDPNatEntry()    {}
 func (m *probeTestMetrics) RemoveUDPNatEntry() {}
+
+func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+	m.mu.Lock()
+	m.probeData = append(m.probeData, clientProxyBytes)
+	m.probeStatus = append(m.probeStatus, status)
+	m.mu.Unlock()
+}
+
+func (m *probeTestMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
+func (m *probeTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 func (m *probeTestMetrics) countStatuses() map[string]int {
 	counts := make(map[string]int)
@@ -522,9 +526,9 @@ func TestReplayDefense(t *testing.T) {
 	s.GracefulStop()
 
 	if len(testMetrics.probeData) == 1 {
-		data := testMetrics.probeData[0]
-		if data.ClientProxy != int64(len(preamble)) {
-			t.Errorf("Unexpected probe data: %v", data)
+		clientProxyData := testMetrics.probeData[0]
+		if clientProxyData != int64(len(preamble)) {
+			t.Errorf("Unexpected probe data: %v", clientProxyData)
 		}
 		status := testMetrics.probeStatus[0]
 		if status != "ERR_REPLAY_CLIENT" {
@@ -579,9 +583,9 @@ func TestReverseReplayDefense(t *testing.T) {
 
 	// The preamble should have been marked as a server replay.
 	if len(testMetrics.probeData) == 1 {
-		data := testMetrics.probeData[0]
-		if data.ClientProxy != int64(len(preamble)) {
-			t.Errorf("Unexpected probe data: %v", data)
+		clientProxyData := testMetrics.probeData[0]
+		if clientProxyData != int64(len(preamble)) {
+			t.Errorf("Unexpected probe data: %v", clientProxyData)
 		}
 		status := testMetrics.probeStatus[0]
 		if status != "ERR_REPLAY_SERVER" {
@@ -647,9 +651,9 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 	s.GracefulStop()
 
 	if len(testMetrics.probeData) == 1 {
-		data := testMetrics.probeData[0]
-		if data.ClientProxy != int64(payloadSize) {
-			t.Errorf("Unexpected probe data: %v, expected %d", data, payloadSize)
+		clientProxyData := testMetrics.probeData[0]
+		if clientProxyData != int64(payloadSize) {
+			t.Errorf("Unexpected probe data: %v, expected %d", clientProxyData, payloadSize)
 		}
 	} else {
 		t.Error("Bad handshake should have triggered probe detection")

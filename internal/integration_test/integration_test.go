@@ -170,7 +170,7 @@ type statusMetrics struct {
 	statuses []string
 }
 
-func (m *statusMetrics) AddClosedTCPConnection(clientLocation, accessKey, status string, data metrics.ProxyMetrics, timeToCipher, duration time.Duration) {
+func (m *statusMetrics) AddClosedTCPConnection(clientLocation metrics.CountryCode, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.Lock()
 	m.statuses = append(m.statuses, status)
 	m.Unlock()
@@ -225,25 +225,26 @@ func TestRestrictedAddresses(t *testing.T) {
 
 // Metrics about one UDP packet.
 type udpRecord struct {
-	location, accessKey, status string
-	in, out                     int
+	location          metrics.CountryCode
+	accessKey, status string
+	in, out           int
 }
 
 // Fake metrics implementation for UDP
 type fakeUDPMetrics struct {
 	metrics.ShadowsocksMetrics
-	fakeLocation string
+	fakeLocation metrics.CountryCode
 	up, down     []udpRecord
 	natAdded     int
 }
 
-func (m *fakeUDPMetrics) GetLocation(addr net.Addr) (string, error) {
+func (m *fakeUDPMetrics) GetLocation(addr net.Addr) (metrics.CountryCode, error) {
 	return m.fakeLocation, nil
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientLocation, accessKey, status string, clientProxyBytes, proxyTargetBytes int, timeToCipher time.Duration) {
+func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientLocation metrics.CountryCode, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.up = append(m.up, udpRecord{clientLocation, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientLocation, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientLocation metrics.CountryCode, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 	m.down = append(m.down, udpRecord{clientLocation, accessKey, status, targetProxyBytes, proxyClientBytes})
 }
 func (m *fakeUDPMetrics) AddUDPNatEntry() {
@@ -252,6 +253,7 @@ func (m *fakeUDPMetrics) AddUDPNatEntry() {
 func (m *fakeUDPMetrics) RemoveUDPNatEntry() {
 	// Not tested because it requires waiting for a long timeout.
 }
+func (m *fakeUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 func TestUDPEcho(t *testing.T) {
 	echoConn, echoRunning := startUDPEchoServer(t)

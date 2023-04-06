@@ -39,4 +39,4 @@ jobs:
       run: go build -v ./...
 
     - name: Test
-      run: go test -v -race -bench=. ./... -benchtime=100ms
+      run: go test -v -race -benchmem -bench=. ./... -benchtime=100ms

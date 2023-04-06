@@ -11,7 +11,7 @@ release-local:
 	$(GORELEASER) --rm-dist --snapshot
 
 test: third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb
-	go test -v -race -bench=. ./... -benchtime=100ms
+	go test -v -race -benchmem -bench=. ./... -benchtime=100ms
 
 third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb:
 	git submodule update --init --depth=1
