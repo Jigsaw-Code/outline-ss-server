@@ -17,7 +17,7 @@ func TestMethodsDontPanic(t *testing.T) {
 		TargetProxy: 3,
 		ProxyClient: 4,
 	}
-	ssMetrics.SetBuildInfo("0.0.0-debug")
+	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
 	ssMetrics.AddOpenTCPConnection("US")
 	ssMetrics.AddClosedTCPConnection("US", "1", "OK", proxyMetrics, 10*time.Millisecond)
