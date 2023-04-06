@@ -185,7 +185,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm metrics.Shadowsoc
 		for range sigHup {
 			logger.Infof("SIGHUP received. Loading config from %v", filename)
 			if err := server.loadConfig(filename); err != nil {
-				logger.Errorf("failed to update server: %w. Server state may be invalid. Fix the error and try the update again", filename, err)
+				logger.Errorf("failed to update server: %v. Server state may be invalid. Fix the error and try the update again", err)
 			}
 		}
 	}()
