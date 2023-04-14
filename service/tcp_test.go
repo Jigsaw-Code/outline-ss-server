@@ -713,6 +713,15 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 	}
 }
 
+func TestStreamServeEarlyClose(t *testing.T) {
+	tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	require.Nil(t, err)
+	err = tcpListener.Close()
+	require.Nil(t, err)
+	// This should return quickly, without timing out or calling the handler.
+	StreamServe(WrapStreamListener(tcpListener.AcceptTCP), nil)
+}
+
 // Makes sure the TCP listener returns [io.ErrClosed] on Close().
 func TestClosedTCPListenerError(t *testing.T) {
 	tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
