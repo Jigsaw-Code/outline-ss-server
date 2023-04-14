@@ -17,6 +17,7 @@ package service
 import (
 	"bytes"
 	"container/list"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -109,13 +110,10 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 	return nil, nil
 }
 
-type tcpService struct {
-	mu          sync.RWMutex // Protects .listeners and .stopped
-	listener    *net.TCPListener
-	stopped     bool
+type tcpHandler struct {
+	port        int
 	ciphers     CipherList
 	m           metrics.ShadowsocksMetrics
-	running     sync.WaitGroup
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 	replayCache       *ReplayCache
@@ -124,29 +122,25 @@ type tcpService struct {
 
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-func NewTCPService(ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPService {
-	return &tcpService{
+func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPHandler {
+	return (&tcpHandler{
+		port:              port,
 		ciphers:           ciphers,
 		m:                 m,
 		readTimeout:       timeout,
 		replayCache:       replayCache,
 		targetIPValidator: onet.RequirePublicIP,
-	}
+	})
 }
 
 // TCPService is a Shadowsocks TCP service that can be started and stopped.
-type TCPService interface {
+type TCPHandler interface {
+	Handle(ctx context.Context, conn transport.StreamConn)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
-	// Serve adopts the listener, which will be closed before Serve returns.  Serve returns an error unless Stop() was called.
-	Serve(listener *net.TCPListener) error
-	// Stop closes the listener but does not interfere with existing connections.
-	Stop() error
-	// GracefulStop calls Stop(), and then blocks until all resources have been cleaned up.
-	GracefulStop() error
 }
 
-func (s *tcpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
+func (s *tcpHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
 	s.targetIPValidator = targetIPValidator
 }
 
@@ -171,71 +165,73 @@ func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIP
 	return metrics.MeasureConn(tgtTCPConn, &proxyMetrics.ProxyTarget, &proxyMetrics.TargetProxy), nil
 }
 
-func (s *tcpService) Serve(listener *net.TCPListener) error {
-	s.mu.Lock()
-	if s.listener != nil {
-		s.mu.Unlock()
-		listener.Close()
-		return errors.New("Serve called again. It must be called only once")
-	}
-	if s.stopped {
-		s.mu.Unlock()
-		return listener.Close()
-	}
-	s.listener = listener
-	s.running.Add(1)
-	s.mu.Unlock()
+type StreamListener func() (transport.StreamConn, error)
 
-	defer s.running.Done()
+func WrapStreamListener[T transport.StreamConn](f func() (T, error)) StreamListener {
+	return func() (transport.StreamConn, error) {
+		return f()
+	}
+}
+
+type StreamHandler func(ctx context.Context, conn transport.StreamConn)
+
+// StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
+// accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
+// via their [context.Context]. StreamServe will return after all pending handlers return.
+func StreamServe(accept StreamListener, handle StreamHandler) {
+	var running sync.WaitGroup
+	defer running.Wait()
+	ctx, contextCancel := context.WithCancel(context.Background())
+	defer contextCancel()
 	for {
-		clientTCPConn, err := listener.AcceptTCP()
+		clientConn, err := accept()
 		if err != nil {
-			s.mu.RLock()
-			stopped := s.stopped
-			s.mu.RUnlock()
-			if stopped {
-				return nil
+			if errors.Is(err, net.ErrClosed) {
+				break
 			}
 			logger.Warningf("AcceptTCP failed: %v. Continuing to listen.", err)
 			continue
 		}
 
-		s.running.Add(1)
+		running.Add(1)
 		go func() {
-			defer s.running.Done()
+			defer running.Done()
+			defer clientConn.Close()
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Warningf("Panic in TCP handler: %v. Continuing to listen.", r)
 				}
 			}()
-
-			clientTCPConn.SetKeepAlive(true)
-			clientLocation, err := s.m.GetLocation(clientTCPConn.RemoteAddr())
-			if err != nil {
-				logger.Warningf("Failed location lookup: %v", err)
-			}
-			logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientTCPConn.RemoteAddr().String())
-			s.m.AddOpenTCPConnection(clientLocation)
-			var proxyMetrics metrics.ProxyMetrics
-			clientConn := metrics.MeasureConn(clientTCPConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
-			connStart := time.Now()
-
-			id, connError := s.handleConnection(listener.Addr().(*net.TCPAddr).Port, clientConn, &proxyMetrics)
-
-			connDuration := time.Now().Sub(connStart)
-			status := "OK"
-			if connError != nil {
-				status = connError.Status
-				logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
-			}
-			s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
-			clientConn.Close() // Closing after the metrics are added aids integration testing.
-			logger.Debugf("Done with status %v, duration %v", status, connDuration)
+			handle(ctx, clientConn)
 		}()
 	}
 }
 
-func (s *tcpService) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (s *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
+	clientLocation, err := s.m.GetLocation(clientConn.RemoteAddr())
+	if err != nil {
+		logger.Warningf("Failed location lookup: %v", err)
+	}
+	logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientConn.RemoteAddr().String())
+	s.m.AddOpenTCPConnection(clientLocation)
+	var proxyMetrics metrics.ProxyMetrics
+	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
+	connStart := time.Now()
+
+	id, connError := s.handleConnection(s.port, measuredClientConn, &proxyMetrics)
+
+	connDuration := time.Now().Sub(connStart)
+	status := "OK"
+	if connError != nil {
+		status = connError.Status
+		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
+	}
+	s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
+	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
+	logger.Debugf("Done with status %v, duration %v", status, connDuration)
+}
+
+func (s *tcpHandler) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
 	clientConn.SetReadDeadline(time.Now().Add(s.readTimeout))
 
@@ -321,7 +317,7 @@ func (s *tcpService) handleConnection(listenerPort int, clientConn transport.Str
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (s *tcpService) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (s *tcpHandler) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(ioutil.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
@@ -339,20 +335,4 @@ func drainErrToString(drainErr error) string {
 	default:
 		return "other"
 	}
-}
-
-func (s *tcpService) Stop() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stopped = true
-	if s.listener == nil {
-		return nil
-	}
-	return s.listener.Close()
-}
-
-func (s *tcpService) GracefulStop() error {
-	err := s.Stop()
-	s.running.Wait()
-	return err
 }

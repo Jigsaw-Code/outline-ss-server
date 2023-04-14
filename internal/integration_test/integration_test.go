@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 	"github.com/Jigsaw-Code/outline-ss-server/client"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
@@ -111,9 +112,13 @@ func TestTCPEcho(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
-	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
-	proxy.SetTargetIPValidator(allowAll)
-	go proxy.Serve(proxyListener)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
+	handler.SetTargetIPValidator(allowAll)
+	done := make(chan struct{})
+	go func() {
+		service.StreamServe(func() (transport.StreamConn, error) { return proxyListener.AcceptTCP() }, handler.Handle)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyListener.Addr().String())
 	if err != nil {
@@ -159,7 +164,8 @@ func TestTCPEcho(t *testing.T) {
 	}
 
 	conn.Close()
-	proxy.Stop()
+	proxyListener.Close()
+	<-done
 	echoListener.Close()
 	echoRunning.Wait()
 }
@@ -184,8 +190,12 @@ func TestRestrictedAddresses(t *testing.T) {
 	require.NoError(t, err)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
-	proxy := service.NewTCPService(cipherList, nil, testMetrics, testTimeout)
-	go proxy.Serve(proxyListener)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, nil, testMetrics, testTimeout)
+	done := make(chan struct{})
+	go func() {
+		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyListener.Addr().String())
 	require.NoError(t, err)
@@ -219,7 +229,8 @@ func TestRestrictedAddresses(t *testing.T) {
 		conn.Close()
 	}
 
-	proxy.GracefulStop()
+	proxyListener.Close()
+	<-done
 	assert.ElementsMatch(t, testMetrics.statuses, expectedStatus)
 }
 
@@ -365,9 +376,13 @@ func BenchmarkTCPThroughput(b *testing.B) {
 		b.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	proxy := service.NewTCPService(cipherList, nil, &metrics.NoOpMetrics{}, testTimeout)
-	proxy.SetTargetIPValidator(allowAll)
-	go proxy.Serve(proxyListener)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, nil, &metrics.NoOpMetrics{}, testTimeout)
+	handler.SetTargetIPValidator(allowAll)
+	done := make(chan struct{})
+	go func() {
+		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyListener.Addr().String())
 	if err != nil {
@@ -392,13 +407,13 @@ func BenchmarkTCPThroughput(b *testing.B) {
 
 	start := time.Now()
 	b.ResetTimer()
-	var running sync.WaitGroup
-	running.Add(1)
+	var clientRunning sync.WaitGroup
+	clientRunning.Add(1)
 	go func() {
 		for i := 0; i < b.N; i++ {
 			conn.Write(up)
 		}
-		running.Done()
+		clientRunning.Done()
 	}()
 
 	for i := 0; i < b.N; i++ {
@@ -411,9 +426,10 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	b.ReportMetric(megabits/elapsed.Seconds(), "mbps")
 
 	conn.Close()
-	proxy.Stop()
+	proxyListener.Close()
+	<-done
 	echoListener.Close()
-	running.Wait()
+	clientRunning.Wait()
 	echoRunning.Wait()
 }
 
@@ -432,9 +448,13 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
-	proxy := service.NewTCPService(cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
-	proxy.SetTargetIPValidator(allowAll)
-	go proxy.Serve(proxyListener)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
+	handler.SetTargetIPValidator(allowAll)
+	done := make(chan struct{})
+	go func() {
+		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyListener.Addr().String())
 	if err != nil {
@@ -492,7 +512,8 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	wg.Wait()
 
-	proxy.Stop()
+	proxyListener.Close()
+	<-done
 	echoListener.Close()
 	echoRunning.Wait()
 }

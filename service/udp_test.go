@@ -528,3 +528,18 @@ func TestUDPEarlyStop(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// Makes sure the UDP listener returns [io.ErrClosed] on reads and writes after Close().
+func TestClosedUDPListenerError(t *testing.T) {
+	var packetConn net.PacketConn
+	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	require.Nil(t, err)
+	err = packetConn.Close()
+	require.Nil(t, err)
+
+	_, _, err = packetConn.ReadFrom(nil)
+	require.ErrorIs(t, err, net.ErrClosed)
+
+	_, err = packetConn.WriteTo(nil, &net.UDPAddr{})
+	require.ErrorIs(t, err, net.ErrClosed)
+}

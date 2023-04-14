@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
@@ -61,9 +62,9 @@ func init() {
 }
 
 type ssPort struct {
-	tcpService service.TCPService
-	udpService service.UDPService
-	cipherList service.CipherList
+	tcpListener *net.TCPListener
+	udpService  service.UDPService
+	cipherList  service.CipherList
 }
 
 type SSServer struct {
@@ -84,12 +85,19 @@ func (s *SSServer) startPort(portNum int) error {
 		return fmt.Errorf("Shadowsocks UDP service failed to start on port %v: %w", portNum, err)
 	}
 	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
-	port := &ssPort{cipherList: service.NewCipherList()}
+	port := &ssPort{tcpListener: listener, cipherList: service.NewCipherList()}
 	// TODO: Register initial data metrics at zero.
-	port.tcpService = service.NewTCPService(port.cipherList, &s.replayCache, s.m, tcpReadTimeout)
+	tcpHandler := service.NewTCPHandler(portNum, port.cipherList, &s.replayCache, s.m, tcpReadTimeout)
 	port.udpService = service.NewUDPService(s.natTimeout, port.cipherList, s.m)
 	s.ports[portNum] = port
-	go port.tcpService.Serve(listener)
+	accept := func() (transport.StreamConn, error) {
+		conn, err := listener.AcceptTCP()
+		if err == nil {
+			conn.SetKeepAlive(true)
+		}
+		return conn, err
+	}
+	go service.StreamServe(accept, tcpHandler.Handle)
 	go port.udpService.Serve(packetConn)
 	return nil
 }
@@ -99,7 +107,7 @@ func (s *SSServer) removePort(portNum int) error {
 	if !ok {
 		return fmt.Errorf("port %v doesn't exist", portNum)
 	}
-	tcpErr := port.tcpService.Stop()
+	tcpErr := port.tcpListener.Close()
 	udpErr := port.udpService.Stop()
 	delete(s.ports, portNum)
 	if tcpErr != nil {
