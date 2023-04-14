@@ -279,9 +279,13 @@ func TestUDPEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	testMetrics := &fakeUDPMetrics{fakeLocation: "QQ"}
-	proxy := service.NewUDPService(time.Hour, cipherList, testMetrics)
+	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics)
 	proxy.SetTargetIPValidator(allowAll)
-	go proxy.Serve(proxyConn)
+	done := make(chan struct{})
+	go func() {
+		proxy.Handle(proxyConn)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyConn.LocalAddr().String())
 	if err != nil {
@@ -329,7 +333,8 @@ func TestUDPEcho(t *testing.T) {
 	conn.Close()
 	echoConn.Close()
 	echoRunning.Wait()
-	proxy.GracefulStop()
+	proxyConn.Close()
+	<-done
 	// Verify that the expected metrics were reported.
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	keyID := snapshot[0].Value.(*service.CipherEntry).ID
@@ -530,9 +535,13 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewUDPService(time.Hour, cipherList, &metrics.NoOpMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &metrics.NoOpMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
-	go proxy.Serve(proxyConn)
+	done := make(chan struct{})
+	go func() {
+		proxy.Handle(proxyConn)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyConn.LocalAddr().String())
 	if err != nil {
@@ -561,7 +570,8 @@ func BenchmarkUDPEcho(b *testing.B) {
 	b.StopTimer()
 
 	conn.Close()
-	proxy.Stop()
+	require.Nil(b, proxyConn.Close())
+	<-done
 	echoConn.Close()
 	echoRunning.Wait()
 }
@@ -579,9 +589,13 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewUDPService(time.Hour, cipherList, &metrics.NoOpMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &metrics.NoOpMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
-	go proxy.Serve(proxyConn)
+	done := make(chan struct{})
+	go func() {
+		proxy.Handle(proxyConn)
+		done <- struct{}{}
+	}()
 
 	proxyHost, proxyPort, err := net.SplitHostPort(proxyConn.LocalAddr().String())
 	if err != nil {
@@ -612,7 +626,8 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 		conn.ReadFrom(buf)
 	}
 	b.StopTimer()
-	proxy.Stop()
+	require.Nil(b, proxyConn.Close())
+	<-done
 	echoConn.Close()
 	echoRunning.Wait()
 }

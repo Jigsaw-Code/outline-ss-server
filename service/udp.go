@@ -69,64 +69,51 @@ func findAccessKeyUDP(clientIP net.IP, dst, src []byte, cipherList CipherList) (
 	return nil, "", nil, errors.New("could not find valid cipher")
 }
 
-type udpService struct {
-	mu                sync.RWMutex // Protects .clientConn and .stopped
-	clientConn        net.PacketConn
-	stopped           bool
+type packetHandler struct {
 	natTimeout        time.Duration
 	ciphers           CipherList
 	m                 metrics.ShadowsocksMetrics
-	running           sync.WaitGroup
 	targetIPValidator onet.TargetIPValidator
 }
 
-// NewUDPService creates a UDPService
-func NewUDPService(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics) UDPService {
-	return &udpService{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
+// NewPacketHandler creates a UDPService
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics) PacketHandler {
+	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
 }
 
-// UDPService is a running UDP shadowsocks proxy that can be stopped.
-type UDPService interface {
+// PacketHandler is a running UDP shadowsocks proxy that can be stopped.
+type PacketHandler interface {
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
-	// Serve adopts the clientConn, and will not return until it is closed by Stop().
-	Serve(clientConn net.PacketConn) error
-	// Stop closes the clientConn and prevents further forwarding of packets.
-	Stop() error
-	// GracefulStop calls Stop(), and then blocks until all resources have been cleaned up.
-	GracefulStop() error
+	// Handle returns after clientConn closes and all the sub goroutines return.
+	Handle(clientConn net.PacketConn)
 }
 
-func (s *udpService) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
+func (s *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
 	s.targetIPValidator = targetIPValidator
 }
 
 // Listen on addr for encrypted packets and basically do UDP NAT.
 // We take the ciphers as a pointer because it gets replaced on config updates.
-func (s *udpService) Serve(clientConn net.PacketConn) error {
-	s.mu.Lock()
-	if s.clientConn != nil {
-		s.mu.Unlock()
-		clientConn.Close()
-		return errors.New("Serve called again. It must be called only once")
-	}
-	if s.stopped {
-		s.mu.Unlock()
-		return clientConn.Close()
-	}
-	s.clientConn = clientConn
-	s.running.Add(1)
-	s.mu.Unlock()
-	defer s.running.Done()
+func (s *packetHandler) Handle(clientConn net.PacketConn) {
+	var running sync.WaitGroup
 
-	nm := newNATmap(s.natTimeout, s.m, &s.running)
+	nm := newNATmap(s.natTimeout, s.m, &running)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
 
-	stopped := false
-	for !stopped {
-		func() (connError *onet.ConnectionError) {
+	for {
+		clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
+		if errors.Is(err, net.ErrClosed) {
+			break
+		}
+
+		var clientLocation metrics.CountryCode
+		keyID := ""
+		var proxyTargetBytes int
+
+		connError := func() (connError *onet.ConnectionError) {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Errorf("Panic in UDP loop: %v. Continuing to listen.", r)
@@ -134,31 +121,7 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 				}
 			}()
 
-			// Attempt to read an upstream packet.
-			clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
-			if err != nil {
-				s.mu.RLock()
-				stopped = s.stopped
-				s.mu.RUnlock()
-				if stopped {
-					return nil
-				}
-			}
-
-			// An upstream packet should have been read.  Set up the metrics reporting
-			// for this forwarding event.
-			var clientLocation metrics.CountryCode
-			keyID := ""
-			var proxyTargetBytes int
-			defer func() {
-				status := "OK"
-				if connError != nil {
-					logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
-					status = connError.Status
-				}
-				s.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes)
-			}()
-
+			// Error from ReadFrom
 			if err != nil {
 				return onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
 			}
@@ -229,14 +192,20 @@ func (s *udpService) Serve(clientConn net.PacketConn) error {
 			}
 			return nil
 		}()
+
+		status := "OK"
+		if connError != nil {
+			logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
+			status = connError.Status
+		}
+		s.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes)
 	}
-	return nil
 }
 
 // Given the decrypted contents of a UDP packet, return
 // the payload and the destination address, or an error if
 // this packet cannot or should not be forwarded.
-func (s *udpService) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+func (s *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
@@ -252,22 +221,6 @@ func (s *udpService) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *one
 
 	payload := textData[len(tgtAddr):]
 	return payload, tgtUDPAddr, nil
-}
-
-func (s *udpService) Stop() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stopped = true
-	if s.clientConn == nil {
-		return nil
-	}
-	return s.clientConn.Close()
-}
-
-func (s *udpService) GracefulStop() error {
-	err := s.Stop()
-	s.running.Wait()
-	return err
 }
 
 func isDNS(addr net.Addr) bool {

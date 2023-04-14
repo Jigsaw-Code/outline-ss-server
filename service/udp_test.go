@@ -76,7 +76,7 @@ func (conn *fakePacketConn) WriteTo(payload []byte, addr net.Addr) (int, error) 
 func (conn *fakePacketConn) ReadFrom(buffer []byte) (int, net.Addr, error) {
 	pkt, ok := <-conn.recv
 	if !ok {
-		return 0, nil, errors.New("receive closed")
+		return 0, nil, net.ErrClosed
 	}
 	n := copy(buffer, pkt.payload)
 	if n < len(pkt.payload) {
@@ -134,9 +134,13 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(nil)[0].Value.(*CipherEntry).Cipher
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	service := NewUDPService(timeout, ciphers, metrics)
-	service.SetTargetIPValidator(validator)
-	go service.Serve(clientConn)
+	handler := NewPacketHandler(timeout, ciphers, metrics)
+	handler.SetTargetIPValidator(validator)
+	done := make(chan struct{})
+	go func() {
+		handler.Handle(clientConn)
+		done <- struct{}{}
+	}()
 
 	// Send one packet to the "discard" port on localhost
 	targetAddr := socks.ParseAddr("127.0.0.1:9")
@@ -153,7 +157,8 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 		}
 	}
 
-	service.GracefulStop()
+	clientConn.Close()
+	<-done
 	return metrics
 }
 
@@ -474,59 +479,22 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	}
 }
 
-func TestUDPDoubleServe(t *testing.T) {
+func TestUDPEarlyClose(t *testing.T) {
 	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewUDPService(testTimeout, cipherList, testMetrics)
+	s := NewPacketHandler(testTimeout, cipherList, testMetrics)
 
-	c := make(chan error)
-	for i := 0; i < 2; i++ {
-		clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-		if err != nil {
-			t.Fatalf("ListenUDP failed: %v", err)
-		}
-		go func() {
-			err := s.Serve(clientConn)
-			if err != nil {
-				c <- err
-				close(c)
-			}
-		}()
-	}
-
-	err = <-c
-	if err == nil {
-		t.Error("Expected an error from one of the two Serve calls")
-	}
-
-	if err := s.Stop(); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestUDPEarlyStop(t *testing.T) {
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	testMetrics := &natTestMetrics{}
-	const testTimeout = 200 * time.Millisecond
-	s := NewUDPService(testTimeout, cipherList, testMetrics)
-
-	if err := s.Stop(); err != nil {
-		t.Error(err)
-	}
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		t.Fatalf("ListenUDP failed: %v", err)
 	}
-	if err := s.Serve(clientConn); err != nil {
-		t.Error(err)
-	}
+	require.Nil(t, clientConn.Close())
+	// This should return quickly without timing out.
+	s.Handle(clientConn)
 }
 
 // Makes sure the UDP listener returns [io.ErrClosed] on reads and writes after Close().
