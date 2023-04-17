@@ -123,14 +123,14 @@ type tcpHandler struct {
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPHandler {
-	return (&tcpHandler{
+	return &tcpHandler{
 		port:              port,
 		ciphers:           ciphers,
 		m:                 m,
 		readTimeout:       timeout,
 		replayCache:       replayCache,
 		targetIPValidator: onet.RequirePublicIP,
-	})
+	}
 }
 
 // TCPService is a Shadowsocks TCP service that can be started and stopped.
@@ -144,7 +144,7 @@ func (s *tcpHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidat
 	s.targetIPValidator = targetIPValidator
 }
 
-func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (onet.DuplexConn, *onet.ConnectionError) {
+func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (transport.StreamConn, *onet.ConnectionError) {
 	var ipError *onet.ConnectionError
 	dialer := net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)
@@ -207,18 +207,18 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 	}
 }
 
-func (s *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientLocation, err := s.m.GetLocation(clientConn.RemoteAddr())
+func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
+	clientLocation, err := h.m.GetLocation(clientConn.RemoteAddr())
 	if err != nil {
 		logger.Warningf("Failed location lookup: %v", err)
 	}
 	logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientConn.RemoteAddr().String())
-	s.m.AddOpenTCPConnection(clientLocation)
+	h.m.AddOpenTCPConnection(clientLocation)
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
-	id, connError := s.handleConnection(s.port, measuredClientConn, &proxyMetrics)
+	id, connError := h.handleConnection(h.port, measuredClientConn, &proxyMetrics)
 
 	connDuration := time.Now().Sub(connStart)
 	status := "OK"
@@ -226,22 +226,22 @@ func (s *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 		status = connError.Status
 		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
 	}
-	s.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
+	h.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func (s *tcpHandler) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
-	clientConn.SetReadDeadline(time.Now().Add(s.readTimeout))
+	clientConn.SetReadDeadline(time.Now().Add(h.readTimeout))
 
 	// 1. Find the cipher and acess key id.
-	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), s.ciphers)
-	s.m.AddTCPCipherSearch(keyErr == nil, timeToCipher)
+	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), h.ciphers)
+	h.m.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 	if keyErr != nil {
 		logger.Debugf("Failed to find a valid cipher after reading %v bytes: %v", proxyMetrics.ClientProxy, keyErr)
 		const status = "ERR_CIPHER"
-		s.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
+		h.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
 		return "", onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
 	}
 	var id string
@@ -252,14 +252,14 @@ func (s *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 	// 2. Check if the connection is a replay.
 	isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
 	// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
-	if isServerSalt || !s.replayCache.Add(cipherEntry.ID, clientSalt) {
+	if isServerSalt || !h.replayCache.Add(cipherEntry.ID, clientSalt) {
 		var status string
 		if isServerSalt {
 			status = "ERR_REPLAY_SERVER"
 		} else {
 			status = "ERR_REPLAY_CLIENT"
 		}
-		s.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
+		h.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
 		logger.Debugf(status+": %v sent %d bytes", clientConn.RemoteAddr(), proxyMetrics.ClientProxy)
 		return id, onet.NewConnectionError(status, "Replay detected", nil)
 	}
@@ -274,7 +274,7 @@ func (s *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		io.Copy(ioutil.Discard, clientConn)
 		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 	}
-	tgtConn, dialErr := dialTarget(tgtAddr, proxyMetrics, s.targetIPValidator)
+	tgtConn, dialErr := dialTarget(tgtAddr, proxyMetrics, h.targetIPValidator)
 	if dialErr != nil {
 		// We don't drain so dial errors and invalid addresses are communicated quickly.
 		return id, dialErr
@@ -317,12 +317,12 @@ func (s *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (s *tcpHandler) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *tcpHandler) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(ioutil.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	s.m.AddTCPProbe(status, drainResult, listenerPort, proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, listenerPort, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {

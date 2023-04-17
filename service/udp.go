@@ -89,16 +89,16 @@ type PacketHandler interface {
 	Handle(clientConn net.PacketConn)
 }
 
-func (s *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
-	s.targetIPValidator = targetIPValidator
+func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
+	h.targetIPValidator = targetIPValidator
 }
 
 // Listen on addr for encrypted packets and basically do UDP NAT.
 // We take the ciphers as a pointer because it gets replaced on config updates.
-func (s *packetHandler) Handle(clientConn net.PacketConn) {
+func (h *packetHandler) Handle(clientConn net.PacketConn) {
 	var running sync.WaitGroup
 
-	nm := newNATmap(s.natTimeout, s.m, &running)
+	nm := newNATmap(h.natTimeout, h.m, &running)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
@@ -136,7 +136,7 @@ func (s *packetHandler) Handle(clientConn net.PacketConn) {
 			targetConn := nm.Get(clientAddr.String())
 			if targetConn == nil {
 				var locErr error
-				clientLocation, locErr = s.m.GetLocation(clientAddr)
+				clientLocation, locErr = h.m.GetLocation(clientAddr)
 				if locErr != nil {
 					logger.Warningf("Failed location lookup: %v", locErr)
 				}
@@ -146,16 +146,16 @@ func (s *packetHandler) Handle(clientConn net.PacketConn) {
 				var textData []byte
 				var cipher *ss.Cipher
 				unpackStart := time.Now()
-				textData, keyID, cipher, err = findAccessKeyUDP(ip, textBuf, cipherData, s.ciphers)
+				textData, keyID, cipher, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers)
 				timeToCipher := time.Now().Sub(unpackStart)
-				s.m.AddUDPCipherSearch(err == nil, timeToCipher)
+				h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
 				}
 
 				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = s.validatePacket(textData); onetErr != nil {
+				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
 					return onetErr
 				}
 
@@ -170,7 +170,7 @@ func (s *packetHandler) Handle(clientConn net.PacketConn) {
 				unpackStart := time.Now()
 				textData, err := ss.Unpack(nil, cipherData, targetConn.cipher)
 				timeToCipher := time.Now().Sub(unpackStart)
-				s.m.AddUDPCipherSearch(err == nil, timeToCipher)
+				h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
@@ -180,7 +180,7 @@ func (s *packetHandler) Handle(clientConn net.PacketConn) {
 				keyID = targetConn.keyID
 
 				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = s.validatePacket(textData); onetErr != nil {
+				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
 					return onetErr
 				}
 			}
@@ -198,14 +198,14 @@ func (s *packetHandler) Handle(clientConn net.PacketConn) {
 			logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
 			status = connError.Status
 		}
-		s.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes)
+		h.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes)
 	}
 }
 
 // Given the decrypted contents of a UDP packet, return
 // the payload and the destination address, or an error if
 // this packet cannot or should not be forwarded.
-func (s *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
@@ -215,7 +215,7 @@ func (s *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *
 	if err != nil {
 		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
 	}
-	if err := s.targetIPValidator(tgtUDPAddr.IP); err != nil {
+	if err := h.targetIPValidator(tgtUDPAddr.IP); err != nil {
 		return nil, nil, err
 	}
 
