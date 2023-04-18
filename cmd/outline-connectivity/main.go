@@ -31,37 +31,6 @@ import (
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks/client"
 )
 
-// func newShadowsocksClient(host string, port int, cipherName, password string, prefix []byte) (*Client, error) {
-// 	// TODO: consider using net.LookupIP to get a list of IPs, and add logic for optimal selection.
-// 	proxyIP, err := net.ResolveIPAddr("ip", host)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("Failed to resolve proxy address: %w", err)
-// 	}
-// 	proxyTCPEndpoint := transport.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
-// 	proxyUDPEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: proxyIP.IP, Port: port}}
-
-// 	cipher, err := shadowsocks.NewCipher(cipherName, password)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("Failed to create Shadowsocks cipher: %w", err)
-// 	}
-
-// 	streamDialer, err := client.NewShadowsocksStreamDialer(proxyTCPEndpoint, cipher)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("Failed to create StreamDialer: %w", err)
-// 	}
-// 	if len(prefix) > 0 {
-// 		log.Debugf("Using salt prefix: %s", string(prefix))
-// 		streamDialer.SetTCPSaltGenerator(client.NewPrefixSaltGenerator(prefix))
-// 	}
-
-// 	packetListener, err := client.NewShadowsocksPacketListener(proxyUDPEndpoint, cipher)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("Failed to create PacketListener: %w", err)
-// 	}
-
-// 	return &outline.Client{StreamDialer: streamDialer, PacketListener: packetListener}, nil
-// }
-
 type sessionConfig struct {
 	Hostname string
 	Port     int
