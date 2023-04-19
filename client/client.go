@@ -110,7 +110,7 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to create StreamDialer: %w", err)
 	}
-	streamDialer.SetTCPSaltGenerator(c.salter)
+	streamDialer.SaltGenerator = c.salter
 	return streamDialer.Dial(context.Background(), raddr)
 }
 

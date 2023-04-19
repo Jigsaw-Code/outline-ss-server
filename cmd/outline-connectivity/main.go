@@ -76,6 +76,43 @@ func ResolveHostname(hostname string) ([]net.IP, error) {
 	return net.DefaultResolver.LookupIP(context.Background(), "ip", hostname)
 }
 
+type boundPacketConn struct {
+	net.PacketConn
+	remoteAddr net.UDPAddr
+}
+
+type boundPacketConnAddr struct {
+}
+
+func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAddr net.UDPAddr) (net.Conn, error) {
+	packetConn, err := listener.ListenPacket(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not create PacketConn: %v", err)
+	}
+	return &boundPacketConn{PacketConn: packetConn, remoteAddr: remoteAddr}, nil
+}
+
+func (c *boundPacketConn) Read(packet []byte) (int, error) {
+	for {
+		n, remoteAddr, err := c.PacketConn.ReadFrom(packet)
+		if err != nil {
+			return n, err
+		}
+		if remoteAddr.String() != c.remoteAddr.String() {
+			continue
+		}
+		return n, nil
+	}
+}
+
+func (c *boundPacketConn) Write(packet []byte) (int, error) {
+	return c.PacketConn.WriteTo(packet, &c.remoteAddr)
+}
+
+func (c *boundPacketConn) RemoteAddr() net.Addr {
+	return &c.remoteAddr
+}
+
 func main() {
 	accessKeyFlag := flag.String("key", "", "Outline access key")
 	// domainFlag := flag.String("domain", "", "Domain name to resolve")
@@ -114,36 +151,26 @@ func main() {
 			return proxyDialer.Dial(ctx, "8.8.8.8:53")
 		},
 	}
-	ips, err := tcpResolver.LookupIP(context.Background(), "ip4", "example.com")
+	ips, err := tcpResolver.LookupIP(context.Background(), "ip", "example.com")
 	if err != nil {
 		log.Fatalf("Failed to resolve test domain: %v", err)
 	}
 	log.Printf("TCP DNS Resolution succeeded: %v", ips)
 
-	// TODO: implement PacketConn binding
-	// // UDP
-	// udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: hostIPs[0], Port: config.Port}}
-	// proxyListener, err := client.NewShadowsocksPacketListener(udpEndpoint, config.Cipher)
-	// if err != nil {
-	// 	log.Fatalf("Failed to create Shadowsocks stream dialer: %v", err)
-	// }
-	// packetConn, err := proxyListener.ListenPacket(context.Background())
-	// if err != nil {
-	// 	log.Fatalf("Failed to create PacketConn: %v", err)
-	// }
-	// udpResolver := net.Resolver{
-	// 	Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
-	// 		return net.Conn {
-	// 			packetConn,
-	// 			Write(b []byte) (int, error) {
-	// 				return packetConn.WriteTo(b, "8.8.8.8:53")
-	// 			},
-	// 		}, nil
-	// 	},
-	// }
-	// ips, err = udpResolver.LookupIP(context.Background(), "ip", "example.com")
-	// if err != nil {
-	// 	log.Fatalf("Failed to resolve test domain: %v", err)
-	// }
-	// log.Printf("UDP DNS Resolution succeeded: %v", ips)
+	// UDP
+	udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: hostIPs[0], Port: config.Port}}
+	proxyListener, err := client.NewShadowsocksPacketListener(udpEndpoint, config.Cipher)
+	if err != nil {
+		log.Fatalf("Failed to create Shadowsocks stream dialer: %v", err)
+	}
+	udpResolver := net.Resolver{
+		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
+			return dialPacket(ctx, proxyListener, net.UDPAddr{IP: net.IPv4(1, 1, 1, 1), Port: 53})
+		},
+	}
+	ips, err = udpResolver.LookupIP(context.Background(), "ip", "example.com")
+	if err != nil {
+		log.Fatalf("Failed to resolve test domain: %v", err)
+	}
+	log.Printf("UDP DNS Resolution succeeded: %v", ips)
 }
