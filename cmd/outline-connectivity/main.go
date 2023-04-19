@@ -81,9 +81,6 @@ type boundPacketConn struct {
 	remoteAddr net.UDPAddr
 }
 
-type boundPacketConnAddr struct {
-}
-
 func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAddr net.UDPAddr) (net.Conn, error) {
 	packetConn, err := listener.ListenPacket(ctx)
 	if err != nil {
@@ -96,6 +93,9 @@ func (c *boundPacketConn) Read(packet []byte) (int, error) {
 	for {
 		n, remoteAddr, err := c.PacketConn.ReadFrom(packet)
 		if err != nil {
+			if err != nil {
+				log.Printf("UDP Read error: %v", err)
+			}
 			return n, err
 		}
 		if remoteAddr.String() != c.remoteAddr.String() {
@@ -106,7 +106,11 @@ func (c *boundPacketConn) Read(packet []byte) (int, error) {
 }
 
 func (c *boundPacketConn) Write(packet []byte) (int, error) {
-	return c.PacketConn.WriteTo(packet, &c.remoteAddr)
+	n, err := c.PacketConn.WriteTo(packet, &c.remoteAddr)
+	if err != nil {
+		log.Printf("UDP Write error: %v", err)
+	}
+	return n, err
 }
 
 func (c *boundPacketConn) RemoteAddr() net.Addr {
@@ -145,10 +149,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create Shadowsocks stream dialer: %v", err)
 	}
-	tcpResolver := net.Resolver{
+	tcpResolver := net.Resolver{StrictErrors: true,
 		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
-			log.Printf("Resolver address is %v", address)
-			return proxyDialer.Dial(ctx, "8.8.8.8:53")
+			log.Printf("Resolver address for TCP is %v %v", network, address)
+			conn, err := proxyDialer.Dial(ctx, "8.8.8.8:53")
+			if err != nil {
+				log.Printf("TCP Dial failed: %v", err)
+			}
+			return conn, err
 		},
 	}
 	ips, err := tcpResolver.LookupIP(context.Background(), "ip", "example.com")
@@ -165,7 +173,12 @@ func main() {
 	}
 	udpResolver := net.Resolver{
 		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
-			return dialPacket(ctx, proxyListener, net.UDPAddr{IP: net.IPv4(1, 1, 1, 1), Port: 53})
+			log.Printf("Resolver address for UDP is %v %v", network, address)
+			conn, err := dialPacket(ctx, proxyListener, net.UDPAddr{IP: net.IPv4(8, 8, 8, 8), Port: 53})
+			if err != nil {
+				log.Printf("UDP Dial failed: %v", err)
+			}
+			return conn, err
 		},
 	}
 	ips, err = udpResolver.LookupIP(context.Background(), "ip", "example.com")
