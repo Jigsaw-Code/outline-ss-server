@@ -119,7 +119,7 @@ func (c *boundPacketConn) RemoteAddr() net.Addr {
 
 func main() {
 	accessKeyFlag := flag.String("key", "", "Outline access key")
-	// domainFlag := flag.String("domain", "", "Domain name to resolve")
+	domainFlag := flag.String("domain", "example.com", "Domain name to resolve")
 	// protoFlag := flag.String("proto", "", "DNS protocol to use ('tcp' or 'udp')")
 	flag.Parse()
 	if *accessKeyFlag == "" {
@@ -159,7 +159,7 @@ func main() {
 			return conn, err
 		},
 	}
-	ips, err := tcpResolver.LookupIP(context.Background(), "ip", "example.com")
+	ips, err := tcpResolver.LookupIP(context.Background(), "ip", *domainFlag)
 	if err != nil {
 		log.Fatalf("Failed to resolve test domain: %v", err)
 	}
@@ -181,7 +181,7 @@ func main() {
 			return conn, err
 		},
 	}
-	ips, err = udpResolver.LookupIP(context.Background(), "ip", "example.com")
+	ips, err = udpResolver.LookupIP(context.Background(), "ip", *domainFlag)
 	if err != nil {
 		log.Fatalf("Failed to resolve test domain: %v", err)
 	}
