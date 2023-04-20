@@ -17,8 +17,10 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -30,6 +32,8 @@ import (
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks/client"
 )
+
+var debugLog log.Logger = *log.Default()
 
 type sessionConfig struct {
 	Hostname string
@@ -78,15 +82,25 @@ func ResolveHostname(hostname string) ([]net.IP, error) {
 
 type boundPacketConn struct {
 	net.PacketConn
-	remoteAddr net.UDPAddr
+	remoteAddr udpAddr
 }
 
-func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAddr net.UDPAddr) (net.Conn, error) {
+type udpAddr string
+
+func (a udpAddr) String() string {
+	return string(a)
+}
+
+func (a udpAddr) Network() string {
+	return "udp"
+}
+
+func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAddr string) (net.Conn, error) {
 	packetConn, err := listener.ListenPacket(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("could not create PacketConn: %v", err)
 	}
-	return &boundPacketConn{PacketConn: packetConn, remoteAddr: remoteAddr}, nil
+	return &boundPacketConn{PacketConn: packetConn, remoteAddr: udpAddr(remoteAddr)}, nil
 }
 
 func (c *boundPacketConn) Read(packet []byte) (int, error) {
@@ -94,7 +108,7 @@ func (c *boundPacketConn) Read(packet []byte) (int, error) {
 		n, remoteAddr, err := c.PacketConn.ReadFrom(packet)
 		if err != nil {
 			if err != nil {
-				log.Printf("UDP Read error: %v", err)
+				debugLog.Printf("UDP Read error: %v", debugError(err))
 			}
 			return n, err
 		}
@@ -108,82 +122,128 @@ func (c *boundPacketConn) Read(packet []byte) (int, error) {
 func (c *boundPacketConn) Write(packet []byte) (int, error) {
 	n, err := c.PacketConn.WriteTo(packet, &c.remoteAddr)
 	if err != nil {
-		log.Printf("UDP Write error: %v", err)
+		debugLog.Printf("UDP Write error: %#v", err)
 	}
 	return n, err
 }
 
 func (c *boundPacketConn) RemoteAddr() net.Addr {
-	return &c.remoteAddr
+	return c.remoteAddr
+}
+
+func testTCP(proxyDialer transport.StreamDialer, resolverAddress string, domain string) error {
+	tcpResolver := net.Resolver{
+		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
+			conn, err := proxyDialer.Dial(ctx, resolverAddress)
+			if err != nil {
+				debugLog.Printf("TCP Dial failed: %v", debugError(err))
+			}
+			return conn, err
+		},
+	}
+	ips, err := tcpResolver.LookupIP(context.Background(), "ip4", domain)
+	if err == nil {
+		debugLog.Printf("TCP DNS Resolution succeeded: %v", ips)
+	}
+	return err
+}
+
+func testUDP(proxyListener transport.PacketListener, resolverAddress string, domain string) error {
+	udpResolver := net.Resolver{
+		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
+			// TODO: use string, porbably the host name "dns.google"
+			conn, err := dialPacket(ctx, proxyListener, resolverAddress)
+			if err != nil {
+				debugLog.Printf("UDP Dial failed: %v", debugError(err))
+			}
+			return conn, err
+		},
+	}
+	ips, err := udpResolver.LookupIP(context.Background(), "ip4", domain)
+	if err == nil {
+		debugLog.Printf("UDP DNS Resolution succeeded: %v", ips)
+	}
+	return err
+}
+
+func debugError(err error) string {
+	// var netErr *net.OpError
+	var syscallErr *os.SyscallError
+	// errors.As(err, &netErr)
+	errors.As(err, &syscallErr)
+	return fmt.Sprintf("%#v %#v %v", err, syscallErr, err.Error())
 }
 
 func main() {
+
+	verboseFlag := flag.Bool("v", false, "Enable debug output")
 	accessKeyFlag := flag.String("key", "", "Outline access key")
-	domainFlag := flag.String("domain", "example.com", "Domain name to resolve")
-	// protoFlag := flag.String("proto", "", "DNS protocol to use ('tcp' or 'udp')")
+	domainFlag := flag.String("domain", "example.com.", "Domain name to resolve")
+	resolver4Flag := flag.String("resolver4", "8.8.8.8", "IPv4 of the DNS resolver to use for the test")
+	resolver6Flag := flag.String("resolver6", "2001:4860:4860::8888", "IPv6 of the DNS resolver to use for the test")
+
 	flag.Parse()
+	if *verboseFlag {
+		debugLog = *log.New(os.Stderr, "[DEBUG] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+	} else {
+		debugLog = *log.New(io.Discard, "", log.LstdFlags)
+	}
+
 	if *accessKeyFlag == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if ip := net.ParseIP(*resolver4Flag); ip == nil || ip.To4() == nil {
+		log.Fatalf("Flag --resolver4 must be an IPv4 address. Got %v", *resolver4Flag)
+	}
+	resolver4Address := net.JoinHostPort(*resolver4Flag, "53")
+	if ip := net.ParseIP(*resolver6Flag); ip == nil || ip.To16() == nil {
+		log.Fatalf("Flag --resolver6 must be an IPv6 address. Got %v", *resolver6Flag)
+	}
+	resolver6Address := net.JoinHostPort(*resolver6Flag, "53")
+
+	// Things to test:
+	// - TCP working. Where's the error?
+	// - UDP working
+	// - Different server IPs
+	// - Server IPv4 dial support
+	// - Server IPv6 dial support
 
 	config, err := ParseAccessKey(*accessKeyFlag)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Printf("Config: %v", config)
+	debugLog.Printf("Config: %+v", config)
 
 	hostIPs, err := ResolveHostname(config.Hostname)
 	if err != nil {
 		log.Fatalf("Failed to resolve host name: %v", err)
 	}
 
-	// TODO: loop through IPs
-	if len(hostIPs) == 0 {
-		log.Fatal("No IPs for hostname found")
-	}
+	// TODO: limit number of IPs. Or force an input IP?
+	for _, hostIP := range hostIPs {
+		proxyAddress := net.JoinHostPort(hostIP.String(), fmt.Sprint(config.Port))
 
-	// TCP
-	tcpEndpoint := transport.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: hostIPs[0], Port: config.Port}}
-	proxyDialer, err := client.NewShadowsocksStreamDialer(tcpEndpoint, config.Cipher)
-	if err != nil {
-		log.Fatalf("Failed to create Shadowsocks stream dialer: %v", err)
-	}
-	tcpResolver := net.Resolver{StrictErrors: true,
-		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
-			log.Printf("Resolver address for TCP is %v %v", network, address)
-			conn, err := proxyDialer.Dial(ctx, "8.8.8.8:53")
-			if err != nil {
-				log.Printf("TCP Dial failed: %v", err)
-			}
-			return conn, err
-		},
-	}
-	ips, err := tcpResolver.LookupIP(context.Background(), "ip", *domainFlag)
-	if err != nil {
-		log.Fatalf("Failed to resolve test domain: %v", err)
-	}
-	log.Printf("TCP DNS Resolution succeeded: %v", ips)
+		// TCP
+		tcpEndpoint := transport.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: hostIP, Port: config.Port}}
+		proxyDialer, err := client.NewShadowsocksStreamDialer(tcpEndpoint, config.Cipher)
+		if err != nil {
+			log.Fatalf("Failed to create Shadowsocks stream dialer: %#v", err)
+		}
+		err = testTCP(proxyDialer, resolver4Address, *domainFlag)
+		fmt.Printf("proxy: %v, resolver: %v, proto: tcp, error: %#v\n", proxyAddress, resolver4Address, err)
+		err = testTCP(proxyDialer, resolver6Address, *domainFlag)
+		fmt.Printf("proxy: %v, resolver: %v, proto: tcp, error: %#v\n", proxyAddress, resolver6Address, err)
 
-	// UDP
-	udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: hostIPs[0], Port: config.Port}}
-	proxyListener, err := client.NewShadowsocksPacketListener(udpEndpoint, config.Cipher)
-	if err != nil {
-		log.Fatalf("Failed to create Shadowsocks stream dialer: %v", err)
+		// UDP
+		udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: hostIP, Port: config.Port}}
+		proxyListener, err := client.NewShadowsocksPacketListener(udpEndpoint, config.Cipher)
+		if err != nil {
+			log.Fatalf("Failed to create Shadowsocks packet listener: %#v", err)
+		}
+		err = testUDP(proxyListener, resolver4Address, *domainFlag)
+		fmt.Printf("proxy: %v, resolver: %v, proto: udp, error: %#v\n", proxyAddress, resolver4Address, err)
+		err = testUDP(proxyListener, resolver6Address, *domainFlag)
+		fmt.Printf("proxy: %v, resolver: %v, proto: udp, error: %#v\n", proxyAddress, resolver6Address, err)
 	}
-	udpResolver := net.Resolver{
-		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
-			log.Printf("Resolver address for UDP is %v %v", network, address)
-			conn, err := dialPacket(ctx, proxyListener, net.UDPAddr{IP: net.IPv4(8, 8, 8, 8), Port: 53})
-			if err != nil {
-				log.Printf("UDP Dial failed: %v", err)
-			}
-			return conn, err
-		},
-	}
-	ips, err = udpResolver.LookupIP(context.Background(), "ip", *domainFlag)
-	if err != nil {
-		log.Fatalf("Failed to resolve test domain: %v", err)
-	}
-	log.Printf("UDP DNS Resolution succeeded: %v", ips)
 }
