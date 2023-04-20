@@ -41,6 +41,7 @@ type sessionConfig struct {
 	Cipher   *shadowsocks.Cipher
 }
 
+// TODO: add prefix support
 func ParseAccessKey(accessKey string) (*sessionConfig, error) {
 	var config sessionConfig
 	accessKeyURL, err := url.Parse(accessKey)
@@ -98,7 +99,7 @@ func (a udpAddr) Network() string {
 func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAddr string) (net.Conn, error) {
 	packetConn, err := listener.ListenPacket(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not create PacketConn: %v", err)
+		return nil, fmt.Errorf("could not create PacketConn: %#v", err)
 	}
 	return &boundPacketConn{PacketConn: packetConn, remoteAddr: udpAddr(remoteAddr)}, nil
 }
