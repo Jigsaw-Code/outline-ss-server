@@ -404,11 +404,11 @@ func TestNATTimeout(t *testing.T) {
 
 // Simulates receiving invalid UDP packets on a server with 100 ciphers.
 func BenchmarkUDPUnpackFail(b *testing.B) {
-	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(100))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(100))
 	if err != nil {
 		b.Fatal(err)
 	}
-	testPayload := shadowsocks.MakeTestPayload(50)
+	testPayload := makeTestPayload(50)
 	textBuf := make([]byte, serverUDPBufferSize)
 	testIP := net.ParseIP("192.0.2.1")
 	b.ResetTimer()
@@ -421,7 +421,7 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 // their own cipher and IP address.
 func BenchmarkUDPUnpackRepeat(b *testing.B) {
 	const numCiphers = 100 // Must be <256
-	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(numCiphers))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(numCiphers))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	for i, element := range snapshot {
 		packets[i] = make([]byte, 0, serverUDPBufferSize)
-		plaintext := shadowsocks.MakeTestPayload(50)
+		plaintext := makeTestPayload(50)
 		packets[i], err = shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, element.Value.(*CipherEntry).CryptoKey)
 		if err != nil {
 			b.Error(err)
@@ -453,12 +453,12 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 // Simulates receiving valid UDP packets from 100 different IP addresses,
 // all using the same cipher.
 func BenchmarkUDPUnpackSharedKey(b *testing.B) {
-	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(1)) // One widely shared key
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1)) // One widely shared key
 	if err != nil {
 		b.Fatal(err)
 	}
 	testBuf := make([]byte, serverUDPBufferSize)
-	plaintext := shadowsocks.MakeTestPayload(50)
+	plaintext := makeTestPayload(50)
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	cryptoKey := snapshot[0].Value.(*CipherEntry).CryptoKey
 	packet, err := shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, cryptoKey)
@@ -480,7 +480,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 }
 
 func TestUDPEarlyClose(t *testing.T) {
-	cipherList, err := MakeTestCiphers(shadowsocks.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	if err != nil {
 		t.Fatal(err)
 	}
