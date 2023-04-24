@@ -28,9 +28,9 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	"github.com/op/go-logging"
 	"github.com/oschwald/geoip2-golang"
 	"github.com/prometheus/client_golang/prometheus"
@@ -136,11 +136,15 @@ func (s *SSServer) loadConfig(filename string) error {
 			cipherList = list.New()
 			portCiphers[keyConfig.Port] = cipherList
 		}
-		cipher, err := ss.NewCipher(keyConfig.Cipher, keyConfig.Secret)
+		cipher, err := shadowsocks.CipherByName(keyConfig.Cipher)
 		if err != nil {
-			return fmt.Errorf("failed to create cipher for key %v: %w", keyConfig.ID, err)
+			return err
 		}
-		entry := service.MakeCipherEntry(keyConfig.ID, cipher, keyConfig.Secret)
+		cryptoKey, err := shadowsocks.NewEncryptionKey(cipher, keyConfig.Secret)
+		if err != nil {
+			return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+		}
+		entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
 		cipherList.PushBack(&entry)
 	}
 	for port := range s.ports {

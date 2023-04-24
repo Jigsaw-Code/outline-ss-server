@@ -62,20 +62,24 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: proxyIP.IP, Port: port}}
 	tcpEndpoint := transport.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
 
-	cipher, err := shadowsocks.NewCipher(cipherName, password)
+	cipher, err := shadowsocks.CipherByName(cipherName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Shadowsocks cipher: %w", err)
 	}
+	key, err := shadowsocks.NewEncryptionKey(cipher, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create encryption key: %w", err)
+	}
 
 	return &ssClient{
-		cipher:      cipher,
+		key:         key,
 		udpEndpoint: udpEndpoint,
 		tcpEndpoint: tcpEndpoint,
 	}, nil
 }
 
 type ssClient struct {
-	cipher      *shadowsocks.Cipher
+	key         *shadowsocks.EncryptionKey
 	udpEndpoint transport.UDPEndpoint
 	tcpEndpoint transport.TCPEndpoint
 	salter      shadowsocks.SaltGenerator
@@ -88,7 +92,7 @@ func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
 	}
-	packetListener, err := ssclient.NewShadowsocksPacketListener(endpointCopy, c.cipher)
+	packetListener, err := ssclient.NewShadowsocksPacketListener(endpointCopy, c.key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PacketListener: %w", err)
 	}
@@ -106,11 +110,11 @@ func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, e
 	if laddr != nil {
 		endpointCopy.Dialer.LocalAddr = laddr
 	}
-	streamDialer, err := ssclient.NewShadowsocksStreamDialer(endpointCopy, c.cipher)
+	streamDialer, err := ssclient.NewShadowsocksStreamDialer(endpointCopy, c.key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create StreamDialer: %w", err)
 	}
-	streamDialer.SetTCPSaltGenerator(c.salter)
+	streamDialer.SaltGenerator = c.salter
 	return streamDialer.Dial(context.Background(), raddr)
 }
 

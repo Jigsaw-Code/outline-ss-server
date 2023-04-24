@@ -28,9 +28,9 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
@@ -83,7 +83,7 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 
 	// Move the active cipher to the front, so that the search is quicker next time.
 	cipherList.MarkUsedByClientIP(elt, clientIP)
-	salt := firstBytes[:entry.Cipher.SaltSize()]
+	salt := firstBytes[:entry.CryptoKey.SaltSize()]
 	return entry, io.MultiReader(bytes.NewReader(firstBytes), clientReader), salt, timeToCipher, nil
 }
 
@@ -93,12 +93,12 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 	chunkLenBuf := [2]byte{}
 	for ci, elt := range ciphers {
 		entry := elt.Value.(*CipherEntry)
-		id, cipher := entry.ID, entry.Cipher
+		id, cipher := entry.ID, entry.CryptoKey
 		saltsize := cipher.SaltSize()
 		salt := firstBytes[:saltsize]
 		cipherTextLength := 2 + cipher.TagSize()
 		cipherText := firstBytes[saltsize : saltsize+cipherTextLength]
-		_, err := ss.DecryptOnce(cipher, salt, chunkLenBuf[:0], cipherText)
+		_, err := shadowsocks.DecryptOnce(cipher, salt, chunkLenBuf[:0], cipherText)
 		if err != nil {
 			debugTCP(id, "Failed to decrypt length: %v", err)
 			continue
@@ -265,7 +265,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 	}
 
 	// 3. Read target address and dial it.
-	ssr := ss.NewShadowsocksReader(clientReader, cipherEntry.Cipher)
+	ssr := shadowsocks.NewShadowsocksReader(clientReader, cipherEntry.CryptoKey)
 	tgtAddr, err := socks.ReadAddr(ssr)
 	// Clear the deadline for the target address
 	clientConn.SetReadDeadline(time.Time{})
@@ -283,7 +283,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 
 	// 4. Bridge the client and target connections
 	logger.Debugf("proxy %s <-> %s", clientConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
-	ssw := ss.NewShadowsocksWriter(clientConn, cipherEntry.Cipher)
+	ssw := shadowsocks.NewShadowsocksWriter(clientConn, cipherEntry.CryptoKey)
 	ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 
 	fromClientErrCh := make(chan error)
