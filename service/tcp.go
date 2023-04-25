@@ -93,18 +93,13 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 	chunkLenBuf := [2]byte{}
 	for ci, elt := range ciphers {
 		entry := elt.Value.(*CipherEntry)
-		id, cipher := entry.ID, entry.CryptoKey
-		saltsize := cipher.SaltSize()
-		salt := firstBytes[:saltsize]
-		cipherTextLength := 2 + cipher.TagSize()
-		cipherText := firstBytes[saltsize : saltsize+cipherTextLength]
-		_, err := shadowsocks.DecryptOnce(cipher, salt, chunkLenBuf[:0], cipherText)
+		cryptoKey := entry.CryptoKey
+		_, err := shadowsocks.Unpack(chunkLenBuf[:0], firstBytes[:cryptoKey.SaltSize()+2+cryptoKey.TagSize()], cryptoKey)
 		if err != nil {
-			debugTCP(id, "Failed to decrypt length: %v", err)
+			debugTCP(entry.ID, "Failed to decrypt length: %v", err)
 			continue
 		}
-		debugTCP(id, "Found cipher at index %d", ci)
-		// Move the active cipher to the front, so that the search is quicker next time.
+		debugTCP(entry.ID, "Found cipher at index %d", ci)
 		return entry, elt
 	}
 	return nil, nil
