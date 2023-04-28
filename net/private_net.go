@@ -48,11 +48,11 @@ func IsPrivateAddress(ip net.IP) bool {
 }
 
 // TargetIPValidator is a type alias for checking if an IP is allowed.
-type TargetIPValidator = func(net.IP) *ConnectionError
+type TargetIPValidator = func(net.IP) error
 
 // RequirePublicIP returns an error if the destination IP is not a
 // standard public IP.
-func RequirePublicIP(ip net.IP) *ConnectionError {
+func RequirePublicIP(ip net.IP) error {
 	if !ip.IsGlobalUnicast() {
 		return NewConnectionError("ERR_ADDRESS_INVALID", fmt.Sprintf("Address is not global unicast: %s", ip.String()), nil)
 	}

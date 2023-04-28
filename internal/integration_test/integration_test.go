@@ -25,7 +25,6 @@ import (
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 	"github.com/Jigsaw-Code/outline-ss-server/client"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
@@ -40,7 +39,7 @@ func init() {
 	logging.SetLevel(logging.INFO, "")
 }
 
-func allowAll(ip net.IP) *onet.ConnectionError {
+func allowAll(ip net.IP) error {
 	// Allow access to localhost so that we can run integration tests with
 	// an actual destination server.
 	return nil
@@ -113,7 +112,7 @@ func TestTCPEcho(t *testing.T) {
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
 	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
-	handler.SetTargetIPValidator(allowAll)
+	handler.SetTargetDialer(&transport.TCPStreamDialer{})
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(func() (transport.StreamConn, error) { return proxyListener.AcceptTCP() }, handler.Handle)
@@ -382,7 +381,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	}
 	const testTimeout = 200 * time.Millisecond
 	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, nil, &metrics.NoOpMetrics{}, testTimeout)
-	handler.SetTargetIPValidator(allowAll)
+	handler.SetTargetDialer(&transport.TCPStreamDialer{})
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
@@ -454,7 +453,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
 	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
-	handler.SetTargetIPValidator(allowAll)
+	handler.SetTargetDialer(&transport.TCPStreamDialer{})
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
