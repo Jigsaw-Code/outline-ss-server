@@ -59,8 +59,7 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve proxy address: %w", err)
 	}
-	udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: proxyIP.IP, Port: port}}
-	tcpEndpoint := transport.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: proxyIP.IP, Port: port}}
+	proxyAddress := net.JoinHostPort(proxyIP.String(), fmt.Sprint(port))
 
 	cipher, err := shadowsocks.CipherByName(cipherName)
 	if err != nil {
@@ -72,27 +71,24 @@ func NewClient(host string, port int, password, cipherName string) (Client, erro
 	}
 
 	return &ssClient{
-		key:         key,
-		udpEndpoint: udpEndpoint,
-		tcpEndpoint: tcpEndpoint,
+		key:          key,
+		proxyAddress: proxyAddress,
 	}, nil
 }
 
 type ssClient struct {
-	key         *shadowsocks.EncryptionKey
-	udpEndpoint transport.UDPEndpoint
-	tcpEndpoint transport.TCPEndpoint
-	salter      shadowsocks.SaltGenerator
+	key          *shadowsocks.EncryptionKey
+	proxyAddress string
+	salter       shadowsocks.SaltGenerator
 }
 
 // ListenUDP implements the Client.ListenUDP API.
 func (c *ssClient) ListenUDP(laddr *net.UDPAddr) (net.PacketConn, error) {
-	// Make sure to make a copy so we don't modify the original endpoint.
-	endpointCopy := c.udpEndpoint
+	endpoint := transport.UDPEndpoint{Address: c.proxyAddress}
 	if laddr != nil {
-		endpointCopy.Dialer.LocalAddr = laddr
+		endpoint.Dialer.LocalAddr = laddr
 	}
-	packetListener, err := ssclient.NewShadowsocksPacketListener(endpointCopy, c.key)
+	packetListener, err := ssclient.NewShadowsocksPacketListener(endpoint, c.key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PacketListener: %w", err)
 	}
@@ -105,12 +101,11 @@ func (c *ssClient) SetTCPSaltGenerator(salter shadowsocks.SaltGenerator) {
 
 // DialTCP implements the Client.DialTCP API.
 func (c *ssClient) DialTCP(laddr *net.TCPAddr, raddr string) (onet.DuplexConn, error) {
-	// Make sure to make a copy so we don't modify the original endpoint.
-	endpointCopy := c.tcpEndpoint
+	endpoint := &transport.TCPEndpoint{Address: c.proxyAddress}
 	if laddr != nil {
-		endpointCopy.Dialer.LocalAddr = laddr
+		endpoint.Dialer.LocalAddr = laddr
 	}
-	streamDialer, err := ssclient.NewShadowsocksStreamDialer(endpointCopy, c.key)
+	streamDialer, err := ssclient.NewShadowsocksStreamDialer(endpoint, c.key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create StreamDialer: %w", err)
 	}

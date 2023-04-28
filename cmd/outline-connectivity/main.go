@@ -36,9 +36,9 @@ import (
 var debugLog log.Logger = *log.Default()
 
 type sessionConfig struct {
-	Hostname string
-	Port     int
-	Cipher   *shadowsocks.Cipher
+	Hostname  string
+	Port      int
+	CryptoKey *shadowsocks.EncryptionKey
 }
 
 // TODO: add prefix support
@@ -66,7 +66,11 @@ func ParseAccessKey(accessKey string) (*sessionConfig, error) {
 	if !found {
 		return nil, fmt.Errorf("invalid cipher info: no ':' separator")
 	}
-	config.Cipher, err = shadowsocks.NewCipher(cipherName, secret)
+	cipher, err := shadowsocks.CipherByName(cipherName)
+	if err != nil {
+		return nil, err
+	}
+	config.CryptoKey, err = shadowsocks.NewEncryptionKey(cipher, secret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cipher: %v", err)
 	}
@@ -83,17 +87,7 @@ func ResolveHostname(hostname string) ([]net.IP, error) {
 
 type boundPacketConn struct {
 	net.PacketConn
-	remoteAddr udpAddr
-}
-
-type udpAddr string
-
-func (a udpAddr) String() string {
-	return string(a)
-}
-
-func (a udpAddr) Network() string {
-	return "udp"
+	remoteAddr *net.UDPAddr
 }
 
 func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAddr string) (net.Conn, error) {
@@ -101,7 +95,11 @@ func dialPacket(ctx context.Context, listener transport.PacketListener, remoteAd
 	if err != nil {
 		return nil, fmt.Errorf("could not create PacketConn: %#v", err)
 	}
-	return &boundPacketConn{PacketConn: packetConn, remoteAddr: udpAddr(remoteAddr)}, nil
+	udpAddr, err := net.ResolveUDPAddr("udp", remoteAddr)
+	if err != nil {
+		return nil, err
+	}
+	return &boundPacketConn{PacketConn: packetConn, remoteAddr: udpAddr}, nil
 }
 
 func (c *boundPacketConn) Read(packet []byte) (int, error) {
@@ -121,7 +119,7 @@ func (c *boundPacketConn) Read(packet []byte) (int, error) {
 }
 
 func (c *boundPacketConn) Write(packet []byte) (int, error) {
-	n, err := c.PacketConn.WriteTo(packet, &c.remoteAddr)
+	n, err := c.PacketConn.WriteTo(packet, c.remoteAddr)
 	if err != nil {
 		debugLog.Printf("UDP Write error: %#v", err)
 	}
@@ -226,8 +224,7 @@ func main() {
 		proxyAddress := net.JoinHostPort(hostIP.String(), fmt.Sprint(config.Port))
 
 		// TCP
-		tcpEndpoint := transport.TCPEndpoint{RemoteAddr: net.TCPAddr{IP: hostIP, Port: config.Port}}
-		proxyDialer, err := client.NewShadowsocksStreamDialer(tcpEndpoint, config.Cipher)
+		proxyDialer, err := client.NewShadowsocksStreamDialer(&transport.TCPEndpoint{Address: proxyAddress}, config.CryptoKey)
 		if err != nil {
 			log.Fatalf("Failed to create Shadowsocks stream dialer: %#v", err)
 		}
@@ -237,8 +234,7 @@ func main() {
 		fmt.Printf("proxy: %v, resolver: %v, proto: tcp, error: %#v\n", proxyAddress, resolver6Address, err)
 
 		// UDP
-		udpEndpoint := transport.UDPEndpoint{RemoteAddr: net.UDPAddr{IP: hostIP, Port: config.Port}}
-		proxyListener, err := client.NewShadowsocksPacketListener(udpEndpoint, config.Cipher)
+		proxyListener, err := client.NewShadowsocksPacketListener(&transport.UDPEndpoint{Address: proxyAddress}, config.CryptoKey)
 		if err != nil {
 			log.Fatalf("Failed to create Shadowsocks packet listener: %#v", err)
 		}
