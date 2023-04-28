@@ -1,7 +1,7 @@
 module github.com/Jigsaw-Code/outline-ss-server
 
 require (
-	github.com/Jigsaw-Code/outline-internal-sdk v0.0.0-20230330230827-540cd1d1c908
+	github.com/Jigsaw-Code/outline-internal-sdk v0.0.0-20230424223153-ae41944dca86
 	github.com/goreleaser/goreleaser v1.12.3
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.8.0

@@ -19,7 +19,7 @@ import (
 	"net"
 	"sync"
 
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 )
 
 // Don't add a tag if it would reduce the salt entropy below this amount.
@@ -29,15 +29,15 @@ const minSaltEntropy = 16
 // The public fields are constant, but lastClientIP is mutable under cipherList.mu.
 type CipherEntry struct {
 	ID            string
-	Cipher        *ss.Cipher
+	CryptoKey     *shadowsocks.EncryptionKey
 	SaltGenerator ServerSaltGenerator
 	lastClientIP  net.IP
 }
 
 // MakeCipherEntry constructs a CipherEntry.
-func MakeCipherEntry(id string, cipher *ss.Cipher, secret string) CipherEntry {
+func MakeCipherEntry(id string, cryptoKey *shadowsocks.EncryptionKey, secret string) CipherEntry {
 	var saltGenerator ServerSaltGenerator
-	if cipher.SaltSize()-serverSaltMarkLen >= minSaltEntropy {
+	if cryptoKey.SaltSize()-serverSaltMarkLen >= minSaltEntropy {
 		// Mark salts with a tag for reverse replay protection.
 		saltGenerator = NewServerSaltGenerator(secret)
 	} else {
@@ -47,7 +47,7 @@ func MakeCipherEntry(id string, cipher *ss.Cipher, secret string) CipherEntry {
 	}
 	return CipherEntry{
 		ID:            id,
-		Cipher:        cipher,
+		CryptoKey:     cryptoKey,
 		SaltGenerator: saltGenerator,
 	}
 }

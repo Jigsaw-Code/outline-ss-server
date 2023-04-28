@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
+	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/require"
@@ -84,11 +84,11 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 		b.Fatalf("ListenTCP failed: %v", err)
 	}
 
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(100))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(100))
 	if err != nil {
 		b.Fatal(err)
 	}
-	testPayload := ss.MakeTestPayload(50)
+	testPayload := makeTestPayload(50)
 	for n := 0; n < b.N; n++ {
 		go func() {
 			conn, err := net.Dial("tcp", listener.Addr().String())
@@ -110,17 +110,17 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 }
 
 func TestCompatibleCiphers(t *testing.T) {
-	for _, cipherName := range ss.SupportedCipherNames() {
-		cipher, _ := ss.NewCipher(cipherName, "dummy secret")
+	for _, cipherName := range [](*shadowsocks.Cipher){shadowsocks.CHACHA20IETFPOLY1305, shadowsocks.AES256GCM, shadowsocks.AES192GCM, shadowsocks.AES128GCM} {
+		cryptoKey, _ := shadowsocks.NewEncryptionKey(cipherName, "dummy secret")
 		// We need at least this many bytes to assess whether a TCP stream corresponds
 		// to this cipher.
-		requires := cipher.SaltSize() + 2 + cipher.TagSize()
+		requires := cryptoKey.SaltSize() + 2 + cryptoKey.TagSize()
 		if requires > bytesForKeyFinding {
 			t.Errorf("Cipher %v required %v bytes > bytesForKeyFinding (%v)", cipherName, requires, bytesForKeyFinding)
 		}
 		// Any TCP stream for this cipher will deliver at least this many bytes before
 		// requiring the proxy to act.
-		provides := requires + cipher.TagSize()
+		provides := requires + cryptoKey.TagSize()
 		if provides < bytesForKeyFinding {
 			t.Errorf("Cipher %v provides %v bytes < bytesForKeyFinding (%v)", cipherName, provides, bytesForKeyFinding)
 		}
@@ -189,7 +189,7 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 	b.ResetTimer()
 
 	const numCiphers = 100 // Must be <256
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(numCiphers))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(numCiphers))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -204,8 +204,8 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 		clientIP := net.IPv4(192, 0, 2, cipherNumber)
 		addr := &net.TCPAddr{IP: clientIP, Port: 54321}
 		c := conn{clientAddr: addr, reader: reader, writer: writer}
-		cipher := cipherEntries[cipherNumber].Cipher
-		go ss.NewShadowsocksWriter(writer, cipher).Write(ss.MakeTestPayload(50))
+		cipher := cipherEntries[cipherNumber].CryptoKey
+		go shadowsocks.NewShadowsocksWriter(writer, cipher).Write(makeTestPayload(50))
 		b.StartTimer()
 		_, _, _, _, err := findAccessKey(&c, clientIP, cipherList)
 		b.StopTimer()
@@ -284,7 +284,7 @@ func probe(serverAddr *net.TCPAddr, bytesToSend []byte) error {
 
 func TestProbeRandom(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	testMetrics := &probeTestMetrics{}
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, nil, testMetrics, 200*time.Millisecond)
@@ -307,12 +307,12 @@ func TestProbeRandom(t *testing.T) {
 	require.Equal(t, len(buf), len(testMetrics.probeData))
 }
 
-func makeClientBytesBasic(t *testing.T, cipher *ss.Cipher, targetAddr string) []byte {
+func makeClientBytesBasic(t *testing.T, cryptoKey *shadowsocks.EncryptionKey, targetAddr string) []byte {
 	var buffer bytes.Buffer
 	socksTargetAddr := socks.ParseAddr(targetAddr)
 	// Assumes IPv4, as that's the common case.
 	require.Equal(t, 1+4+2, len(socksTargetAddr))
-	ssw := ss.NewShadowsocksWriter(&buffer, cipher)
+	ssw := shadowsocks.NewShadowsocksWriter(&buffer, cryptoKey)
 	n, err := ssw.Write(socksTargetAddr)
 	require.Nil(t, err, "Write failed: %v", err)
 	require.Equal(t, len(socksTargetAddr), n, "Write failed: %v", err)
@@ -333,10 +333,10 @@ func makeClientBytesBasic(t *testing.T, cipher *ss.Cipher, targetAddr string) []
 	return buffer.Bytes()
 }
 
-func makeClientBytesCoalesced(t *testing.T, cipher *ss.Cipher, targetAddr string) []byte {
+func makeClientBytesCoalesced(t *testing.T, cryptoKey *shadowsocks.EncryptionKey, targetAddr string) []byte {
 	var buffer bytes.Buffer
 	socksTargetAddr := socks.ParseAddr(targetAddr)
-	ssw := ss.NewShadowsocksWriter(&buffer, cipher)
+	ssw := shadowsocks.NewShadowsocksWriter(&buffer, cryptoKey)
 	n, err := ssw.LazyWrite(socksTargetAddr)
 	require.Nil(t, err, "LazyWrite failed: %v", err)
 	require.Equal(t, len(socksTargetAddr), n, "LazyWrite failed: %v", err)
@@ -351,15 +351,15 @@ func makeClientBytesCoalesced(t *testing.T, cipher *ss.Cipher, targetAddr string
 	return buffer.Bytes()
 }
 
-func firstCipher(cipherList CipherList) *ss.Cipher {
+func firstCipher(cipherList CipherList) *shadowsocks.EncryptionKey {
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	cipherEntry := snapshot[0].Value.(*CipherEntry)
-	return cipherEntry.Cipher
+	return cipherEntry.CryptoKey
 }
 
 func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
@@ -394,7 +394,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 
 func TestProbeClientBytesBasicModified(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
@@ -430,7 +430,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 
 func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
@@ -461,9 +461,9 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	discardWait.Wait()
 }
 
-func makeServerBytes(t *testing.T, cipher *ss.Cipher) []byte {
+func makeServerBytes(t *testing.T, cryptoKey *shadowsocks.EncryptionKey) []byte {
 	var buffer bytes.Buffer
-	ssw := ss.NewShadowsocksWriter(&buffer, cipher)
+	ssw := shadowsocks.NewShadowsocksWriter(&buffer, cryptoKey)
 	_, err := ssw.Write([]byte("initial data"))
 	require.Nil(t, err, "Write failed: %v", err)
 	_, err = ssw.Write([]byte("more data"))
@@ -473,7 +473,7 @@ func makeServerBytes(t *testing.T, cipher *ss.Cipher) []byte {
 
 func TestProbeServerBytesModified(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
@@ -502,7 +502,7 @@ func TestProbeServerBytesModified(t *testing.T) {
 
 func TestReplayDefense(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	replayCache := NewReplayCache(5)
 	testMetrics := &probeTestMetrics{}
@@ -510,9 +510,9 @@ func TestReplayDefense(t *testing.T) {
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, testMetrics, testTimeout)
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	cipherEntry := snapshot[0].Value.(*CipherEntry)
-	cipher := cipherEntry.Cipher
+	cipher := cipherEntry.CryptoKey
 	reader, writer := io.Pipe()
-	go ss.NewShadowsocksWriter(writer, cipher).Write([]byte{0})
+	go shadowsocks.NewShadowsocksWriter(writer, cipher).Write([]byte{0})
 	preamble := make([]byte, cipher.SaltSize()+2+cipher.TagSize())
 	if _, err := io.ReadFull(reader, preamble); err != nil {
 		t.Fatal(err)
@@ -580,7 +580,7 @@ func TestReplayDefense(t *testing.T) {
 
 func TestReverseReplayDefense(t *testing.T) {
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(1))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	replayCache := NewReplayCache(5)
 	testMetrics := &probeTestMetrics{}
@@ -588,9 +588,9 @@ func TestReverseReplayDefense(t *testing.T) {
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, testMetrics, testTimeout)
 	snapshot := cipherList.SnapshotForClientIP(nil)
 	cipherEntry := snapshot[0].Value.(*CipherEntry)
-	cipher := cipherEntry.Cipher
+	cipher := cipherEntry.CryptoKey
 	reader, writer := io.Pipe()
-	ssWriter := ss.NewShadowsocksWriter(writer, cipher)
+	ssWriter := shadowsocks.NewShadowsocksWriter(writer, cipher)
 	// Use a server-marked salt in the client's preamble.
 	ssWriter.SetSaltGenerator(cipherEntry.SaltGenerator)
 	go ssWriter.Write([]byte{0})
@@ -652,7 +652,7 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 	const testTimeout = 200 * time.Millisecond
 
 	listener := makeLocalhostListener(t)
-	cipherList, err := MakeTestCiphers(ss.MakeTestSecrets(5))
+	cipherList, err := MakeTestCiphers(makeTestSecrets(5))
 	require.Nil(t, err, "MakeTestCiphers failed: %v", err)
 	testMetrics := &probeTestMetrics{}
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, nil, testMetrics, testTimeout)
@@ -663,7 +663,7 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 		done <- struct{}{}
 	}()
 
-	testPayload := ss.MakeTestPayload(payloadSize)
+	testPayload := makeTestPayload(payloadSize)
 	timerStart := time.Now()
 	conn, err := net.Dial("tcp", listener.Addr().String())
 	if err != nil {
