@@ -130,7 +130,6 @@ func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m met
 
 var defaultDialer = makeValidatingTCPStreamDialer(onet.RequirePublicIP)
 
-// TODO: replace with new TCPStreamDialer
 func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) transport.StreamDialer {
 	return &transport.TCPStreamDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)

@@ -169,7 +169,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 				unpackStart := time.Now()
 				textData, err := shadowsocks.Unpack(nil, cipherData, targetConn.cryptoKey)
-				timeToCipher := time.Now().Sub(unpackStart)
+				timeToCipher := time.Since(unpackStart)
 				h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
