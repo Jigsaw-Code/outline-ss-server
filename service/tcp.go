@@ -260,7 +260,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 	}
 
 	// 3. Read target address and dial it.
-	ssr := shadowsocks.NewShadowsocksReader(clientReader, cipherEntry.CryptoKey)
+	ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
 	tgtAddr, err := socks.ReadAddr(ssr)
 	// Clear the deadline for the target address
 	clientConn.SetReadDeadline(time.Time{})
@@ -278,7 +278,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 
 	// 4. Bridge the client and target connections
 	logger.Debugf("proxy %s <-> %s", clientConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
-	ssw := shadowsocks.NewShadowsocksWriter(clientConn, cipherEntry.CryptoKey)
+	ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
 	ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 
 	fromClientErrCh := make(chan error)

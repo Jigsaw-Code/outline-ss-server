@@ -136,11 +136,7 @@ func (s *SSServer) loadConfig(filename string) error {
 			cipherList = list.New()
 			portCiphers[keyConfig.Port] = cipherList
 		}
-		cipher, err := shadowsocks.CipherByName(keyConfig.Cipher)
-		if err != nil {
-			return err
-		}
-		cryptoKey, err := shadowsocks.NewEncryptionKey(cipher, keyConfig.Secret)
+		cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
 		if err != nil {
 			return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
 		}
