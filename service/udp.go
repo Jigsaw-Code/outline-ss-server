@@ -109,7 +109,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			break
 		}
 
-		var clientLocation metrics.CountryCode
+		var clientInfo metrics.ClientInfo
 		keyID := ""
 		var proxyTargetBytes int
 
@@ -136,18 +136,18 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			targetConn := nm.Get(clientAddr.String())
 			if targetConn == nil {
 				var locErr error
-				clientLocation, locErr = h.m.GetLocation(clientAddr)
+				clientInfo, locErr = h.m.GetClientInfo(clientAddr)
 				if locErr != nil {
-					logger.Warningf("Failed location lookup: %v", locErr)
+					logger.Warningf("Failed client info lookup: %v", locErr)
 				}
-				debugUDPAddr(clientAddr, "Got location \"%s\"", clientLocation)
+				debugUDPAddr(clientAddr, "Got info \"%#v\"", clientInfo)
 
 				ip := clientAddr.(*net.UDPAddr).IP
 				var textData []byte
 				var cryptoKey *shadowsocks.EncryptionKey
 				unpackStart := time.Now()
 				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers)
-				timeToCipher := time.Now().Sub(unpackStart)
+				timeToCipher := time.Since(unpackStart)
 				h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
@@ -163,13 +163,13 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				if err != nil {
 					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
 				}
-				targetConn = nm.Add(clientAddr, clientConn, cryptoKey, udpConn, clientLocation, keyID)
+				targetConn = nm.Add(clientAddr, clientConn, cryptoKey, udpConn, clientInfo, keyID)
 			} else {
-				clientLocation = targetConn.clientLocation
+				clientInfo = targetConn.clientInfo
 
 				unpackStart := time.Now()
 				textData, err := shadowsocks.Unpack(nil, cipherData, targetConn.cryptoKey)
-				timeToCipher := time.Now().Sub(unpackStart)
+				timeToCipher := time.Since(unpackStart)
 				h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
@@ -198,7 +198,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
 			status = connError.Status
 		}
-		h.m.AddUDPPacketFromClient(clientLocation, keyID, status, clientProxyBytes, proxyTargetBytes)
+		h.m.AddUDPPacketFromClient(clientInfo, keyID, status, clientProxyBytes, proxyTargetBytes)
 	}
 }
 
@@ -232,9 +232,9 @@ type natconn struct {
 	net.PacketConn
 	cryptoKey *shadowsocks.EncryptionKey
 	keyID     string
-	// We store the client location in the NAT map to avoid recomputing it
+	// We store the client information in the NAT map to avoid recomputing it
 	// for every downstream packet in a UDP-based connection.
-	clientLocation metrics.CountryCode
+	clientInfo metrics.ClientInfo
 	// NAT timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
 	// Current read deadline of PacketConn.  Used to avoid decreasing the
@@ -312,12 +312,12 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, clientLocation metrics.CountryCode) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, clientInfo metrics.ClientInfo) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		cryptoKey:      cryptoKey,
 		keyID:          keyID,
-		clientLocation: clientLocation,
+		clientInfo:     clientInfo,
 		defaultTimeout: m.timeout,
 	}
 
@@ -340,8 +340,8 @@ func (m *natmap) del(key string) net.PacketConn {
 	return nil
 }
 
-func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientLocation metrics.CountryCode, keyID string) *natconn {
-	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, clientLocation)
+func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo metrics.ClientInfo, keyID string) *natconn {
+	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, clientInfo)
 
 	m.metrics.AddUDPNatEntry()
 	m.running.Add(1)
@@ -444,6 +444,6 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		if expired {
 			break
 		}
-		sm.AddUDPPacketFromTarget(targetConn.clientLocation, keyID, status, bodyLen, proxyClientBytes)
+		sm.AddUDPPacketFromTarget(targetConn.clientInfo, keyID, status, bodyLen, proxyClientBytes)
 	}
 }

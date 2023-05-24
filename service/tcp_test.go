@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"sync"
@@ -66,7 +65,7 @@ func startDiscardServer(t testing.TB) (*net.TCPListener, *sync.WaitGroup) {
 			running.Add(1)
 			go func() {
 				defer running.Done()
-				io.Copy(ioutil.Discard, clientConn)
+				io.Copy(io.Discard, clientConn)
 				clientConn.Close()
 			}()
 		}
@@ -92,9 +91,7 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		go func() {
 			conn, err := net.Dial("tcp", listener.Addr().String())
-			if err != nil {
-				b.Fatalf("Failed to dial %v: %v", listener.Addr(), err)
-			}
+			require.Nilf(b, err, "Failed to dial %v: %v", listener.Addr(), err)
 			conn.Write(testPayload)
 			conn.Close()
 		}()
@@ -225,22 +222,24 @@ type probeTestMetrics struct {
 	closeStatus []string
 }
 
-func (m *probeTestMetrics) AddClosedTCPConnection(clientLocation metrics.CountryCode, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+var _ metrics.ShadowsocksMetrics = (*probeTestMetrics)(nil)
+
+func (m *probeTestMetrics) AddClosedTCPConnection(clientInfo metrics.ClientInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()
 }
 
-func (m *probeTestMetrics) GetLocation(net.Addr) (metrics.CountryCode, error) {
-	return "", nil
+func (m *probeTestMetrics) GetClientInfo(net.Addr) (metrics.ClientInfo, error) {
+	return metrics.ClientInfo{}, nil
 }
 func (m *probeTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
 }
-func (m *probeTestMetrics) AddOpenTCPConnection(clientLocation metrics.CountryCode) {
+func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo metrics.ClientInfo) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromClient(clientLocation metrics.CountryCode, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *probeTestMetrics) AddUDPPacketFromClient(clientInfo metrics.ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromTarget(clientLocation metrics.CountryCode, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *probeTestMetrics) AddUDPPacketFromTarget(clientInfo metrics.ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *probeTestMetrics) AddUDPNatEntry()    {}
 func (m *probeTestMetrics) RemoveUDPNatEntry() {}

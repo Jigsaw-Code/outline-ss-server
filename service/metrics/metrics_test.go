@@ -19,10 +19,10 @@ func TestMethodsDontPanic(t *testing.T) {
 	}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
-	ssMetrics.AddOpenTCPConnection("US")
-	ssMetrics.AddClosedTCPConnection("US", "1", "OK", proxyMetrics, 10*time.Millisecond)
-	ssMetrics.AddUDPPacketFromClient("US", "2", "OK", 10, 20)
-	ssMetrics.AddUDPPacketFromTarget("US", "3", "OK", 10, 20)
+	ssMetrics.AddOpenTCPConnection(ClientInfo{CountryCode: "US"})
+	ssMetrics.AddClosedTCPConnection(ClientInfo{CountryCode: "US"}, "1", "OK", proxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddUDPPacketFromClient(ClientInfo{CountryCode: "US"}, "2", "OK", 10, 20)
+	ssMetrics.AddUDPPacketFromTarget(ClientInfo{CountryCode: "US"}, "3", "OK", 10, 20)
 	ssMetrics.AddUDPNatEntry()
 	ssMetrics.RemoveUDPNatEntry()
 	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
@@ -48,7 +48,7 @@ func BenchmarkGetLocation(b *testing.B) {
 	// servers call this method for each new connection, but typically many connections
 	// come from a single user in succession.
 	for i := 0; i < b.N; i++ {
-		ssMetrics.GetLocation(testAddr)
+		ssMetrics.GetClientInfo(testAddr)
 	}
 }
 
@@ -56,13 +56,13 @@ func BenchmarkOpenTCP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddOpenTCPConnection("ZZ")
+		ssMetrics.AddOpenTCPConnection(ClientInfo{CountryCode: "ZZ"})
 	}
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientLocation := CountryCode("ZZ")
+	clientInfo := ClientInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
 	data := ProxyMetrics{}
@@ -70,7 +70,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddClosedTCPConnection(clientLocation, accessKey, status, data, duration)
+		ssMetrics.AddClosedTCPConnection(clientInfo, accessKey, status, data, duration)
 		ssMetrics.AddTCPCipherSearch(true, timeToCipher)
 	}
 }
@@ -89,27 +89,27 @@ func BenchmarkProbe(b *testing.B) {
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientLocation := CountryCode("ZZ")
+	clientInfo := ClientInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
 	timeToCipher := time.Microsecond
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPPacketFromClient(clientLocation, accessKey, status, size, size)
+		ssMetrics.AddUDPPacketFromClient(clientInfo, accessKey, status, size, size)
 		ssMetrics.AddUDPCipherSearch(true, timeToCipher)
 	}
 }
 
 func BenchmarkTargetUDP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientLocation := CountryCode("ZZ")
+	clientInfo := ClientInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPPacketFromTarget(clientLocation, accessKey, status, size, size)
+		ssMetrics.AddUDPPacketFromTarget(clientInfo, accessKey, status, size, size)
 	}
 }
 

@@ -176,7 +176,7 @@ type statusMetrics struct {
 	statuses []string
 }
 
-func (m *statusMetrics) AddClosedTCPConnection(clientLocation metrics.CountryCode, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *statusMetrics) AddClosedTCPConnection(clientInfo metrics.ClientInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.Lock()
 	m.statuses = append(m.statuses, status)
 	m.Unlock()
@@ -236,7 +236,7 @@ func TestRestrictedAddresses(t *testing.T) {
 
 // Metrics about one UDP packet.
 type udpRecord struct {
-	location          metrics.CountryCode
+	clientInfo        metrics.ClientInfo
 	accessKey, status string
 	in, out           int
 }
@@ -244,19 +244,21 @@ type udpRecord struct {
 // Fake metrics implementation for UDP
 type fakeUDPMetrics struct {
 	metrics.ShadowsocksMetrics
-	fakeLocation metrics.CountryCode
-	up, down     []udpRecord
-	natAdded     int
+	fakeInfo metrics.ClientInfo
+	up, down []udpRecord
+	natAdded int
 }
 
-func (m *fakeUDPMetrics) GetLocation(addr net.Addr) (metrics.CountryCode, error) {
-	return m.fakeLocation, nil
+var _ metrics.ShadowsocksMetrics = (*fakeUDPMetrics)(nil)
+
+func (m *fakeUDPMetrics) GetClientInfo(addr net.Addr) (metrics.ClientInfo, error) {
+	return m.fakeInfo, nil
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientLocation metrics.CountryCode, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.up = append(m.up, udpRecord{clientLocation, accessKey, status, clientProxyBytes, proxyTargetBytes})
+func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientInfo metrics.ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+	m.up = append(m.up, udpRecord{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientLocation metrics.CountryCode, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
-	m.down = append(m.down, udpRecord{clientLocation, accessKey, status, targetProxyBytes, proxyClientBytes})
+func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientInfo metrics.ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+	m.down = append(m.down, udpRecord{clientInfo, accessKey, status, targetProxyBytes, proxyClientBytes})
 }
 func (m *fakeUDPMetrics) AddUDPNatEntry() {
 	m.natAdded++
@@ -278,7 +280,7 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMetrics := &fakeUDPMetrics{fakeLocation: "QQ"}
+	testMetrics := &fakeUDPMetrics{fakeInfo: metrics.ClientInfo{CountryCode: "QQ"}}
 	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics)
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
@@ -346,7 +348,7 @@ func TestUDPEcho(t *testing.T) {
 		t.Errorf("Wrong number of packets sent: %v", testMetrics.up)
 	} else {
 		record := testMetrics.up[0]
-		if record.location != "QQ" ||
+		if record.clientInfo.CountryCode != "QQ" ||
 			record.accessKey != keyID ||
 			record.status != "OK" ||
 			record.in <= record.out ||
@@ -358,7 +360,7 @@ func TestUDPEcho(t *testing.T) {
 		t.Errorf("Wrong number of packets received: %v", testMetrics.down)
 	} else {
 		record := testMetrics.down[0]
-		if record.location != "QQ" ||
+		if record.clientInfo.CountryCode != "QQ" ||
 			record.accessKey != keyID ||
 			record.status != "OK" ||
 			record.in != N ||

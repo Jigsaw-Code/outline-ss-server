@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"sync"
 	"syscall"
@@ -75,7 +74,7 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 
 	findStartTime := time.Now()
 	entry, elt := findEntry(firstBytes, ciphers)
-	timeToCipher := time.Now().Sub(findStartTime)
+	timeToCipher := time.Since(findStartTime)
 	if entry == nil {
 		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
 		return nil, clientReader, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
@@ -203,25 +202,25 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 }
 
 func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientLocation, err := h.m.GetLocation(clientConn.RemoteAddr())
+	clientInfo, err := h.m.GetClientInfo(clientConn.RemoteAddr())
 	if err != nil {
-		logger.Warningf("Failed location lookup: %v", err)
+		logger.Warningf("Failed client info lookup: %v", err)
 	}
-	logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientConn.RemoteAddr().String())
-	h.m.AddOpenTCPConnection(clientLocation)
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, clientConn.RemoteAddr().String())
+	h.m.AddOpenTCPConnection(clientInfo)
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
 	id, connError := h.handleConnection(h.port, measuredClientConn, &proxyMetrics)
 
-	connDuration := time.Now().Sub(connStart)
+	connDuration := time.Since(connStart)
 	status := "OK"
 	if connError != nil {
 		status = connError.Status
 		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
 	}
-	h.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
+	h.m.AddClosedTCPConnection(clientInfo, id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
@@ -266,7 +265,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 	clientConn.SetReadDeadline(time.Time{})
 	if err != nil {
 		// Drain to prevent a close on cipher error.
-		io.Copy(ioutil.Discard, clientConn)
+		io.Copy(io.Discard, clientConn)
 		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 	}
 	tgtConn, dialErr := dialTarget(tgtAddr, proxyMetrics, h.targetIPValidator)
@@ -286,7 +285,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		_, fromClientErr := ssr.WriteTo(tgtConn)
 		if fromClientErr != nil {
 			// Drain to prevent a close in the case of a cipher error.
-			io.Copy(ioutil.Discard, clientConn)
+			io.Copy(io.Discard, clientConn)
 		}
 		clientConn.CloseRead()
 		// Send FIN to target.
@@ -314,7 +313,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
 func (h *tcpHandler) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
-	_, drainErr := io.Copy(ioutil.Discard, clientConn) // drain socket
+	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
 	h.m.AddTCPProbe(status, drainResult, listenerPort, proxyMetrics.ClientProxy)
