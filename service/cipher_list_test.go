@@ -19,13 +19,13 @@ import (
 	"net"
 	"testing"
 
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	sstest "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 )
 
 func BenchmarkLocking(b *testing.B) {
 	var ip net.IP
 
-	ciphers, _ := MakeTestCiphers(ss.MakeTestSecrets(1))
+	ciphers, _ := MakeTestCiphers([]string{"secret"})
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -41,7 +41,7 @@ func BenchmarkSnapshot(b *testing.B) {
 	// Small cipher lists (N~1e3) fit entirely in cache, and are ~10 times
 	// faster to copy (per entry) than very large cipher lists (N~1e5).
 	const N = 1e3
-	ciphers, _ := MakeTestCiphers(ss.MakeTestSecrets(N))
+	ciphers, _ := MakeTestCiphers(sstest.MakeTestSecrets(N))
 
 	// Shuffling simulates the behavior of a real server, where successive
 	// ciphers are not expected to be nearby in memory.
