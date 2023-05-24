@@ -503,9 +503,9 @@ func TestUDPEarlyClose(t *testing.T) {
 func TestClosedUDPListenerError(t *testing.T) {
 	var packetConn net.PacketConn
 	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	err = packetConn.Close()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	_, _, err = packetConn.ReadFrom(nil)
 	require.ErrorIs(t, err, net.ErrClosed)
