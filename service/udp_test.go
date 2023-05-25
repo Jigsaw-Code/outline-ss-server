@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
@@ -92,7 +93,7 @@ func (conn *fakePacketConn) Close() error {
 }
 
 type udpReport struct {
-	clientInfo                         metrics.ClientInfo
+	clientInfo                         ipinfo.IPInfo
 	accessKey, status                  string
 	clientProxyBytes, proxyTargetBytes int
 }
@@ -106,19 +107,19 @@ type natTestMetrics struct {
 
 var _ metrics.ShadowsocksMetrics = (*natTestMetrics)(nil)
 
-func (m *natTestMetrics) AddClosedTCPConnection(clientInfo metrics.ClientInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *natTestMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
-func (m *natTestMetrics) GetClientInfo(net.Addr) (metrics.ClientInfo, error) {
-	return metrics.ClientInfo{}, nil
+func (m *natTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
 }
 func (m *natTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
 }
-func (m *natTestMetrics) AddOpenTCPConnection(clientInfo metrics.ClientInfo) {
+func (m *natTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 }
-func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo metrics.ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo metrics.ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *natTestMetrics) AddUDPNatEntry() {
 	m.natEntriesAdded++
@@ -223,7 +224,7 @@ func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
 	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, metrics.ClientInfo{CountryCode: "ZZ"}, "key id")
+	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, ipinfo.IPInfo{CountryCode: "ZZ"}, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }

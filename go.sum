@@ -155,8 +155,6 @@ github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym
 github.com/DataDog/datadog-go v3.2.0+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
 github.com/DataDog/zstd v1.4.5 h1:EndNeuB0l9syBZhut0wns3gV1hL8zX8LIu6ZiVHWLIQ=
 github.com/GoogleCloudPlatform/cloudsql-proxy v1.31.2/go.mod h1:qR6jVnZTKDCW3j+fC9mOEPHm++1nKDMkqbbkD6KNsfo=
-github.com/Jigsaw-Code/outline-internal-sdk v0.0.0-20230502182149-b8f111a1cdb2 h1:6i/9okipiPuLDEjvwWpCA/ZpoICJqUFBs1FVzJpfIVA=
-github.com/Jigsaw-Code/outline-internal-sdk v0.0.0-20230502182149-b8f111a1cdb2/go.mod h1:vxtE3esaFy5UG6TnipLyWx0esUQBy9LBXHLQx+SoER8=
 github.com/Jigsaw-Code/outline-internal-sdk v0.0.0-20230522235223-1b323ea1d667 h1:msZNpaFAjRTvVi5q2yW1PJ4MmU4/7anob2IZYtDZQJw=
 github.com/Jigsaw-Code/outline-internal-sdk v0.0.0-20230522235223-1b323ea1d667/go.mod h1:vxtE3esaFy5UG6TnipLyWx0esUQBy9LBXHLQx+SoER8=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=

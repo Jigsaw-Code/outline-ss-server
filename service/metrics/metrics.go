@@ -15,93 +15,31 @@
 package metrics
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
-	geoip2 "github.com/oschwald/geoip2-golang"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type ClientInfo struct {
-	CountryCode CountryCode
-	ASN         int
-}
-
-type CountryCode string
-
-func (cc CountryCode) String() string {
-	return string(cc)
-}
-
-type mmIPInfoMap struct {
-	reader *geoip2.Reader
-}
-
-func (ip2info *mmIPInfoMap) GetClientInfo(addr net.Addr) (ClientInfo, error) {
-	var info ClientInfo
-	if ip2info == nil {
-		// Location is disabled. return empty info.
-		return info, nil
-	}
-	hostname, _, err := net.SplitHostPort(addr.String())
-	if err != nil {
-		info.CountryCode = errParseAddr
-		return info, fmt.Errorf("failed to split hostname and port: %w", err)
-	}
-	ip := net.ParseIP(hostname)
-	if ip == nil {
-		info.CountryCode = errParseAddr
-		return info, errors.New("failed to parse address as IP")
-	}
-
-	info.CountryCode, err = getIPLocation(ip2info.reader, ip)
-	if err != nil {
-		return info, err
-	}
-
-	return info, nil
-}
-
-func getIPLocation(ipCountryDb *geoip2.Reader, ip net.IP) (CountryCode, error) {
-	if ip.IsLoopback() {
-		return localLocation, nil
-	}
-	if !ip.IsGlobalUnicast() {
-		return localLocation, nil
-	}
-	record, err := ipCountryDb.Country(ip)
-	if err != nil {
-		return errDbLookupError, fmt.Errorf("IP lookup failed: %w", err)
-	}
-	if record == nil {
-		return unknownLocation, errors.New("IP lookup returned nil")
-	}
-	if record.Country.IsoCode == "" {
-		return unknownLocation, errors.New("IP Lookup has empty ISO code")
-	}
-	return CountryCode(record.Country.IsoCode), nil
-}
-
 // ShadowsocksMetrics registers metrics for the Shadowsocks service.
 type ShadowsocksMetrics interface {
-	SetBuildInfo(version string)
+	ipinfo.IPInfoMap
 
-	GetClientInfo(net.Addr) (ClientInfo, error)
+	SetBuildInfo(version string)
 
 	SetNumAccessKeys(numKeys int, numPorts int)
 
 	// TCP metrics
-	AddOpenTCPConnection(clientInfo ClientInfo)
-	AddClosedTCPConnection(clientInfo ClientInfo, accessKey, status string, data ProxyMetrics, duration time.Duration)
+	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
+	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data ProxyMetrics, duration time.Duration)
 
 	// UDP metrics
-	AddUDPPacketFromClient(clientInfo ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
-	AddUDPPacketFromTarget(clientInfo ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
+	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
+	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
 	AddUDPNatEntry()
 	RemoveUDPNatEntry()
 
@@ -112,7 +50,7 @@ type ShadowsocksMetrics interface {
 }
 
 type shadowsocksMetrics struct {
-	mmIPInfoMap
+	ipinfo.IPInfoMap
 
 	buildInfo            *prometheus.GaugeVec
 	accessKeys           prometheus.Gauge
@@ -134,10 +72,10 @@ type shadowsocksMetrics struct {
 
 var _ ShadowsocksMetrics = (*shadowsocksMetrics)(nil)
 
-func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
+func newShadowsocksMetrics(ip2info ipinfo.IPInfoMap) *shadowsocksMetrics {
 	// Don't forget to pass the counters to the registerer.MustRegister call in NewPrometheusShadowsocksMetrics.
 	return &shadowsocksMetrics{
-		mmIPInfoMap: mmIPInfoMap{ipCountryDB},
+		IPInfoMap: ip2info,
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "shadowsocks",
 			Name:      "build_info",
@@ -233,20 +171,13 @@ func newShadowsocksMetrics(ipCountryDB *geoip2.Reader) *shadowsocksMetrics {
 // `ipCountryDB` to convert IP addresses to countries, and reports all
 // metrics to Prometheus via `registerer`.  `ipCountryDB` may be nil, but
 // `registerer` must not be.
-func NewPrometheusShadowsocksMetrics(ipCountryDB *geoip2.Reader, registerer prometheus.Registerer) ShadowsocksMetrics {
-	m := newShadowsocksMetrics(ipCountryDB)
+func NewPrometheusShadowsocksMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) ShadowsocksMetrics {
+	m := newShadowsocksMetrics(ip2info)
 	// TODO: Is it possible to pass where to register the collectors?
 	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
 		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries)
 	return m
 }
-
-const (
-	errParseAddr     CountryCode = "XA"
-	errDbLookupError CountryCode = "XD"
-	localLocation    CountryCode = "XL"
-	unknownLocation  CountryCode = "ZZ"
-)
 
 func (m *shadowsocksMetrics) SetBuildInfo(version string) {
 	m.buildInfo.WithLabelValues(version).Set(1)
@@ -257,7 +188,7 @@ func (m *shadowsocksMetrics) SetNumAccessKeys(numKeys int, ports int) {
 	m.ports.Set(float64(ports))
 }
 
-func (m *shadowsocksMetrics) AddOpenTCPConnection(clientInfo ClientInfo) {
+func (m *shadowsocksMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 	m.tcpOpenConnections.WithLabelValues(clientInfo.CountryCode.String()).Inc()
 }
 
@@ -268,7 +199,7 @@ func addIfNonZero(value int64, counterVec *prometheus.CounterVec, lvs ...string)
 	}
 }
 
-func (m *shadowsocksMetrics) AddClosedTCPConnection(clientInfo ClientInfo, accessKey, status string, data ProxyMetrics, duration time.Duration) {
+func (m *shadowsocksMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data ProxyMetrics, duration time.Duration) {
 	m.tcpClosedConnections.WithLabelValues(clientInfo.CountryCode.String(), status, accessKey).Inc()
 	m.tcpConnectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 	addIfNonZero(data.ClientProxy, m.dataBytes, "c>p", "tcp", accessKey)
@@ -281,7 +212,7 @@ func (m *shadowsocksMetrics) AddClosedTCPConnection(clientInfo ClientInfo, acces
 	addIfNonZero(data.ProxyClient, m.dataBytesPerLocation, "c<p", "tcp", clientInfo.CountryCode.String())
 }
 
-func (m *shadowsocksMetrics) AddUDPPacketFromClient(clientInfo ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *shadowsocksMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.udpPacketsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), status).Inc()
 	addIfNonZero(int64(clientProxyBytes), m.dataBytes, "c>p", "udp", accessKey)
 	addIfNonZero(int64(clientProxyBytes), m.dataBytesPerLocation, "c>p", "udp", clientInfo.CountryCode.String())
@@ -289,7 +220,7 @@ func (m *shadowsocksMetrics) AddUDPPacketFromClient(clientInfo ClientInfo, acces
 	addIfNonZero(int64(proxyTargetBytes), m.dataBytesPerLocation, "p>t", "udp", clientInfo.CountryCode.String())
 }
 
-func (m *shadowsocksMetrics) AddUDPPacketFromTarget(clientInfo ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *shadowsocksMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 	addIfNonZero(int64(targetProxyBytes), m.dataBytes, "p<t", "udp", accessKey)
 	addIfNonZero(int64(targetProxyBytes), m.dataBytesPerLocation, "p<t", "udp", clientInfo.CountryCode.String())
 	addIfNonZero(int64(proxyClientBytes), m.dataBytes, "c<p", "udp", accessKey)
@@ -372,16 +303,16 @@ func MeasureConn(conn transport.StreamConn, bytesSent, bytesReceived *int64) tra
 type NoOpMetrics struct{}
 
 func (m *NoOpMetrics) SetBuildInfo(version string) {}
-func (m *NoOpMetrics) AddClosedTCPConnection(clientInfo ClientInfo, accessKey, status string, data ProxyMetrics, duration time.Duration) {
+func (m *NoOpMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data ProxyMetrics, duration time.Duration) {
 }
-func (m *NoOpMetrics) GetClientInfo(net.Addr) (ClientInfo, error) {
-	return ClientInfo{}, nil
+func (m *NoOpMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
 }
-func (m *NoOpMetrics) SetNumAccessKeys(numKeys int, numPorts int) {}
-func (m *NoOpMetrics) AddOpenTCPConnection(clientInfo ClientInfo) {}
-func (m *NoOpMetrics) AddUDPPacketFromClient(clientInfo ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *NoOpMetrics) SetNumAccessKeys(numKeys int, numPorts int)    {}
+func (m *NoOpMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
+func (m *NoOpMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 }
-func (m *NoOpMetrics) AddUDPPacketFromTarget(clientInfo ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *NoOpMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *NoOpMetrics) AddUDPNatEntry()    {}
 func (m *NoOpMetrics) RemoveUDPNatEntry() {}

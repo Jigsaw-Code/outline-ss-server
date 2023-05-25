@@ -27,6 +27,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
@@ -224,22 +225,22 @@ type probeTestMetrics struct {
 
 var _ metrics.ShadowsocksMetrics = (*probeTestMetrics)(nil)
 
-func (m *probeTestMetrics) AddClosedTCPConnection(clientInfo metrics.ClientInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *probeTestMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()
 }
 
-func (m *probeTestMetrics) GetClientInfo(net.Addr) (metrics.ClientInfo, error) {
-	return metrics.ClientInfo{}, nil
+func (m *probeTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
 }
 func (m *probeTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
 }
-func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo metrics.ClientInfo) {
+func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromClient(clientInfo metrics.ClientInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *probeTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromTarget(clientInfo metrics.ClientInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *probeTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *probeTestMetrics) AddUDPNatEntry()    {}
 func (m *probeTestMetrics) RemoveUDPNatEntry() {}

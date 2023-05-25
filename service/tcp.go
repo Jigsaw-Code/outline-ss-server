@@ -28,6 +28,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
@@ -202,7 +203,7 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 }
 
 func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientInfo, err := h.m.GetClientInfo(clientConn.RemoteAddr())
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
 	}

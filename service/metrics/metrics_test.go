@@ -1,11 +1,10 @@
 package metrics
 
 import (
-	"net"
 	"testing"
 	"time"
 
-	geoip2 "github.com/oschwald/geoip2-golang"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -19,10 +18,10 @@ func TestMethodsDontPanic(t *testing.T) {
 	}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
-	ssMetrics.AddOpenTCPConnection(ClientInfo{CountryCode: "US"})
-	ssMetrics.AddClosedTCPConnection(ClientInfo{CountryCode: "US"}, "1", "OK", proxyMetrics, 10*time.Millisecond)
-	ssMetrics.AddUDPPacketFromClient(ClientInfo{CountryCode: "US"}, "2", "OK", 10, 20)
-	ssMetrics.AddUDPPacketFromTarget(ClientInfo{CountryCode: "US"}, "3", "OK", 10, 20)
+	ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "US"})
+	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{CountryCode: "US"}, "1", "OK", proxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddUDPPacketFromClient(ipinfo.IPInfo{CountryCode: "US"}, "2", "OK", 10, 20)
+	ssMetrics.AddUDPPacketFromTarget(ipinfo.IPInfo{CountryCode: "US"}, "3", "OK", 10, 20)
 	ssMetrics.AddUDPNatEntry()
 	ssMetrics.RemoveUDPNatEntry()
 	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
@@ -30,39 +29,17 @@ func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
 }
 
-func BenchmarkGetLocation(b *testing.B) {
-	var ipCountryDB *geoip2.Reader
-	// The test data is in a git submodule that must be initialized before running the test.
-	dbPath := "../../third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb"
-	ipCountryDB, err := geoip2.Open(dbPath)
-	if err != nil {
-		b.Fatalf("Could not open geoip database at %v: %v", dbPath, err)
-	}
-	defer ipCountryDB.Close()
-
-	ssMetrics := NewPrometheusShadowsocksMetrics(ipCountryDB, prometheus.NewRegistry())
-	testIP := net.ParseIP("217.65.48.1")
-	testAddr := &net.TCPAddr{IP: testIP, Port: 12345}
-	b.ResetTimer()
-	// Repeatedly check the country for the same address.  This is realistic, because
-	// servers call this method for each new connection, but typically many connections
-	// come from a single user in succession.
-	for i := 0; i < b.N; i++ {
-		ssMetrics.GetClientInfo(testAddr)
-	}
-}
-
 func BenchmarkOpenTCP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddOpenTCPConnection(ClientInfo{CountryCode: "ZZ"})
+		ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "ZZ"})
 	}
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ClientInfo{CountryCode: "ZZ"}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
 	data := ProxyMetrics{}
@@ -89,7 +66,7 @@ func BenchmarkProbe(b *testing.B) {
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ClientInfo{CountryCode: "ZZ"}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
@@ -103,7 +80,7 @@ func BenchmarkClientUDP(b *testing.B) {
 
 func BenchmarkTargetUDP(b *testing.B) {
 	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ClientInfo{CountryCode: "ZZ"}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000

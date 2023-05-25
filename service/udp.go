@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
@@ -109,7 +110,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			break
 		}
 
-		var clientInfo metrics.ClientInfo
+		var clientInfo ipinfo.IPInfo
 		keyID := ""
 		var proxyTargetBytes int
 
@@ -136,7 +137,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			targetConn := nm.Get(clientAddr.String())
 			if targetConn == nil {
 				var locErr error
-				clientInfo, locErr = h.m.GetClientInfo(clientAddr)
+				clientInfo, locErr = ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
 				if locErr != nil {
 					logger.Warningf("Failed client info lookup: %v", locErr)
 				}
@@ -234,7 +235,7 @@ type natconn struct {
 	keyID     string
 	// We store the client information in the NAT map to avoid recomputing it
 	// for every downstream packet in a UDP-based connection.
-	clientInfo metrics.ClientInfo
+	clientInfo ipinfo.IPInfo
 	// NAT timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
 	// Current read deadline of PacketConn.  Used to avoid decreasing the
@@ -312,7 +313,7 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, clientInfo metrics.ClientInfo) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, clientInfo ipinfo.IPInfo) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		cryptoKey:      cryptoKey,
@@ -340,7 +341,7 @@ func (m *natmap) del(key string) net.PacketConn {
 	return nil
 }
 
-func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo metrics.ClientInfo, keyID string) *natconn {
+func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo ipinfo.IPInfo, keyID string) *natconn {
 	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, clientInfo)
 
 	m.metrics.AddUDPNatEntry()
