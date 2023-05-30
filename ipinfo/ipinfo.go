@@ -45,10 +45,10 @@ const (
 // GetIPInfoFromAddr is a helper function to extract the IP address from the [net.Addr]
 // and call [IPInfoMap].GetIPInfo.
 // It uses special country codes to indicate errors:
-// - "XA": failed to extract the IP from the address
-// - "XL": IP is not global.
-// - "XD": error lookip up the country code
-// - "ZZ": lookup returned an empty country code.
+//   - "XA": failed to extract the IP from the address
+//   - "XL": IP is not global.
+//   - "XD": error lookip up the country code
+//   - "ZZ": lookup returned an empty country code.
 func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 	var info IPInfo
 	if ip2info == nil {

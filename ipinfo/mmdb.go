@@ -15,37 +15,71 @@
 package ipinfo
 
 import (
+	"errors"
 	"fmt"
 	"net"
 
 	"github.com/oschwald/geoip2-golang"
 )
 
-// mmIPInfoMap is a [ipinfo.IPInfoMap] that uses [geoip2.Reader] to read MMDB files.
-type mmIPInfoMap struct {
+// MMDBIpInfoMap is a [ipinfo.IPInfoMap] that uses MMDB files to lookup IP information.
+type MMDBIPInfoMap struct {
 	countryDB *geoip2.Reader
+	asnDB     *geoip2.Reader
 }
 
-// NewMMDBIPInfoMap creates a [ipinfo.IPInfoMap] that uses [geoip2.Reader] to lookup IP information from a MMDB.
-func NewMMDBIPInfoMap(countryDB *geoip2.Reader) IPInfoMap {
-	return &mmIPInfoMap{countryDB}
+var _ IPInfoMap = (*MMDBIPInfoMap)(nil)
+
+// NewMMDBIPInfoMap creates a [ipinfo.IPInfoMap] that uses the MMDB at countryDBPath to lookup IP Country information
+// and the MMDB at asnDBPath to lookup IP ASN information. Either may be "", in which case you won't get the corresponding
+// information in the IPInfo.
+func NewMMDBIPInfoMap(countryDBPath string, asnDBPath string) (*MMDBIPInfoMap, error) {
+	var ip2info MMDBIPInfoMap
+	var countryErr, asnErr error
+	if countryDBPath != "" {
+		ip2info.countryDB, countryErr = geoip2.Open(countryDBPath)
+	}
+	if asnDBPath != "" {
+		ip2info.asnDB, asnErr = geoip2.Open(asnDBPath)
+	}
+	return &ip2info, errors.Join(countryErr, asnErr)
 }
 
-var _ IPInfoMap = (*mmIPInfoMap)(nil)
+func (ip2info *MMDBIPInfoMap) Close() error {
+	var countryErr, asnErr error
+	if ip2info.countryDB != nil {
+		countryErr = ip2info.countryDB.Close()
+	}
+	if ip2info.asnDB != nil {
+		asnErr = ip2info.asnDB.Close()
+	}
+	return errors.Join(countryErr, asnErr)
+}
 
-func (ip2info *mmIPInfoMap) GetIPInfo(ip net.IP) (IPInfo, error) {
+// GetIPInfo implements [IPInfoMap].GetIPInfo.
+func (ip2info *MMDBIPInfoMap) GetIPInfo(ip net.IP) (IPInfo, error) {
+	var countryErr, asnErr error
 	var info IPInfo
-	if ip2info == nil || ip2info.countryDB == nil {
+	if ip2info == nil {
 		// Location is disabled. return empty info.
 		return info, nil
 	}
-	record, err := ip2info.countryDB.Country(ip)
-	if err != nil {
-		info.CountryCode = errDbLookupError
-		return info, fmt.Errorf("IP lookup failed: %w", err)
+	if ip2info.countryDB != nil {
+		var record *geoip2.Country
+		record, countryErr = ip2info.countryDB.Country(ip)
+		if countryErr != nil {
+			info.CountryCode = errDbLookupError
+			countryErr = fmt.Errorf("country lookup failed: %w", countryErr)
+		} else if record != nil && record.Country.IsoCode != "" {
+			info.CountryCode = CountryCode(record.Country.IsoCode)
+		}
 	}
-	if record != nil && record.Country.IsoCode != "" {
-		info.CountryCode = CountryCode(record.Country.IsoCode)
+	if ip2info.asnDB != nil {
+		var record *geoip2.ASN
+		record, asnErr = ip2info.asnDB.ASN(ip)
+		if asnErr == nil && record != nil {
+			info.ASN = int(record.AutonomousSystemNumber)
+		}
 	}
-	return info, nil
+	return info, errors.Join(countryErr, asnErr)
 }

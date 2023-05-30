@@ -32,7 +32,6 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/op/go-logging"
-	"github.com/oschwald/geoip2-golang"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
@@ -270,17 +269,17 @@ func main() {
 		logger.Infof("Prometheus metrics available at http://%v/metrics", flags.MetricsAddr)
 	}
 
-	var ipCountryDB *geoip2.Reader
+	var ip2info *ipinfo.MMDBIPInfoMap
 	var err error
 	if flags.IPCountryDB != "" {
 		logger.Infof("Using IP-Country database at %v", flags.IPCountryDB)
-		ipCountryDB, err = geoip2.Open(flags.IPCountryDB)
+		ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, "")
 		if err != nil {
 			logger.Fatalf("Could not open geoip database at %v: %v. Aborting", flags.IPCountryDB, err)
 		}
-		defer ipCountryDB.Close()
+		defer ip2info.Close()
 	}
-	ip2info := ipinfo.NewMMDBIPInfoMap(ipCountryDB)
+
 	m := metrics.NewPrometheusShadowsocksMetrics(ip2info, prometheus.DefaultRegisterer)
 	m.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
