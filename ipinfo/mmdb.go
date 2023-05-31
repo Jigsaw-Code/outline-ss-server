@@ -22,7 +22,7 @@ import (
 	"github.com/oschwald/geoip2-golang"
 )
 
-// MMDBIpInfoMap is a [ipinfo.IPInfoMap] that uses MMDB files to lookup IP information.
+// MMDBIpInfoMap is an [ipinfo.IPInfoMap] that uses MMDB files to lookup IP information.
 type MMDBIPInfoMap struct {
 	countryDB *geoip2.Reader
 	asnDB     *geoip2.Reader
@@ -30,7 +30,7 @@ type MMDBIPInfoMap struct {
 
 var _ IPInfoMap = (*MMDBIPInfoMap)(nil)
 
-// NewMMDBIPInfoMap creates a [ipinfo.IPInfoMap] that uses the MMDB at countryDBPath to lookup IP Country information
+// NewMMDBIPInfoMap creates an [ipinfo.IPInfoMap] that uses the MMDB at countryDBPath to lookup IP Country information
 // and the MMDB at asnDBPath to lookup IP ASN information. Either may be "", in which case you won't get the corresponding
 // information in the IPInfo.
 func NewMMDBIPInfoMap(countryDBPath string, asnDBPath string) (*MMDBIPInfoMap, error) {
@@ -68,7 +68,6 @@ func (ip2info *MMDBIPInfoMap) GetIPInfo(ip net.IP) (IPInfo, error) {
 		var record *geoip2.Country
 		record, countryErr = ip2info.countryDB.Country(ip)
 		if countryErr != nil {
-			info.CountryCode = errDbLookupError
 			countryErr = fmt.Errorf("country lookup failed: %w", countryErr)
 		} else if record != nil && record.Country.IsoCode != "" {
 			info.CountryCode = CountryCode(record.Country.IsoCode)
@@ -77,7 +76,9 @@ func (ip2info *MMDBIPInfoMap) GetIPInfo(ip net.IP) (IPInfo, error) {
 	if ip2info.asnDB != nil {
 		var record *geoip2.ASN
 		record, asnErr = ip2info.asnDB.ASN(ip)
-		if asnErr == nil && record != nil {
+		if asnErr != nil {
+			asnErr = fmt.Errorf("asn lookup failed: %w", asnErr)
+		} else if record != nil {
 			info.ASN = int(record.AutonomousSystemNumber)
 		}
 	}

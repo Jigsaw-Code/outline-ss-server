@@ -36,19 +36,22 @@ func (cc CountryCode) String() string {
 }
 
 const (
+	// Codes in the X* range are reserved to be user-assigned.
+	// See https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2#Decoding_table
 	errParseAddr     CountryCode = "XA"
 	localLocation    CountryCode = "XL"
 	errDbLookupError CountryCode = "XD"
-	unknownLocation  CountryCode = "ZZ"
+	// Code "ZZ" is also used by Unicode as unknown country.
+	unknownLocation CountryCode = "ZZ"
 )
 
 // GetIPInfoFromAddr is a helper function to extract the IP address from the [net.Addr]
 // and call [IPInfoMap].GetIPInfo.
 // It uses special country codes to indicate errors:
-//   - "XA": failed to extract the IP from the address
-//   - "XL": IP is not global.
-//   - "XD": error lookip up the country code
-//   - "ZZ": lookup returned an empty country code.
+//   - "XA": failed to extract the IP from the address ("A" is for "Address").
+//   - "XL": IP is not global ("L" is for "Local").
+//   - "XD": database error looking up the country code ("D" is for "DB").
+//   - "ZZ": lookup returned an empty country code (same as the Unicode unknown location).
 func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 	var info IPInfo
 	if ip2info == nil {
@@ -56,6 +59,10 @@ func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 		return info, nil
 	}
 
+	if addr == nil {
+		info.CountryCode = errParseAddr
+		return info, fmt.Errorf("address cannot be nil")
+	}
 	hostname, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
 		info.CountryCode = errParseAddr
@@ -67,7 +74,7 @@ func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 		return info, errors.New("failed to parse address as IP")
 	}
 
-	if ip.IsLoopback() || ip.IsGlobalUnicast() {
+	if !ip.IsGlobalUnicast() {
 		info.CountryCode = localLocation
 		return info, nil
 	}

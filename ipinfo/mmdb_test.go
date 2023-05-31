@@ -15,6 +15,7 @@
 package ipinfo
 
 import (
+	"io/fs"
 	"net"
 	"os"
 	"testing"
@@ -23,16 +24,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ensureTestData(tb testing.TB) {
-	_, err := os.Stat("../third_party/maxmind/test-data/")
-	if os.IsNotExist(err) {
-		// The test data is in a git submodule that must be initialized before running the test.
-		tb.Skip("Test MMDB directory not found. Make sure you ran `git submodule update --init --depth=1`")
-	}
+func TestTestDataExists(t *testing.T) {
+	_, err := os.Stat("../third_party/maxmind/test-data")
+	// The test data is in a git submodule that must be initialized before running the test.
+	require.NotErrorIs(t, err, fs.ErrNotExist, "Test MMDB directory not found. Make sure you ran `git submodule update --init --depth=1`")
+}
+
+func TestIPInfoMapNil(t *testing.T) {
+	var infoMap *MMDBIPInfoMap = nil
+	info, err := infoMap.GetIPInfo(net.ParseIP("111.235.160.0"))
+	require.NoError(t, err)
+	assert.Equal(t, IPInfo{}, info)
+}
+
+func TestIPInfoMapEmpty(t *testing.T) {
+	ip2info, err := NewMMDBIPInfoMap("", "")
+	require.NoError(t, err)
+	defer ip2info.Close()
+
+	info, err := ip2info.GetIPInfo(net.ParseIP("111.235.160.0"))
+	require.NoError(t, err)
+	assert.Equal(t, IPInfo{}, info)
 }
 
 func TestIPInfoMapCountryOnly(t *testing.T) {
-	ensureTestData(t)
 	ip2info, err := NewMMDBIPInfoMap("../third_party/maxmind/test-data/GeoLite2-Country-Test.mmdb", "")
 	require.NoError(t, err)
 	defer ip2info.Close()
@@ -56,7 +71,6 @@ func TestIPInfoMapCountryOnly(t *testing.T) {
 }
 
 func TestIPInfoMapASNOnly(t *testing.T) {
-	ensureTestData(t)
 	ip2info, err := NewMMDBIPInfoMap("", "../third_party/maxmind/test-data/GeoLite2-ASN-Test.mmdb")
 	require.NoError(t, err)
 	defer ip2info.Close()
@@ -84,7 +98,6 @@ func TestIPInfoMapASNOnly(t *testing.T) {
 }
 
 func TestIPInfoMap(t *testing.T) {
-	ensureTestData(t)
 	ip2info, err := NewMMDBIPInfoMap("../third_party/maxmind/test-data/GeoLite2-Country-Test.mmdb", "../third_party/maxmind/test-data/GeoLite2-ASN-Test.mmdb")
 	require.NoError(t, err)
 	defer ip2info.Close()
@@ -111,7 +124,6 @@ func TestIPInfoMap(t *testing.T) {
 }
 
 func BenchmarkNewMMDBIPInfoMap(b *testing.B) {
-	ensureTestData(b)
 	ip2info, err := NewMMDBIPInfoMap("../third_party/maxmind/test-data/GeoLite2-Country-Test.mmdb", "../third_party/maxmind/test-data/GeoLite2-ASN-Test.mmdb")
 	require.NoError(b, err)
 	defer ip2info.Close()
