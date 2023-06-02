@@ -113,7 +113,7 @@ func TestTCPEcho(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &service.NoOpTCPMetrics{}, testTimeout)
 	handler.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -162,7 +162,7 @@ func TestTCPEcho(t *testing.T) {
 }
 
 type statusMetrics struct {
-	metrics.NoOpMetrics
+	service.NoOpTCPMetrics
 	sync.Mutex
 	statuses []string
 }
@@ -232,12 +232,11 @@ type udpRecord struct {
 
 // Fake metrics implementation for UDP
 type fakeUDPMetrics struct {
-	metrics.ShadowsocksMetrics
 	up, down []udpRecord
 	natAdded int
 }
 
-var _ metrics.ShadowsocksMetrics = (*fakeUDPMetrics)(nil)
+var _ service.UDPMetrics = (*fakeUDPMetrics)(nil)
 
 func (m *fakeUDPMetrics) GetIPInfo(ip net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{CountryCode: "QQ"}, nil
@@ -362,7 +361,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 		b.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, nil, &metrics.NoOpMetrics{}, testTimeout)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, nil, &service.NoOpTCPMetrics{}, testTimeout)
 	handler.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -424,7 +423,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &metrics.NoOpMetrics{}, testTimeout)
+	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, cipherList, &replayCache, &service.NoOpTCPMetrics{}, testTimeout)
 	handler.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -497,7 +496,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &metrics.NoOpMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -541,7 +540,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &metrics.NoOpMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {

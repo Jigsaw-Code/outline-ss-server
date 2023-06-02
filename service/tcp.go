@@ -35,6 +35,19 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
+// TCPMetrics is used to report metrics on TCP connections.
+type TCPMetrics interface {
+	ipinfo.IPInfoMap
+
+	// TCP metrics
+	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
+	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
+
+	// Shadowsocks TCP metrics
+	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
+	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+}
+
 func remoteIP(conn net.Conn) net.IP {
 	addr := conn.RemoteAddr()
 	if addr == nil {
@@ -108,7 +121,7 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 type tcpHandler struct {
 	port        int
 	ciphers     CipherList
-	m           metrics.ShadowsocksMetrics
+	m           TCPMetrics
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 	replayCache       *ReplayCache
@@ -117,7 +130,7 @@ type tcpHandler struct {
 
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPHandler {
+func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m TCPMetrics, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
 		port:              port,
 		ciphers:           ciphers,
@@ -331,3 +344,19 @@ func drainErrToString(drainErr error) string {
 		return "other"
 	}
 }
+
+// NoOpTCPMetrics is a [TCPMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpTCPMetrics struct{}
+
+var _ TCPMetrics = (*NoOpTCPMetrics)(nil)
+
+func (m *NoOpTCPMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+}
+func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
+}
+func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
+func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+}
+func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

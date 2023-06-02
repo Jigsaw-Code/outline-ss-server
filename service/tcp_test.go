@@ -216,14 +216,13 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 
 // Stub metrics implementation for testing replay defense.
 type probeTestMetrics struct {
-	metrics.ShadowsocksMetrics
 	mu          sync.Mutex
 	probeData   []int64
 	probeStatus []string
 	closeStatus []string
 }
 
-var _ metrics.ShadowsocksMetrics = (*probeTestMetrics)(nil)
+var _ TCPMetrics = (*probeTestMetrics)(nil)
 
 func (m *probeTestMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
@@ -234,17 +233,8 @@ func (m *probeTestMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, acce
 func (m *probeTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
-func (m *probeTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
-}
 func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 }
-func (m *probeTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-}
-func (m *probeTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
-}
-func (m *probeTestMetrics) AddUDPNatEntry()    {}
-func (m *probeTestMetrics) RemoveUDPNatEntry() {}
-
 func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
 	m.mu.Lock()
 	m.probeData = append(m.probeData, clientProxyBytes)
@@ -253,7 +243,6 @@ func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, cli
 }
 
 func (m *probeTestMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
-func (m *probeTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 func (m *probeTestMetrics) countStatuses() map[string]int {
 	counts := make(map[string]int)

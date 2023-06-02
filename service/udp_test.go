@@ -25,7 +25,6 @@ import (
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/assert"
@@ -100,21 +99,14 @@ type udpReport struct {
 
 // Stub metrics implementation for testing NAT behaviors.
 type natTestMetrics struct {
-	metrics.ShadowsocksMetrics
 	natEntriesAdded int
 	upstreamPackets []udpReport
 }
 
-var _ metrics.ShadowsocksMetrics = (*natTestMetrics)(nil)
+var _ UDPMetrics = (*natTestMetrics)(nil)
 
-func (m *natTestMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
-}
 func (m *natTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
-}
-func (m *natTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
-}
-func (m *natTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 }
 func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
@@ -124,10 +116,7 @@ func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 func (m *natTestMetrics) AddUDPNatEntry() {
 	m.natEntriesAdded++
 }
-func (m *natTestMetrics) RemoveUDPNatEntry() {}
-func (m *natTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
-}
-func (m *natTestMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
+func (m *natTestMetrics) RemoveUDPNatEntry()                                                 {}
 func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 // Takes a validation policy, and returns the metrics it

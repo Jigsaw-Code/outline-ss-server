@@ -30,7 +30,6 @@ import (
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/op/go-logging"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -68,7 +67,7 @@ type ssPort struct {
 
 type SSServer struct {
 	natTimeout  time.Duration
-	m           metrics.ShadowsocksMetrics
+	m           *outlineMetrics
 	replayCache service.ReplayCache
 	ports       map[int]*ssPort
 }
@@ -179,7 +178,7 @@ func (s *SSServer) Stop() error {
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
-func RunSSServer(filename string, natTimeout time.Duration, sm metrics.ShadowsocksMetrics, replayHistory int) (*SSServer, error) {
+func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
 		natTimeout:  natTimeout,
 		m:           sm,
@@ -280,7 +279,7 @@ func main() {
 		defer ip2info.Close()
 	}
 
-	m := metrics.NewPrometheusShadowsocksMetrics(ip2info, prometheus.DefaultRegisterer)
+	m := newPrometheusOutlineMetrics(ip2info, prometheus.DefaultRegisterer)
 	m.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
 	if err != nil {

@@ -25,10 +25,23 @@ import (
 	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
+
+// UDPMetrics is used to report metrics on UDP connections.
+type UDPMetrics interface {
+	ipinfo.IPInfoMap
+
+	// UDP metrics
+	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
+	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
+	AddUDPNatEntry()
+	RemoveUDPNatEntry()
+
+	// Shadowsocks metrics
+	AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+}
 
 // Max UDP buffer size for the server code.
 const serverUDPBufferSize = 64 * 1024
@@ -73,12 +86,12 @@ func findAccessKeyUDP(clientIP net.IP, dst, src []byte, cipherList CipherList) (
 type packetHandler struct {
 	natTimeout        time.Duration
 	ciphers           CipherList
-	m                 metrics.ShadowsocksMetrics
+	m                 UDPMetrics
 	targetIPValidator onet.TargetIPValidator
 }
 
 // NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m metrics.ShadowsocksMetrics) PacketHandler {
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics) PacketHandler {
 	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
 }
 
@@ -296,11 +309,11 @@ type natmap struct {
 	sync.RWMutex
 	keyConn map[string]*natconn
 	timeout time.Duration
-	metrics metrics.ShadowsocksMetrics
+	metrics UDPMetrics
 	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, sm metrics.ShadowsocksMetrics, running *sync.WaitGroup) *natmap {
+func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup) *natmap {
 	m := &natmap{metrics: sm, running: running}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
@@ -377,7 +390,7 @@ var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
 func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn,
-	keyID string, sm metrics.ShadowsocksMetrics) {
+	keyID string, sm UDPMetrics) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
@@ -448,3 +461,20 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		sm.AddUDPPacketFromTarget(targetConn.clientInfo, keyID, status, bodyLen, proxyClientBytes)
 	}
 }
+
+// NoOpUDPMetrics is a [UDPMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpUDPMetrics struct{}
+
+var _ UDPMetrics = (*NoOpUDPMetrics)(nil)
+
+func (m *NoOpUDPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
+}
+func (m *NoOpUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+}
+func (m *NoOpUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+}
+func (m *NoOpUDPMetrics) AddUDPNatEntry()                                                    {}
+func (m *NoOpUDPMetrics) RemoveUDPNatEntry()                                                 {}
+func (m *NoOpUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

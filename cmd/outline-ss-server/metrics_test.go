@@ -1,16 +1,31 @@
-package metrics
+// Copyright 2023 Jigsaw Operations LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
 
 import (
 	"testing"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
+	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestMethodsDontPanic(t *testing.T) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewPedanticRegistry())
-	proxyMetrics := ProxyMetrics{
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry())
+	proxyMetrics := metrics.ProxyMetrics{
 		ClientProxy: 1,
 		ProxyTarget: 2,
 		TargetProxy: 3,
@@ -30,7 +45,7 @@ func TestMethodsDontPanic(t *testing.T) {
 }
 
 func BenchmarkOpenTCP(b *testing.B) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "ZZ"})
@@ -38,11 +53,11 @@ func BenchmarkOpenTCP(b *testing.B) {
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
-	data := ProxyMetrics{}
+	data := metrics.ProxyMetrics{}
 	timeToCipher := time.Microsecond
 	duration := time.Minute
 	b.ResetTimer()
@@ -53,11 +68,11 @@ func BenchmarkCloseTCP(b *testing.B) {
 }
 
 func BenchmarkProbe(b *testing.B) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	status := "ERR_REPLAY"
 	drainResult := "other"
 	port := 12345
-	data := ProxyMetrics{}
+	data := metrics.ProxyMetrics{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ssMetrics.AddTCPProbe(status, drainResult, port, data.ClientProxy)
@@ -65,7 +80,7 @@ func BenchmarkProbe(b *testing.B) {
 }
 
 func BenchmarkClientUDP(b *testing.B) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
@@ -79,7 +94,7 @@ func BenchmarkClientUDP(b *testing.B) {
 }
 
 func BenchmarkTargetUDP(b *testing.B) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
 	accessKey := "key 1"
 	status := "OK"
@@ -91,7 +106,7 @@ func BenchmarkTargetUDP(b *testing.B) {
 }
 
 func BenchmarkNAT(b *testing.B) {
-	ssMetrics := NewPrometheusShadowsocksMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ssMetrics.AddUDPNatEntry()
