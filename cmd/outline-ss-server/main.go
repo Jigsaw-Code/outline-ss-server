@@ -229,6 +229,7 @@ func main() {
 		ConfigFile    string
 		MetricsAddr   string
 		IPCountryDB   string
+		IPASNDB       string
 		natTimeout    time.Duration
 		replayHistory int
 		Verbose       bool
@@ -237,6 +238,7 @@ func main() {
 	flag.StringVar(&flags.ConfigFile, "config", "", "Configuration filename")
 	flag.StringVar(&flags.MetricsAddr, "metrics", "", "Address for the Prometheus metrics")
 	flag.StringVar(&flags.IPCountryDB, "ip_country_db", "", "Path to the ip-to-country mmdb file")
+	flag.StringVar(&flags.IPASNDB, "ip_asn_db", "", "Path to the ip-to-ASN mmdb file")
 	flag.DurationVar(&flags.natTimeout, "udptimeout", defaultNatTimeout, "UDP tunnel timeout")
 	flag.IntVar(&flags.replayHistory, "replay_history", 0, "Replay buffer size (# of handshakes)")
 	flag.BoolVar(&flags.Verbose, "verbose", false, "Enables verbose logging output")
@@ -268,16 +270,18 @@ func main() {
 		logger.Infof("Prometheus metrics available at http://%v/metrics", flags.MetricsAddr)
 	}
 
-	var ip2info *ipinfo.MMDBIPInfoMap
 	var err error
 	if flags.IPCountryDB != "" {
 		logger.Infof("Using IP-Country database at %v", flags.IPCountryDB)
-		ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, "")
-		if err != nil {
-			logger.Fatalf("Could not open geoip database at %v: %v. Aborting", flags.IPCountryDB, err)
-		}
-		defer ip2info.Close()
 	}
+	if flags.IPASNDB != "" {
+		logger.Infof("Using IP-ASN database at %v", flags.IPASNDB)
+	}
+	ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, flags.IPASNDB)
+	if err != nil {
+		logger.Fatalf("Could create IP info map: %v. Aborting", err)
+	}
+	defer ip2info.Close()
 
 	m := newPrometheusOutlineMetrics(ip2info, prometheus.DefaultRegisterer)
 	m.SetBuildInfo(version)

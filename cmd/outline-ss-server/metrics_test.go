@@ -21,6 +21,7 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMethodsDontPanic(t *testing.T) {
@@ -33,10 +34,10 @@ func TestMethodsDontPanic(t *testing.T) {
 	}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
-	ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "US"})
-	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{CountryCode: "US"}, "1", "OK", proxyMetrics, 10*time.Millisecond)
-	ssMetrics.AddUDPPacketFromClient(ipinfo.IPInfo{CountryCode: "US"}, "2", "OK", 10, 20)
-	ssMetrics.AddUDPPacketFromTarget(ipinfo.IPInfo{CountryCode: "US"}, "3", "OK", 10, 20)
+	ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "US", ASN: 100})
+	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "1", "OK", proxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddUDPPacketFromClient(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "2", "OK", 10, 20)
+	ssMetrics.AddUDPPacketFromTarget(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "3", "OK", 10, 20)
 	ssMetrics.AddUDPNatEntry()
 	ssMetrics.RemoveUDPNatEntry()
 	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
@@ -44,17 +45,22 @@ func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
 }
 
+func TestASNLabel(t *testing.T) {
+	require.Equal(t, "", asnLabel(0))
+	require.Equal(t, "100", asnLabel(100))
+}
+
 func BenchmarkOpenTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "ZZ"})
+		ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100})
 	}
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
 	accessKey := "key 1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
@@ -81,7 +87,7 @@ func BenchmarkProbe(b *testing.B) {
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
@@ -95,7 +101,7 @@ func BenchmarkClientUDP(b *testing.B) {
 
 func BenchmarkTargetUDP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ"}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
