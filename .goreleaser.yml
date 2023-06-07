@@ -18,7 +18,7 @@ project_name: outline-ss-server
 # Skip 32 bit macOS builds.
 builds:
   -
-    main: ./cmd/outline-ss-server/main.go
+    main: ./cmd/outline-ss-server
     env:
       - CGO_ENABLED=0
     goos:

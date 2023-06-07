@@ -8,7 +8,7 @@ release: clean-all
 	$(GORELEASER)
 
 release-local:
-	$(GORELEASER) --rm-dist --snapshot
+	$(GORELEASER) --clean --snapshot
 
 test: third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb
 	go test -v -race -benchmem -bench=. ./... -benchtime=100ms
