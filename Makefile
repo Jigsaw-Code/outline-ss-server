@@ -1,10 +1,10 @@
 BUILDDIR=$(CURDIR)/dist
 GORELEASER=go run github.com/goreleaser/goreleaser
 
-.PHONY: release release-local test clean clean-all
+.PHONY: release release-local test clean
 
 # This requires GITHUB_TOKEN to be set.
-release: clean-all
+release: clean
 	$(GORELEASER)
 
 release-local:
@@ -23,6 +23,3 @@ go.mod: tools.go
 clean:
 	rm -rf $(BUILDDIR)
 	go clean
-
-clean-all: clean
-	rm -rf $(CURDIR)/third_party/maxmind/*
