@@ -152,7 +152,7 @@ func (s *tcpHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidat
 	s.targetIPValidator = targetIPValidator
 }
 
-func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (transport.StreamConn, *onet.ConnectionError) {
+func dialTarget(tgtAddr string, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (transport.StreamConn, *onet.ConnectionError) {
 	var ipError *onet.ConnectionError
 	dialer := net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)
@@ -162,7 +162,7 @@ func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIP
 		}
 		return nil
 	}}
-	tgtConn, err := dialer.Dial("tcp", tgtAddr.String())
+	tgtConn, err := dialer.Dial("tcp", tgtAddr)
 	if ipError != nil {
 		return nil, ipError
 	} else if err != nil {
@@ -226,9 +226,27 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
-	id, connError := h.handleConnection(h.port, measuredClientConn, &proxyMetrics)
-
+	id, connError := func() (string, *onet.ConnectionError) {
+		// Set a deadline to receive the address to the target.
+		clientConn.SetReadDeadline(time.Now().Add(h.readTimeout))
+		id, authConn, connError := h.authenticateConnection(h.port, measuredClientConn, &proxyMetrics)
+		if connError != nil {
+			return id, connError
+		}
+		// 3. Read target address and dial it.
+		tgtAddr, err := socks.ReadAddr(clientConn)
+		// Clear the deadline for the target address
+		clientConn.SetReadDeadline(time.Time{})
+		if err != nil {
+			// Drain to prevent a close on cipher error.
+			io.Copy(io.Discard, clientConn)
+			return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
+		}
+		connError = h.proxyConnection(authConn, tgtAddr.String(), &proxyMetrics)
+		return id, connError
+	}()
 	connDuration := time.Since(connStart)
+
 	status := "OK"
 	if connError != nil {
 		status = connError.Status
@@ -239,10 +257,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
-	// Set a deadline to receive the address to the target.
-	clientConn.SetReadDeadline(time.Now().Add(h.readTimeout))
-
+func (h *tcpHandler) authenticateConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, transport.StreamConn, *onet.ConnectionError) {
 	// 1. Find the cipher and acess key id.
 	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), h.ciphers)
 	h.m.AddTCPCipherSearch(keyErr == nil, timeToCipher)
@@ -250,7 +265,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		logger.Debugf("Failed to find a valid cipher after reading %v bytes: %v", proxyMetrics.ClientProxy, keyErr)
 		const status = "ERR_CIPHER"
 		h.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
-		return "", onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
+		return "", nil, onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
 	}
 	var id string
 	if cipherEntry != nil {
@@ -269,34 +284,28 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		}
 		h.absorbProbe(listenerPort, clientConn, status, proxyMetrics)
 		logger.Debugf(status+": %v sent %d bytes", clientConn.RemoteAddr(), proxyMetrics.ClientProxy)
-		return id, onet.NewConnectionError(status, "Replay detected", nil)
+		return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
 	}
-
-	// 3. Read target address and dial it.
 	ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
-	tgtAddr, err := socks.ReadAddr(ssr)
-	// Clear the deadline for the target address
-	clientConn.SetReadDeadline(time.Time{})
-	if err != nil {
-		// Drain to prevent a close on cipher error.
-		io.Copy(io.Discard, clientConn)
-		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
-	}
+	ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
+	ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
+	return id, transport.WrapConn(clientConn, ssr, ssw), nil
+}
+
+func (h *tcpHandler) proxyConnection(clientConn transport.StreamConn, tgtAddr string, proxyMetrics *metrics.ProxyMetrics) *onet.ConnectionError {
 	tgtConn, dialErr := dialTarget(tgtAddr, proxyMetrics, h.targetIPValidator)
 	if dialErr != nil {
 		// We don't drain so dial errors and invalid addresses are communicated quickly.
-		return id, dialErr
+		return dialErr
 	}
 	defer tgtConn.Close()
 
 	// 4. Bridge the client and target connections
 	logger.Debugf("proxy %s <-> %s", clientConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
-	ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
-	ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 
 	fromClientErrCh := make(chan error)
 	go func() {
-		_, fromClientErr := ssr.WriteTo(tgtConn)
+		_, fromClientErr := clientConn.WriteTo(tgtConn)
 		if fromClientErr != nil {
 			// Drain to prevent a close in the case of a cipher error.
 			io.Copy(io.Discard, clientConn)
@@ -308,19 +317,19 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		tgtConn.CloseWrite()
 		fromClientErrCh <- fromClientErr
 	}()
-	_, fromTargetErr := ssw.ReadFrom(tgtConn)
+	_, fromTargetErr := clientConn.ReadFrom(tgtConn)
 	// Send FIN to client.
 	clientConn.CloseWrite()
 	tgtConn.CloseRead()
 
 	fromClientErr := <-fromClientErrCh
 	if fromClientErr != nil {
-		return id, onet.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
+		return onet.NewConnectionError("ERR_RELAY_CLIENT", "Failed to relay traffic from client", fromClientErr)
 	}
 	if fromTargetErr != nil {
-		return id, onet.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
+		return onet.NewConnectionError("ERR_RELAY_TARGET", "Failed to relay traffic from target", fromTargetErr)
 	}
-	return id, nil
+	return nil
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
