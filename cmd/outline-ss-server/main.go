@@ -279,7 +279,7 @@ func main() {
 	}
 	ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, flags.IPASNDB)
 	if err != nil {
-		logger.Fatalf("Could create IP info map: %v. Aborting", err)
+		logger.Fatalf("Failed to create IP info map: %v. Aborting", err)
 	}
 	defer ip2info.Close()
 
