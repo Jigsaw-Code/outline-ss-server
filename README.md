@@ -42,11 +42,7 @@ To fetch and update MMDB files from [DB-IP](https://db-ip.com), you can do somet
 
 ## Full Working Example: Try It!
 
-Fetch dependencies for this demo:
-```
-GO111MODULE=off go get github.com/prometheus/prometheus/cmd/...
-```
-If that doesn't work, download the [prometheus](https://prometheus.io/download/) binary directly.
+Download the [Prometheus](https://prometheus.io/download/) binary.
 
 
 ### Run the server
@@ -60,7 +56,7 @@ In production, you may want to specify `-ip_country_db` to get per-country metri
 ### Run the Prometheus scraper for metrics collection
 On Terminal 2, start prometheus scraper for metrics collection:
 ```
-$(go env GOPATH)/bin/prometheus --config.file=cmd/outline-ss-server/prometheus_example.yml
+prometheus --config.file=cmd/outline-ss-server/prometheus_example.yml
 ```
 
 ### Run the SOCKS-to-Shadowsocks client
