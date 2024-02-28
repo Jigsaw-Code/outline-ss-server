@@ -36,6 +36,10 @@ type outlineMetrics struct {
 	timeToCipherMs       *prometheus.HistogramVec
 	// TODO: Add time to first byte.
 
+	keyTime              *prometheus.CounterVec
+	IPKeyTimePerKey      *prometheus.CounterVec
+	IPKeyTimePerLocation *prometheus.CounterVec
+
 	tcpProbes               *prometheus.HistogramVec
 	tcpOpenConnections      *prometheus.CounterVec
 	tcpClosedConnections    *prometheus.CounterVec
@@ -104,6 +108,21 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 					float64(7 * 24 * time.Hour.Milliseconds()), // Week
 				},
 			}, []string{"status"}),
+		keyTime: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "shadowsocks",
+			Name:      "key_connectivity_seconds",
+			Help:      "Time at least 1 connection was open, per key",
+		}, []string{"key"}),
+		IPKeyTimePerKey: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "shadowsocks",
+			Name:      "ip_key_connectivity_seconds",
+			Help:      "Time at least 1 connection was open for a (IP, access key) pair, per key",
+		}, []string{"key"}),
+		IPKeyTimePerLocation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "shadowsocks",
+			Name:      "ip_key_connectivity_seconds_per_location",
+			Help:      "Time at least 1 connection was open for a (IP, access key) pair, per location",
+		}, []string{"location", "asn"}),
 		dataBytes: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "shadowsocks",
@@ -148,7 +167,8 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 
 	// TODO: Is it possible to pass where to register the collectors?
 	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
-		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries)
+		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries,
+		m.keyTime, m.IPKeyTimePerKey, m.IPKeyTimePerLocation)
 	return m
 }
 
