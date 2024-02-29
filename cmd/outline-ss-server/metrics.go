@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -54,8 +55,8 @@ var _ service.TCPMetrics = (*outlineMetrics)(nil)
 var _ service.UDPMetrics = (*outlineMetrics)(nil)
 
 // newPrometheusOutlineMetrics constructs a metrics object that uses
-// `ipCountryDB` to convert IP addresses to countries, and reports all
-// metrics to Prometheus via `registerer`.  `ipCountryDB` may be nil, but
+// `ip2info` to convert IP addresses to countries, and reports all
+// metrics to Prometheus via `registerer`. `ip2info` may be nil, but
 // `registerer` must not be.
 func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) *outlineMetrics {
 	m := &outlineMetrics{
@@ -181,7 +182,12 @@ func (m *outlineMetrics) SetNumAccessKeys(numKeys int, ports int) {
 	m.ports.Set(float64(ports))
 }
 
-func (m *outlineMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
+func (m *outlineMetrics) AddOpenTCPConnection(ip net.Addr) {
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(m.IPInfoMap, ip)
+	if err != nil {
+		logger.Warningf("Failed client info lookup: %v", err)
+	}
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, ip.String())
 	m.tcpOpenConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
 }
 
@@ -199,7 +205,12 @@ func asnLabel(asn int) string {
 	return fmt.Sprint(asn)
 }
 
-func (m *outlineMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *outlineMetrics) AddClosedTCPConnection(ip net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(m.IPInfoMap, ip)
+	if err != nil {
+		logger.Warningf("Failed client info lookup: %v", err)
+	}
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, ip.String())
 	m.tcpClosedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
 	m.tcpConnectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 	addIfNonZero(data.ClientProxy, m.dataBytes, "c>p", "tcp", accessKey)

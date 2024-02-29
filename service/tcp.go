@@ -40,8 +40,8 @@ type TCPMetrics interface {
 	ipinfo.IPInfoMap
 
 	// TCP metrics
-	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
-	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
+	AddOpenTCPConnection(ip net.Addr)
+	AddClosedTCPConnection(ip net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
 
 	// Shadowsocks TCP metrics
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
@@ -216,12 +216,7 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 }
 
 func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
-	if err != nil {
-		logger.Warningf("Failed client info lookup: %v", err)
-	}
-	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, clientConn.RemoteAddr().String())
-	h.m.AddOpenTCPConnection(clientInfo)
+	h.m.AddOpenTCPConnection(clientConn.RemoteAddr())
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
@@ -234,7 +229,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 		status = connError.Status
 		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
 	}
-	h.m.AddClosedTCPConnection(clientInfo, id, status, proxyMetrics, connDuration)
+	h.m.AddClosedTCPConnection(clientConn.RemoteAddr(), id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
@@ -351,12 +346,12 @@ type NoOpTCPMetrics struct{}
 
 var _ TCPMetrics = (*NoOpTCPMetrics)(nil)
 
-func (m *NoOpTCPMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *NoOpTCPMetrics) AddClosedTCPConnection(ip net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
 func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
-func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
+func (m *NoOpTCPMetrics) AddOpenTCPConnection(ip net.Addr) {}
 func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
 }
 func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
