@@ -278,12 +278,12 @@ func (m *outlineMetrics) SetNumAccessKeys(numKeys int, ports int) {
 	m.ports.Set(float64(ports))
 }
 
-func (m *outlineMetrics) AddOpenTCPConnection(ip net.Addr) {
-	clientInfo, err := ipinfo.GetIPInfoFromAddr(m.IPInfoMap, ip)
+func (m *outlineMetrics) AddOpenTCPConnection(addr net.Addr) {
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(m.IPInfoMap, addr)
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
 	}
-	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, ip.String())
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, addr.String())
 	m.tcpOpenConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
 }
 

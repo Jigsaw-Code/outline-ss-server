@@ -24,6 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type fakeAddr string
+
+func (a fakeAddr) String() string  { return string(a) }
+func (a fakeAddr) Network() string { return "" }
+
 func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry())
 	proxyMetrics := metrics.ProxyMetrics{
@@ -34,12 +39,12 @@ func TestMethodsDontPanic(t *testing.T) {
 	}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
-	ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "US", ASN: 100})
-	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "1", "OK", proxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddOpenTCPConnection(fakeAddr("127.0.0.1:9"))
+	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
 	ssMetrics.AddUDPPacketFromClient(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "2", "OK", 10, 20)
 	ssMetrics.AddUDPPacketFromTarget(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "3", "OK", 10, 20)
-	ssMetrics.AddUDPNatEntry()
-	ssMetrics.RemoveUDPNatEntry()
+	ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
+	ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
 	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
 	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
 	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
@@ -54,13 +59,13 @@ func BenchmarkOpenTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddOpenTCPConnection(ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100})
+		ssMetrics.AddOpenTCPConnection(fakeAddr("127.0.0.1:9"))
 	}
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
+	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
@@ -68,7 +73,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddClosedTCPConnection(clientInfo, accessKey, status, data, duration)
+		ssMetrics.AddClosedTCPConnection(addr, accessKey, status, data, duration)
 		ssMetrics.AddTCPCipherSearch(true, timeToCipher)
 	}
 }
@@ -115,7 +120,7 @@ func BenchmarkNAT(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPNatEntry()
-		ssMetrics.RemoveUDPNatEntry()
+		ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")
+		ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")
 	}
 }
