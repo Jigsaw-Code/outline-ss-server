@@ -45,12 +45,12 @@ const (
 	unknownLocation CountryCode = "ZZ"
 )
 
-// GetIpInfoFromIP is a helper function to call [IPInfoMap].GetIPInfo using a [net.IP].
+// GetIPInfoFromIP is a helper function to call [IPInfoMap].GetIPInfo using a [net.IP].
 // It uses special country codes to indicate errors:
 //   - "XL": IP is not global ("L" is for "Local").
 //   - "XD": database error looking up the country code ("D" is for "DB").
 //   - "ZZ": lookup returned an empty country code (same as the Unicode unknown location).
-func GetIpInfoFromIP(ip2info IPInfoMap, ip net.IP) (IPInfo, error) {
+func GetIPInfoFromIP(ip2info IPInfoMap, ip net.IP) (IPInfo, error) {
 	var info IPInfo
 	if ip2info == nil {
 		// Location is disabled. return empty info.
@@ -100,5 +100,5 @@ func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 		return info, errors.New("failed to parse address as IP")
 	}
 
-	return GetIpInfoFromIP(ip2info, ip)
+	return GetIPInfoFromIP(ip2info, ip)
 }

@@ -292,7 +292,7 @@ func (m *outlineMetrics) reportIPKeyActivity(ipKey IPKey, duration time.Duration
 	// TODO: Figure out how we're going to track m.keyTime
 	m.IPKeyTimePerKey.WithLabelValues(ipKey.accessKey).Add(duration.Seconds())
 	ip := net.ParseIP(ipKey.ip)
-	clientInfo, err := ipinfo.GetIpInfoFromIP(m.IPInfoMap, ip)
+	clientInfo, err := ipinfo.GetIPInfoFromIP(m.IPInfoMap, ip)
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
 	}
