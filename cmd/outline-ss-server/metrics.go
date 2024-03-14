@@ -26,8 +26,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	// How often to report the active IP key TunnelTime.
+	activeIPKeyTrackerReportingInterval = 5 * time.Second
+)
+
 type outlineMetrics struct {
 	ipinfo.IPInfoMap
+	activeIPKeyTracker
 
 	buildInfo            *prometheus.GaugeVec
 	accessKeys           prometheus.Gauge
@@ -53,6 +59,95 @@ type outlineMetrics struct {
 
 var _ service.TCPMetrics = (*outlineMetrics)(nil)
 var _ service.UDPMetrics = (*outlineMetrics)(nil)
+
+type activeClient struct {
+	IPKey           IPKey
+	connectionCount int
+	startTime       time.Time
+}
+
+func (c *activeClient) IsActive() bool {
+	return c.connectionCount > 0
+}
+
+type IPKey struct {
+	ip        string
+	accessKey string
+}
+
+type activeIPKeyTracker struct {
+	activeClients   map[IPKey]activeClient
+	metricsCallback func(IPKey, time.Duration)
+}
+
+// Reports time connected for all active clients, called at a regular interval.
+func (t *activeIPKeyTracker) reportAll() {
+	if len(t.activeClients) == 0 {
+		logger.Debugf("No active clients. No IPKey activity to report.")
+		return
+	}
+	for _, c := range t.activeClients {
+		t.reportDuration(c)
+	}
+}
+
+// Reports time connected for a given active client.
+func (t *activeIPKeyTracker) reportDuration(c activeClient) {
+	connDuration := time.Since(c.startTime)
+	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
+	t.metricsCallback(c.IPKey, connDuration)
+
+	// Reset the start time now that it's been reported.
+	c.startTime = time.Now()
+	t.activeClients[c.IPKey] = c
+}
+
+// Registers a new active connection for a client [net.Addr] and access key.
+func (t *activeIPKeyTracker) startConnection(addr net.Addr, accessKey string) {
+	hostname, _, _ := net.SplitHostPort(addr.String())
+	ipKey := IPKey{ip: hostname, accessKey: accessKey}
+
+	c, exists := t.activeClients[ipKey]
+	if !exists {
+		c = activeClient{ipKey, 0, time.Now()}
+	}
+	c.connectionCount++
+	t.activeClients[ipKey] = c
+}
+
+// Removes an active connection for a client [net.Addr] and access key.
+func (t *activeIPKeyTracker) stopConnection(addr net.Addr, accessKey string) {
+	hostname, _, _ := net.SplitHostPort(addr.String())
+	ipKey := IPKey{ip: hostname, accessKey: accessKey}
+
+	c := t.activeClients[ipKey]
+	c.connectionCount--
+	if !c.IsActive() {
+		t.reportDuration(c)
+		delete(t.activeClients, ipKey)
+		return
+	}
+	t.activeClients[ipKey] = c
+}
+
+func newActiveIPKeyTracker(callback func(IPKey, time.Duration)) *activeIPKeyTracker {
+	t := &activeIPKeyTracker{activeClients: make(map[IPKey]activeClient), metricsCallback: callback}
+	ticker := time.NewTicker(activeIPKeyTrackerReportingInterval)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				t.reportAll()
+			case <-done:
+				logger.Debugf("done channel %p closed", done)
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	return t
+}
 
 // newPrometheusOutlineMetrics constructs a metrics object that uses
 // `ip2info` to convert IP addresses to countries, and reports all
@@ -113,12 +208,12 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 			Namespace: "shadowsocks",
 			Name:      "key_connectivity_seconds",
 			Help:      "Time at least 1 connection was open, per key",
-		}, []string{"key"}),
+		}, []string{"access_key"}),
 		IPKeyTimePerKey: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "shadowsocks",
 			Name:      "ip_key_connectivity_seconds",
 			Help:      "Time at least 1 connection was open for a (IP, access key) pair, per key",
-		}, []string{"key"}),
+		}, []string{"access_key"}),
 		IPKeyTimePerLocation: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "shadowsocks",
 			Name:      "ip_key_connectivity_seconds_per_location",
@@ -165,6 +260,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 				Help:      "Entries removed from the UDP NAT table",
 			}),
 	}
+	m.activeIPKeyTracker = *newActiveIPKeyTracker(m.reportIPKeyActivity)
 
 	// TODO: Is it possible to pass where to register the collectors?
 	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
@@ -191,6 +287,22 @@ func (m *outlineMetrics) AddOpenTCPConnection(ip net.Addr) {
 	m.tcpOpenConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
 }
 
+// Reports total time connected, by access key and by country.
+func (m *outlineMetrics) reportIPKeyActivity(ipKey IPKey, duration time.Duration) {
+	// TODO: Figure out how we're going to track m.keyTime
+	m.IPKeyTimePerKey.WithLabelValues(ipKey.accessKey).Add(duration.Seconds())
+	ip := net.ParseIP(ipKey.ip)
+	clientInfo, err := ipinfo.GetIpInfoFromIP(m.IPInfoMap, ip)
+	if err != nil {
+		logger.Warningf("Failed client info lookup: %v", err)
+	}
+	m.IPKeyTimePerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Add(duration.Seconds())
+}
+
+func (m *outlineMetrics) AddAuthenticatedTCPConnection(addr net.Addr, accessKey string) {
+	m.activeIPKeyTracker.startConnection(addr, accessKey)
+}
+
 // addIfNonZero helps avoid the creation of series that are always zero.
 func addIfNonZero(value int64, counterVec *prometheus.CounterVec, lvs ...string) {
 	if value > 0 {
@@ -205,12 +317,12 @@ func asnLabel(asn int) string {
 	return fmt.Sprint(asn)
 }
 
-func (m *outlineMetrics) AddClosedTCPConnection(ip net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
-	clientInfo, err := ipinfo.GetIPInfoFromAddr(m.IPInfoMap, ip)
+func (m *outlineMetrics) AddClosedTCPConnection(addr net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(m.IPInfoMap, addr)
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
 	}
-	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, ip.String())
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, addr.String())
 	m.tcpClosedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
 	m.tcpConnectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 	addIfNonZero(data.ClientProxy, m.dataBytes, "c>p", "tcp", accessKey)
@@ -221,6 +333,8 @@ func (m *outlineMetrics) AddClosedTCPConnection(ip net.Addr, accessKey, status s
 	addIfNonZero(data.TargetProxy, m.dataBytesPerLocation, "p<t", "tcp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 	addIfNonZero(data.ProxyClient, m.dataBytes, "c<p", "tcp", accessKey)
 	addIfNonZero(data.ProxyClient, m.dataBytesPerLocation, "c<p", "tcp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
+
+	m.activeIPKeyTracker.stopConnection(addr, accessKey)
 }
 
 func (m *outlineMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
@@ -238,12 +352,16 @@ func (m *outlineMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 	addIfNonZero(int64(proxyClientBytes), m.dataBytesPerLocation, "c<p", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 }
 
-func (m *outlineMetrics) AddUDPNatEntry() {
+func (m *outlineMetrics) AddUDPNatEntry(addr net.Addr, accessKey string) {
 	m.udpAddedNatEntries.Inc()
+
+	m.activeIPKeyTracker.startConnection(addr, accessKey)
 }
 
-func (m *outlineMetrics) RemoveUDPNatEntry() {
+func (m *outlineMetrics) RemoveUDPNatEntry(addr net.Addr, accessKey string) {
 	m.udpRemovedNatEntries.Inc()
+
+	m.activeIPKeyTracker.stopConnection(addr, accessKey)
 }
 
 func (m *outlineMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {

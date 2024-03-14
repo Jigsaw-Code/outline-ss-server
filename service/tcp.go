@@ -41,7 +41,8 @@ type TCPMetrics interface {
 
 	// TCP metrics
 	AddOpenTCPConnection(ip net.Addr)
-	AddClosedTCPConnection(ip net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
+	AddAuthenticatedTCPConnection(ip net.Addr, accessKey string)
+	AddClosedTCPConnection(ip net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
 
 	// Shadowsocks TCP metrics
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
@@ -267,6 +268,8 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		return id, onet.NewConnectionError(status, "Replay detected", nil)
 	}
 
+	h.m.AddAuthenticatedTCPConnection(clientConn.RemoteAddr(), id)
+
 	// 3. Read target address and dial it.
 	ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
 	tgtAddr, err := socks.ReadAddr(ssr)
@@ -346,12 +349,13 @@ type NoOpTCPMetrics struct{}
 
 var _ TCPMetrics = (*NoOpTCPMetrics)(nil)
 
-func (m *NoOpTCPMetrics) AddClosedTCPConnection(ip net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *NoOpTCPMetrics) AddClosedTCPConnection(ip net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
 func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
-func (m *NoOpTCPMetrics) AddOpenTCPConnection(ip net.Addr) {}
+func (m *NoOpTCPMetrics) AddOpenTCPConnection(ip net.Addr)                            {}
+func (m *NoOpTCPMetrics) AddAuthenticatedTCPConnection(ip net.Addr, accessKey string) {}
 func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
 }
 func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
