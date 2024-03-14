@@ -18,12 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestRunSSServer(t *testing.T) {
-	m := metrics.NewPrometheusShadowsocksMetrics(nil, prometheus.DefaultRegisterer)
+	m := newPrometheusOutlineMetrics(nil, prometheus.DefaultRegisterer)
 	server, err := RunSSServer("config_example.yml", 30*time.Second, m, 10000)
 	if err != nil {
 		t.Fatalf("RunSSServer() error = %v", err)

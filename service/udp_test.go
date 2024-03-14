@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/assert"
@@ -92,39 +92,31 @@ func (conn *fakePacketConn) Close() error {
 }
 
 type udpReport struct {
-	clientLocation                     metrics.CountryCode
+	clientInfo                         ipinfo.IPInfo
 	accessKey, status                  string
 	clientProxyBytes, proxyTargetBytes int
 }
 
 // Stub metrics implementation for testing NAT behaviors.
 type natTestMetrics struct {
-	metrics.ShadowsocksMetrics
 	natEntriesAdded int
 	upstreamPackets []udpReport
 }
 
-func (m *natTestMetrics) AddClosedTCPConnection(clientLocation metrics.CountryCode, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+var _ UDPMetrics = (*natTestMetrics)(nil)
+
+func (m *natTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
 }
-func (m *natTestMetrics) GetLocation(net.Addr) (metrics.CountryCode, error) {
-	return "", nil
+func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *natTestMetrics) SetNumAccessKeys(numKeys int, numPorts int) {
-}
-func (m *natTestMetrics) AddOpenTCPConnection(clientLocation metrics.CountryCode) {
-}
-func (m *natTestMetrics) AddUDPPacketFromClient(clientLocation metrics.CountryCode, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientLocation, accessKey, status, clientProxyBytes, proxyTargetBytes})
-}
-func (m *natTestMetrics) AddUDPPacketFromTarget(clientLocation metrics.CountryCode, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
 func (m *natTestMetrics) AddUDPNatEntry() {
 	m.natEntriesAdded++
 }
-func (m *natTestMetrics) RemoveUDPNatEntry() {}
-func (m *natTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
-}
-func (m *natTestMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
+func (m *natTestMetrics) RemoveUDPNatEntry()                                                 {}
 func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 // Takes a validation policy, and returns the metrics it
@@ -221,7 +213,7 @@ func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
 	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "ZZ", "key id")
+	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, ipinfo.IPInfo{CountryCode: "ZZ"}, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }
@@ -501,9 +493,9 @@ func TestUDPEarlyClose(t *testing.T) {
 func TestClosedUDPListenerError(t *testing.T) {
 	var packetConn net.PacketConn
 	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	err = packetConn.Close()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	_, _, err = packetConn.ReadFrom(nil)
 	require.ErrorIs(t, err, net.ErrClosed)

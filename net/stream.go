@@ -17,7 +17,7 @@ package net
 import (
 	"io"
 
-	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 )
 
 type DuplexConn = transport.StreamConn

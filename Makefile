@@ -1,14 +1,14 @@
 BUILDDIR=$(CURDIR)/dist
 GORELEASER=go run github.com/goreleaser/goreleaser
 
-.PHONY: release release-local test clean clean-all
+.PHONY: release release-local test clean
 
 # This requires GITHUB_TOKEN to be set.
-release: clean-all
+release: clean
 	$(GORELEASER)
 
 release-local:
-	$(GORELEASER) --rm-dist --snapshot
+	$(GORELEASER) --clean --snapshot
 
 test: third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb
 	go test -v -race -benchmem -bench=. ./... -benchtime=100ms
@@ -23,6 +23,3 @@ go.mod: tools.go
 clean:
 	rm -rf $(BUILDDIR)
 	go clean
-
-clean-all: clean
-	rm -rf $(CURDIR)/third_party/maxmind/*

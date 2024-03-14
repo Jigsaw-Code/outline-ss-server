@@ -21,19 +21,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
-	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
+
+// TCPMetrics is used to report metrics on TCP connections.
+type TCPMetrics interface {
+	ipinfo.IPInfoMap
+
+	// TCP metrics
+	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
+	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
+
+	// Shadowsocks TCP metrics
+	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
+	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+}
 
 func remoteIP(conn net.Conn) net.IP {
 	addr := conn.RemoteAddr()
@@ -75,7 +88,7 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 
 	findStartTime := time.Now()
 	entry, elt := findEntry(firstBytes, ciphers)
-	timeToCipher := time.Now().Sub(findStartTime)
+	timeToCipher := time.Since(findStartTime)
 	if entry == nil {
 		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
 		return nil, clientReader, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
@@ -108,7 +121,7 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 type tcpHandler struct {
 	port        int
 	ciphers     CipherList
-	m           metrics.ShadowsocksMetrics
+	m           TCPMetrics
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 	replayCache *ReplayCache
@@ -117,7 +130,7 @@ type tcpHandler struct {
 
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m metrics.ShadowsocksMetrics, timeout time.Duration) TCPHandler {
+func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m TCPMetrics, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
 		port:        port,
 		ciphers:     ciphers,
@@ -203,25 +216,25 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 }
 
 func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientLocation, err := h.m.GetLocation(clientConn.RemoteAddr())
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
 	if err != nil {
-		logger.Warningf("Failed location lookup: %v", err)
+		logger.Warningf("Failed client info lookup: %v", err)
 	}
-	logger.Debugf("Got location \"%v\" for IP %v", clientLocation, clientConn.RemoteAddr().String())
-	h.m.AddOpenTCPConnection(clientLocation)
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, clientConn.RemoteAddr().String())
+	h.m.AddOpenTCPConnection(clientInfo)
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
 	id, connError := h.handleConnection(ctx, h.port, measuredClientConn, &proxyMetrics)
 
-	connDuration := time.Now().Sub(connStart)
+	connDuration := time.Since(connStart)
 	status := "OK"
 	if connError != nil {
 		status = connError.Status
 		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
 	}
-	h.m.AddClosedTCPConnection(clientLocation, id, status, proxyMetrics, connDuration)
+	h.m.AddClosedTCPConnection(clientInfo, id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
@@ -267,7 +280,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 	clientConn.SetReadDeadline(time.Time{})
 	if err != nil {
 		// Drain to prevent a close on cipher error.
-		io.Copy(ioutil.Discard, clientConn)
+		io.Copy(io.Discard, clientConn)
 		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 	}
 	tgtConn, dialErr := h.dialer.Dial(ctx, tgtAddr.String())
@@ -288,7 +301,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 		_, fromClientErr := ssr.WriteTo(tgtConn)
 		if fromClientErr != nil {
 			// Drain to prevent a close in the case of a cipher error.
-			io.Copy(ioutil.Discard, clientConn)
+			io.Copy(io.Discard, clientConn)
 		}
 		clientConn.CloseRead()
 		// Send FIN to target.
@@ -316,7 +329,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
 func (h *tcpHandler) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
-	_, drainErr := io.Copy(ioutil.Discard, clientConn) // drain socket
+	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
 	h.m.AddTCPProbe(status, drainResult, listenerPort, proxyMetrics.ClientProxy)
@@ -333,3 +346,19 @@ func drainErrToString(drainErr error) string {
 		return "other"
 	}
 }
+
+// NoOpTCPMetrics is a [TCPMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpTCPMetrics struct{}
+
+var _ TCPMetrics = (*NoOpTCPMetrics)(nil)
+
+func (m *NoOpTCPMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+}
+func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
+}
+func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
+func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+}
+func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

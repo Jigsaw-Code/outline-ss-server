@@ -18,7 +18,6 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -27,15 +26,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-internal-sdk/transport"
-	"github.com/Jigsaw-Code/outline-internal-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/op/go-logging"
-	"github.com/oschwald/geoip2-golang"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 )
 
@@ -52,7 +50,7 @@ const defaultNatTimeout time.Duration = 5 * time.Minute
 
 func init() {
 	var prefix = "%{level:.1s}%{time:2006-01-02T15:04:05.000Z07:00} %{pid} %{shortfile}]"
-	if terminal.IsTerminal(int(os.Stderr.Fd())) {
+	if term.IsTerminal(int(os.Stderr.Fd())) {
 		// Add color only if the output is the terminal
 		prefix = strings.Join([]string{"%{color}", prefix, "%{color:reset}"}, "")
 	}
@@ -69,7 +67,7 @@ type ssPort struct {
 
 type SSServer struct {
 	natTimeout  time.Duration
-	m           metrics.ShadowsocksMetrics
+	m           *outlineMetrics
 	replayCache service.ReplayCache
 	ports       map[int]*ssPort
 }
@@ -77,11 +75,13 @@ type SSServer struct {
 func (s *SSServer) startPort(portNum int) error {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
 	if err != nil {
+		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks TCP service failed to start on port %v: %w", portNum, err)
 	}
 	logger.Infof("Shadowsocks TCP service listening on %v", listener.Addr().String())
 	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: portNum})
 	if err != nil {
+		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks UDP service failed to start on port %v: %w", portNum, err)
 	}
 	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
@@ -111,10 +111,12 @@ func (s *SSServer) removePort(portNum int) error {
 	udpErr := port.packetConn.Close()
 	delete(s.ports, portNum)
 	if tcpErr != nil {
+		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks TCP service on port %v failed to stop: %w", portNum, tcpErr)
 	}
 	logger.Infof("Shadowsocks TCP service on port %v stopped", portNum)
 	if udpErr != nil {
+		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks UDP service on port %v failed to stop: %w", portNum, udpErr)
 	}
 	logger.Infof("Shadowsocks UDP service on port %v stopped", portNum)
@@ -176,7 +178,7 @@ func (s *SSServer) Stop() error {
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
-func RunSSServer(filename string, natTimeout time.Duration, sm metrics.ShadowsocksMetrics, replayHistory int) (*SSServer, error) {
+func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
 		natTimeout:  natTimeout,
 		m:           sm,
@@ -211,7 +213,7 @@ type Config struct {
 
 func readConfig(filename string) (*Config, error) {
 	config := Config{}
-	configData, err := ioutil.ReadFile(filename)
+	configData, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
@@ -227,6 +229,7 @@ func main() {
 		ConfigFile    string
 		MetricsAddr   string
 		IPCountryDB   string
+		IPASNDB       string
 		natTimeout    time.Duration
 		replayHistory int
 		Verbose       bool
@@ -235,6 +238,7 @@ func main() {
 	flag.StringVar(&flags.ConfigFile, "config", "", "Configuration filename")
 	flag.StringVar(&flags.MetricsAddr, "metrics", "", "Address for the Prometheus metrics")
 	flag.StringVar(&flags.IPCountryDB, "ip_country_db", "", "Path to the ip-to-country mmdb file")
+	flag.StringVar(&flags.IPASNDB, "ip_asn_db", "", "Path to the ip-to-ASN mmdb file")
 	flag.DurationVar(&flags.natTimeout, "udptimeout", defaultNatTimeout, "UDP tunnel timeout")
 	flag.IntVar(&flags.replayHistory, "replay_history", 0, "Replay buffer size (# of handshakes)")
 	flag.BoolVar(&flags.Verbose, "verbose", false, "Enables verbose logging output")
@@ -266,17 +270,20 @@ func main() {
 		logger.Infof("Prometheus metrics available at http://%v/metrics", flags.MetricsAddr)
 	}
 
-	var ipCountryDB *geoip2.Reader
 	var err error
 	if flags.IPCountryDB != "" {
 		logger.Infof("Using IP-Country database at %v", flags.IPCountryDB)
-		ipCountryDB, err = geoip2.Open(flags.IPCountryDB)
-		if err != nil {
-			logger.Fatalf("Could not open geoip database at %v: %v. Aborting", flags.IPCountryDB, err)
-		}
-		defer ipCountryDB.Close()
 	}
-	m := metrics.NewPrometheusShadowsocksMetrics(ipCountryDB, prometheus.DefaultRegisterer)
+	if flags.IPASNDB != "" {
+		logger.Infof("Using IP-ASN database at %v", flags.IPASNDB)
+	}
+	ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, flags.IPASNDB)
+	if err != nil {
+		logger.Fatalf("Could create IP info map: %v. Aborting", err)
+	}
+	defer ip2info.Close()
+
+	m := newPrometheusOutlineMetrics(ip2info, prometheus.DefaultRegisterer)
 	m.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
 	if err != nil {

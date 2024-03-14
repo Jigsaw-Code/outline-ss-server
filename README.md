@@ -1,13 +1,14 @@
 # Outline ss-server
 
-![Build Status](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml/badge.svg)
+[![Build Status](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml/badge.svg)](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml?query=branch%3Amaster)
+
 [![Go Report Card](https://goreportcard.com/badge/github.com/Jigsaw-Code/outline-ss-server)](https://goreportcard.com/report/github.com/Jigsaw-Code/outline-ss-server)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Jigsaw-Code/outline-ss-server.svg)](https://pkg.go.dev/github.com/Jigsaw-Code/outline-ss-server)
 
 [![Mattermost](https://badgen.net/badge/Mattermost/Outline%20Community/blue)](https://community.internetfreedomfestival.org/community/channels/outline-community)
 [![Reddit](https://badgen.net/badge/Reddit/r%2Foutlinevpn/orange)](https://www.reddit.com/r/outlinevpn/)
 
-This repository has the Shadowsocks service used by Outline servers. It was inspired by [go-shadowsocks2](https://github.com/shadowsocks/go-shadowsocks2), and adds a number of improvements to meet the needs of the Outline users.
+This repository has the Shadowsocks backend used by the [Outline Server](https://github.com/Jigsaw-Code/outline-server).
 
 The Outline Shadowsocks service allows for:
 - Multiple users on a single port.
@@ -20,8 +21,26 @@ The Outline Shadowsocks service allows for:
 
 ![Graphana Dashboard](https://user-images.githubusercontent.com/113565/44177062-419d7700-a0ba-11e8-9621-db519692ff6c.png "Graphana Dashboard")
 
+## How to run it
 
-## Try it!
+Call the `outline-ss-server` command with the recommended flags, [as done by the official Outline Server](https://github.com/Jigsaw-Code/outline-server/blob/b2639d09c30a50479eddcd33b84432f57081be0c/src/shadowbox/server/outline_shadowsocks_server.ts#L91-L100):
+```
+outline-ss-server -replay_history=10000 -metrics=127.0.0.1:9091 -config=$CONFIG_YML  -ip_country_db=$COUNTRY_MMDB -ip_asn_db=$ASN_MMDB
+```
+
+Flags:
+- `replay_history`: Enables replay protection for the last 10000 connections.
+- `metrics`: Where the webserver exposing the Prometheus metrics will listen on. You should specify localhost so it's not accessible from outside the machine, unless you know what you are doing.
+- `config`: The config file with the access keys. See the config example.
+- `ip_country_db`: The IP-Country MMDB file to enable per-country metrics breakdown.
+- `ip_asn_db`: The IP-ASN MMDB file to enable per-country metrics breakdown.
+
+In the example, you can open https://127.0.0.1:9091 on your browser to see the exported Prometheus metrics.
+
+To fetch and update MMDB files from [DB-IP](https://db-ip.com), you can do something like the [update_mmdb.sh from the Outline Server](https://github.com/Jigsaw-Code/outline-server/blob/master/src/shadowbox/scripts/update_mmdb.sh).
+
+
+## Full Working Example: Try It!
 
 Fetch dependencies for this demo:
 ```
@@ -47,7 +66,7 @@ $(go env GOPATH)/bin/prometheus --config.file=cmd/outline-ss-server/prometheus_e
 ### Run the SOCKS-to-Shadowsocks client
 On Terminal 3, start the SS client:
 ```
-go run github.com/shadowsocks/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose  -socks localhost:1080
+go run github.com/shadowsocks/go-shadowsocks2@latest -c ss://chacha20-ietf-poly1305:Secret0@:9000 -verbose  -socks localhost:1080
 ```
 
 ### Fetch a page over Shadowsocks
@@ -78,7 +97,7 @@ go run ./cmd/outline-ss-server -config cmd/outline-ss-server/config_example.yml
 
 Start the SS tunnel to redirect port 8000 -> localhost:5201 via the proxy on 9000:
 ```
-go run github.com/shadowsocks/go-shadowsocks2 -c ss://chacha20-ietf-poly1305:Secret0@:9000 -tcptun ":8000=localhost:5201" -udptun ":8000=localhost:5201" -verbose
+go run github.com/shadowsocks/go-shadowsocks2@latest -c ss://chacha20-ietf-poly1305:Secret0@:9000 -tcptun ":8000=localhost:5201" -udptun ":8000=localhost:5201" -verbose
 ```
 
 Test TCP upload (client -> server):
