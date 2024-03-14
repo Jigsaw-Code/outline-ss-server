@@ -3,7 +3,7 @@ version: '3'
 run: when_changed
 
 vars:
-  OUT_DIR: "{{.USER_WORKING_DIR}}/out"
+  OUT_DIR: "{{.USER_WORKING_DIR}}/dist"
 
 tasks:
   release:
