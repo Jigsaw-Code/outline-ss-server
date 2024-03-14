@@ -17,6 +17,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -29,7 +30,6 @@ import (
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	sstest "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,6 +39,24 @@ const maxUDPPacketSize = 64 * 1024
 
 func init() {
 	logging.SetLevel(logging.INFO, "")
+}
+
+// makeTestPayload returns a slice of `size` arbitrary bytes.
+func makeTestPayload(size int) []byte {
+	payload := make([]byte, size)
+	for i := 0; i < size; i++ {
+		payload[i] = byte(i)
+	}
+	return payload
+}
+
+// makeTestSecrets returns a slice of `n` test passwords.  Not secure!
+func makeTestSecrets(n int) []string {
+	secrets := make([]string, n)
+	for i := 0; i < n; i++ {
+		secrets[i] = fmt.Sprintf("secret-%v", i)
+	}
+	return secrets
 }
 
 func allowAll(ip net.IP) *onet.ConnectionError {
@@ -125,7 +143,7 @@ func TestTCPEcho(t *testing.T) {
 	require.NoError(t, err)
 	client, err := shadowsocks.NewStreamDialer(&transport.TCPEndpoint{Address: proxyListener.Addr().String()}, cryptoKey)
 	require.NoError(t, err)
-	conn, err := client.Dial(context.Background(), echoListener.Addr().String())
+	conn, err := client.DialStream(context.Background(), echoListener.Addr().String())
 	require.NoError(t, err)
 
 	const N = 1000
@@ -210,7 +228,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	}
 
 	for _, address := range addresses {
-		conn, err := dialer.Dial(context.Background(), address)
+		conn, err := dialer.DialStream(context.Background(), address)
 		require.NoError(t, err, "Failed to dial %v", address)
 		n, err := conn.Read(buf)
 		assert.Equal(t, 0, n, "Server should close without replying on rejected address")
@@ -284,7 +302,7 @@ func TestUDPEcho(t *testing.T) {
 	require.NoError(t, err)
 
 	const N = 1000
-	up := sstest.MakeTestPayload(N)
+	up := makeTestPayload(N)
 	n, err := conn.WriteTo(up, echoConn.LocalAddr())
 	if err != nil {
 		t.Fatal(err)
@@ -373,11 +391,11 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	require.NoError(b, err)
 	client, err := shadowsocks.NewStreamDialer(&transport.TCPEndpoint{Address: proxyListener.Addr().String()}, cryptoKey)
 	require.NoError(b, err)
-	conn, err := client.Dial(context.Background(), echoListener.Addr().String())
+	conn, err := client.DialStream(context.Background(), echoListener.Addr().String())
 	require.NoError(b, err)
 
 	const N = 1000
-	up := sstest.MakeTestPayload(N)
+	up := makeTestPayload(N)
 	down := make([]byte, N)
 
 	start := time.Now()
@@ -416,7 +434,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 		b.Fatalf("ListenTCP failed: %v", err)
 	}
 	const numKeys = 50
-	secrets := sstest.MakeTestSecrets(numKeys)
+	secrets := makeTestSecrets(numKeys)
 	cipherList, err := service.MakeTestCiphers(secrets)
 	if err != nil {
 		b.Fatal(err)
@@ -451,7 +469,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < k; i++ {
-				conn, err := client.Dial(context.Background(), echoListener.Addr().String())
+				conn, err := client.DialStream(context.Background(), echoListener.Addr().String())
 				if err != nil {
 					b.Errorf("ShadowsocksClient.DialTCP failed: %v", err)
 				}
@@ -535,7 +553,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 		b.Fatalf("ListenTCP failed: %v", err)
 	}
 	const numKeys = 100
-	secrets := sstest.MakeTestSecrets(numKeys)
+	secrets := makeTestSecrets(numKeys)
 	cipherList, err := service.MakeTestCiphers(secrets)
 	if err != nil {
 		b.Fatal(err)

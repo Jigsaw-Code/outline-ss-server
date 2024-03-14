@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 
-	ss "github.com/Jigsaw-Code/outline-ss-server/shadowsocks"
+	ss "github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"golang.org/x/crypto/hkdf"
 )
 
