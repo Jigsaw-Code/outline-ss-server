@@ -169,7 +169,8 @@ Summary:
   ```
 - Export an environment variable named `GITHUB_TOKEN` with a temporary repo-scoped GitHub token ([create one here](https://github.com/settings/tokens/new)):
   ```bash
-  export GITHUB_TOKEN=yournewtoken
+  read -s -p "Type your Github token:" GITHUB_TOKEN
+  export GITHUB_TOKEN
   ```
 - Create a new tag and push it to GitHub e.g.:
   ```bash
