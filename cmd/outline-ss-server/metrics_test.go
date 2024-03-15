@@ -15,6 +15,7 @@
 package main
 
 import (
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,12 @@ import (
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+type noopMap struct{}
+
+func (*noopMap) GetIPInfo(ip net.IP) (ipinfo.IPInfo, error) {
+	return ipinfo.IPInfo{}, nil
+}
 
 type fakeAddr string
 
@@ -109,7 +116,7 @@ func TestIPKeyActivityPerKey(t *testing.T) {
 func TestIPKeyActivityPerLocation(t *testing.T) {
 	since = func(time.Time) time.Duration { return 5 * time.Second }
 	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
 	accessKey := "key-1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
@@ -121,7 +128,7 @@ func TestIPKeyActivityPerLocation(t *testing.T) {
 	expected := strings.NewReader(`
 	# HELP shadowsocks_ip_key_connectivity_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location
 	# TYPE shadowsocks_ip_key_connectivity_seconds_per_location counter
-	shadowsocks_ip_key_connectivity_seconds_per_location{asn="",location=""} 5
+	shadowsocks_ip_key_connectivity_seconds_per_location{asn="",location="XL"} 5
 `)
 	err := promtest.GatherAndCompare(
 		reg,
