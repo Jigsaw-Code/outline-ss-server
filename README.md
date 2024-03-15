@@ -144,7 +144,7 @@ You can mix and match the libev and go servers and clients.
 
 To run the tests and benchmarks, call:
 ```
-make test
+go run github.com/go-task/task/v3/cmd/task test
 ```
 
 You can benchmark the cipher finding code with
@@ -161,11 +161,12 @@ We use [GoReleaser](https://goreleaser.com/) to build and upload binaries to our
 Summary:
 - Test the build locally:
   ```
-  make release-local
+  go run github.com/go-task/task/v3/cmd/task release-local
   ```
 - Export an environment variable named `GITHUB_TOKEN` with a temporary repo-scoped GitHub token ([create one here](https://github.com/settings/tokens/new)):
   ```bash
-  export GITHUB_TOKEN=yournewtoken
+  read -s -p "Type your Github token:" GITHUB_TOKEN
+  export GITHUB_TOKEN
   ```
 - Create a new tag and push it to GitHub e.g.:
   ```bash
@@ -174,7 +175,7 @@ Summary:
   ```
 - Build and upload:
   ```bash
-  make release
+  go run github.com/go-task/task/v3/cmd/task release
   ```
 - Go to https://github.com/Jigsaw-Code/outline-ss-server/releases, review and publish the release.
 

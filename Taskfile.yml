@@ -1,0 +1,40 @@
+version: '3'
+
+run: when_changed
+
+vars:
+  OUT_DIR: "{{.USER_WORKING_DIR}}/dist"
+
+tasks:
+  release:
+    desc: "Release"
+    deps: [clean]
+    cmds:
+      - go run github.com/goreleaser/goreleaser
+
+
+  release-local:
+    desc: "Build a release binary"
+    cmds:
+      - go run github.com/goreleaser/goreleaser --clean --snapshot
+
+  test:
+    desc: "Runs tests"
+    deps: [mmdb]
+    cmds:
+      - go test -v -race -benchmem -bench=. ./... -benchtime=100ms
+
+  mmdb:
+    cmds:
+      - git submodule update --init --depth=1
+    sources:
+      - "{{.ROOT_DIR}}/gitmodules"
+    generates:
+      - "{{.ROOT_DIR}}/third_party/maxmind/test-data/GeoIP2-Country-Test.mmdb"
+
+  clean:
+    desc: "Cleans output directory"
+    cmds:
+        - rm -rf {{.OUT_DIR}}
+        - git submodule deinit --all
+        - go clean

@@ -24,3 +24,23 @@ type ConnectionError struct {
 func NewConnectionError(status, message string, cause error) *ConnectionError {
 	return &ConnectionError{Status: status, Message: message, Cause: cause}
 }
+
+func (e *ConnectionError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	msg := e.Message
+	if len(e.Status) > 0 {
+		msg += " [" + e.Status + "]"
+	}
+	if e.Cause != nil {
+		msg += ": " + e.Cause.Error()
+	}
+	return msg
+}
+
+func (e *ConnectionError) Unwrap() error {
+	return e.Cause
+}
+
+var _ error = (*ConnectionError)(nil)

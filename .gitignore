@@ -24,3 +24,6 @@
 
 # Prometheus
 /data/
+
+# Go task
+/.task/
