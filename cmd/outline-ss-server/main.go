@@ -86,9 +86,9 @@ func (s *SSServer) startPort(portNum int) error {
 	}
 	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
 	port := &ssPort{tcpListener: listener, packetConn: packetConn, cipherList: service.NewCipherList()}
-	ssAuthenticator := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m)
+	authFunc := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m)
 	// TODO: Register initial data metrics at zero.
-	tcpHandler := service.NewTCPHandler(portNum, ssAuthenticator, s.m, tcpReadTimeout)
+	tcpHandler := service.NewTCPHandler(portNum, authFunc, s.m, tcpReadTimeout)
 	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m)
 	s.ports[portNum] = port
 	accept := func() (transport.StreamConn, error) {
