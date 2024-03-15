@@ -45,7 +45,6 @@ type outlineMetrics struct {
 	timeToCipherMs       *prometheus.HistogramVec
 	// TODO: Add time to first byte.
 
-	keyTime              *prometheus.CounterVec
 	IPKeyTimePerKey      *prometheus.CounterVec
 	IPKeyTimePerLocation *prometheus.CounterVec
 
@@ -206,11 +205,6 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 					float64(7 * 24 * time.Hour.Milliseconds()), // Week
 				},
 			}, []string{"status"}),
-		keyTime: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "shadowsocks",
-			Name:      "key_connectivity_seconds",
-			Help:      "Time at least 1 connection was open, per key",
-		}, []string{"access_key"}),
 		IPKeyTimePerKey: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "shadowsocks",
 			Name:      "ip_key_connectivity_seconds",
@@ -267,7 +261,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 	// TODO: Is it possible to pass where to register the collectors?
 	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
 		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries,
-		m.keyTime, m.IPKeyTimePerKey, m.IPKeyTimePerLocation)
+		m.IPKeyTimePerKey, m.IPKeyTimePerLocation)
 	return m
 }
 
@@ -291,7 +285,6 @@ func (m *outlineMetrics) AddOpenTCPConnection(addr net.Addr) {
 
 // Reports total time connected, by access key and by country.
 func (m *outlineMetrics) reportIPKeyActivity(ipKey IPKey, duration time.Duration) {
-	// TODO: Figure out how we're going to track m.keyTime
 	m.IPKeyTimePerKey.WithLabelValues(ipKey.accessKey).Add(duration.Seconds())
 	ip := net.ParseIP(ipKey.ip)
 	clientInfo, err := ipinfo.GetIPInfoFromIP(m.IPInfoMap, ip)
