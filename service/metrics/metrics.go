@@ -53,8 +53,13 @@ func (c *measuredConn) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func (c *measuredConn) ReadFrom(r io.Reader) (int64, error) {
-	n, err := io.Copy(c.StreamConn, r)
+func (c *measuredConn) ReadFrom(r io.Reader) (n int64, err error) {
+	if rf, ok := c.StreamConn.(io.ReaderFrom); ok {
+		// Prefer ReadFrom if we are calling ReadFrom. Otherwise io.Copy will try WriteTo first.
+		n, err = rf.ReadFrom(r)
+	} else {
+		n, err = io.Copy(c.StreamConn, r)
+	}
 	*c.writeCount += n
 	return n, err
 }
