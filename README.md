@@ -148,7 +148,7 @@ You can mix and match the libev and go servers and clients.
 
 To run the tests and benchmarks, call:
 ```
-make test
+go run github.com/go-task/task/v3/cmd/task test
 ```
 
 You can benchmark the cipher finding code with
