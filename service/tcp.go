@@ -42,10 +42,7 @@ type TCPMetrics interface {
 	// TCP metrics
 	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
 	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
-
-	// Shadowsocks TCP metrics
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
-	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
 }
 
 func remoteIP(conn net.Conn) net.IP {
@@ -118,26 +115,65 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 	return nil, nil
 }
 
+type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
+
+// ShadowsocksTCPMetrics is used to report Shadowsocks metrics on TCP connections.
+type ShadowsocksTCPMetrics interface {
+	// Shadowsocks TCP metrics
+	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+}
+
+// NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
+// TODO(fortuna): Offer alternative transports.
+func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
+	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+		// Find the cipher and acess key id.
+		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers)
+		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
+		if keyErr != nil {
+			const status = "ERR_CIPHER"
+			return "", nil, onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
+		}
+		var id string
+		if cipherEntry != nil {
+			id = cipherEntry.ID
+		}
+
+		// Check if the connection is a replay.
+		isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
+		// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
+		if isServerSalt || !replayCache.Add(cipherEntry.ID, clientSalt) {
+			var status string
+			if isServerSalt {
+				status = "ERR_REPLAY_SERVER"
+			} else {
+				status = "ERR_REPLAY_CLIENT"
+			}
+			return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
+		}
+		ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
+		ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
+		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
+		return id, transport.WrapConn(clientConn, ssr, ssw), nil
+	}
+}
+
 type tcpHandler struct {
-	port        int
-	ciphers     CipherList
-	m           TCPMetrics
-	readTimeout time.Duration
-	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-	replayCache *ReplayCache
-	dialer      transport.StreamDialer
+	port         int
+	m            TCPMetrics
+	readTimeout  time.Duration
+	authenticate StreamAuthenticateFunc
+	dialer       transport.StreamDialer
 }
 
 // NewTCPService creates a TCPService
-// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m TCPMetrics, timeout time.Duration) TCPHandler {
+func NewTCPHandler(port int, authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
-		port:        port,
-		ciphers:     ciphers,
-		m:           m,
-		readTimeout: timeout,
-		replayCache: replayCache,
-		dialer:      defaultDialer,
+		port:         port,
+		m:            m,
+		readTimeout:  timeout,
+		authenticate: authenticate,
+		dialer:       defaultDialer,
 	}
 }
 
@@ -239,40 +275,6 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func (h *tcpHandler) authenticate(clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, transport.StreamConn, *onet.ConnectionError) {
-	// TODO(fortuna): Offer alternative transports.
-	// Find the cipher and acess key id.
-	cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), h.ciphers)
-	h.m.AddTCPCipherSearch(keyErr == nil, timeToCipher)
-	if keyErr != nil {
-		logger.Debugf("Failed to find a valid cipher after reading %v bytes: %v", proxyMetrics.ClientProxy, keyErr)
-		const status = "ERR_CIPHER"
-		return "", nil, onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
-	}
-	var id string
-	if cipherEntry != nil {
-		id = cipherEntry.ID
-	}
-
-	// Check if the connection is a replay.
-	isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
-	// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
-	if isServerSalt || !h.replayCache.Add(cipherEntry.ID, clientSalt) {
-		var status string
-		if isServerSalt {
-			status = "ERR_REPLAY_SERVER"
-		} else {
-			status = "ERR_REPLAY_CLIENT"
-		}
-		logger.Debugf(status+": %v sent %d bytes", clientConn.RemoteAddr(), proxyMetrics.ClientProxy)
-		return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
-	}
-	ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
-	ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
-	ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
-	return id, transport.WrapConn(clientConn, ssr, ssw), nil
-}
-
 func getProxyRequest(clientConn transport.StreamConn) (string, error) {
 	// TODO(fortuna): Use Shadowsocks proxy, HTTP CONNECT or SOCKS5 based on first byte:
 	// case 1, 3 or 4: Shadowsocks (address type)
@@ -334,7 +336,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, out
 	}
 	outerConn.SetReadDeadline(readDeadline)
 
-	id, innerConn, authErr := h.authenticate(outerConn, proxyMetrics)
+	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
 		h.absorbProbe(listenerPort, outerConn, authErr.Status, proxyMetrics)
