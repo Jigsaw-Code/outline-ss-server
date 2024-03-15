@@ -10,7 +10,7 @@ tasks:
     desc: "Release"
     deps: [clean]
     cmds:
-      - go run github.com/goreleaser/goreleaser --clean --snapshot
+      - go run github.com/goreleaser/goreleaser
 
 
   release-local:
