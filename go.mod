@@ -1,7 +1,7 @@
 module github.com/Jigsaw-Code/outline-ss-server
 
 require (
-	github.com/Jigsaw-Code/outline-sdk v0.0.13
+	github.com/Jigsaw-Code/outline-sdk v0.0.14
 	github.com/go-task/task/v3 v3.34.1
 	github.com/goreleaser/goreleaser v1.18.2
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
@@ -203,7 +203,6 @@ require (
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/radovskyb/watcher v1.0.7 // indirect
-	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
 	github.com/rivo/uniseg v0.4.2 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sajari/fuzzy v1.0.0 // indirect
