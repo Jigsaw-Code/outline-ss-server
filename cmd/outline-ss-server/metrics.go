@@ -31,6 +31,8 @@ const (
 	activeIPKeyTrackerReportingInterval = 5 * time.Second
 )
 
+var since = time.Since
+
 type outlineMetrics struct {
 	ipinfo.IPInfoMap
 	activeIPKeyTracker
@@ -93,7 +95,7 @@ func (t *activeIPKeyTracker) reportAll() {
 
 // Reports time connected for a given active client.
 func (t *activeIPKeyTracker) reportDuration(c activeClient) {
-	connDuration := time.Since(c.startTime)
+	connDuration := since(c.startTime)
 	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
 	t.metricsCallback(c.IPKey, connDuration)
 
