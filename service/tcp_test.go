@@ -28,7 +28,6 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
@@ -39,7 +38,7 @@ func init() {
 	logging.SetLevel(logging.INFO, "")
 }
 
-func allowAll(ip net.IP) *onet.ConnectionError {
+func allowAll(ip net.IP) error {
 	// Allow access to localhost so that we can run integration tests with
 	// an actual destination server.
 	return nil
@@ -353,7 +352,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, nil, testMetrics, 200*time.Millisecond)
-	handler.SetTargetIPValidator(allowAll)
+	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
@@ -388,7 +387,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, nil, testMetrics, 200*time.Millisecond)
-	handler.SetTargetIPValidator(allowAll)
+	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
@@ -424,7 +423,7 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	cipher := firstCipher(cipherList)
 	testMetrics := &probeTestMetrics{}
 	handler := NewTCPHandler(listener.Addr().(*net.TCPAddr).Port, cipherList, nil, testMetrics, 200*time.Millisecond)
-	handler.SetTargetIPValidator(allowAll)
+	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)

@@ -124,53 +124,53 @@ type tcpHandler struct {
 	m           TCPMetrics
 	readTimeout time.Duration
 	// `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
-	replayCache       *ReplayCache
-	targetIPValidator onet.TargetIPValidator
+	replayCache *ReplayCache
+	dialer      transport.StreamDialer
 }
 
 // NewTCPService creates a TCPService
 // `replayCache` is a pointer to SSServer.replayCache, to share the cache among all ports.
 func NewTCPHandler(port int, ciphers CipherList, replayCache *ReplayCache, m TCPMetrics, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
-		port:              port,
-		ciphers:           ciphers,
-		m:                 m,
-		readTimeout:       timeout,
-		replayCache:       replayCache,
-		targetIPValidator: onet.RequirePublicIP,
+		port:        port,
+		ciphers:     ciphers,
+		m:           m,
+		readTimeout: timeout,
+		replayCache: replayCache,
+		dialer:      defaultDialer,
 	}
+}
+
+var defaultDialer = makeValidatingTCPStreamDialer(onet.RequirePublicIP)
+
+func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) transport.StreamDialer {
+	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
+		ip, _, _ := net.SplitHostPort(address)
+		return targetIPValidator(net.ParseIP(ip))
+	}}}
 }
 
 // TCPService is a Shadowsocks TCP service that can be started and stopped.
 type TCPHandler interface {
 	Handle(ctx context.Context, conn transport.StreamConn)
-	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
-	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
+	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
+	SetTargetDialer(dialer transport.StreamDialer)
 }
 
-func (s *tcpHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
-	s.targetIPValidator = targetIPValidator
+func (s *tcpHandler) SetTargetDialer(dialer transport.StreamDialer) {
+	s.dialer = dialer
 }
 
-func dialTarget(tgtAddr socks.Addr, proxyMetrics *metrics.ProxyMetrics, targetIPValidator onet.TargetIPValidator) (transport.StreamConn, *onet.ConnectionError) {
-	var ipError *onet.ConnectionError
-	dialer := net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
-		ip, _, _ := net.SplitHostPort(address)
-		ipError = targetIPValidator(net.ParseIP(ip))
-		if ipError != nil {
-			return errors.New(ipError.Message)
-		}
+func ensureConnectionError(err error, fallbackStatus string, fallbackMsg string) *onet.ConnectionError {
+	if err == nil {
 		return nil
-	}}
-	tgtConn, err := dialer.Dial("tcp", tgtAddr.String())
-	if ipError != nil {
-		return nil, ipError
-	} else if err != nil {
-		return nil, onet.NewConnectionError("ERR_CONNECT", "Failed to connect to target", err)
 	}
-	tgtTCPConn := tgtConn.(*net.TCPConn)
-	tgtTCPConn.SetKeepAlive(true)
-	return metrics.MeasureConn(tgtTCPConn, &proxyMetrics.ProxyTarget, &proxyMetrics.TargetProxy), nil
+	var connErr *onet.ConnectionError
+	if errors.As(err, &connErr) {
+		return connErr
+	} else {
+		return onet.NewConnectionError(fallbackStatus, fallbackMsg, err)
+	}
 }
 
 type StreamListener func() (transport.StreamConn, error)
@@ -226,7 +226,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
-	id, connError := h.handleConnection(h.port, measuredClientConn, &proxyMetrics)
+	id, connError := h.handleConnection(ctx, h.port, measuredClientConn, &proxyMetrics)
 
 	connDuration := time.Since(connStart)
 	status := "OK"
@@ -239,7 +239,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, clientConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
 	clientConn.SetReadDeadline(time.Now().Add(h.readTimeout))
 
@@ -275,6 +275,7 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 	// 3. Read target address and dial it.
 	ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
 	tgtAddr, err := socks.ReadAddr(ssr)
+
 	// Clear the deadline for the target address
 	clientConn.SetReadDeadline(time.Time{})
 	if err != nil {
@@ -282,11 +283,12 @@ func (h *tcpHandler) handleConnection(listenerPort int, clientConn transport.Str
 		io.Copy(io.Discard, clientConn)
 		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 	}
-	tgtConn, dialErr := dialTarget(tgtAddr, proxyMetrics, h.targetIPValidator)
+	tgtConn, dialErr := h.dialer.DialStream(ctx, tgtAddr.String())
 	if dialErr != nil {
 		// We don't drain so dial errors and invalid addresses are communicated quickly.
-		return id, dialErr
+		return id, ensureConnectionError(dialErr, "ERR_CONNECT", "Failed to connect to target")
 	}
+	tgtConn = metrics.MeasureConn(tgtConn, &proxyMetrics.ProxyTarget, &proxyMetrics.TargetProxy)
 	defer tgtConn.Close()
 
 	// 4. Bridge the client and target connections

@@ -230,7 +230,7 @@ func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *
 		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
 	}
 	if err := h.targetIPValidator(tgtUDPAddr.IP); err != nil {
-		return nil, nil, err
+		return nil, nil, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
 	}
 
 	payload := textData[len(tgtAddr):]
