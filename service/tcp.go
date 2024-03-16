@@ -41,7 +41,6 @@ type TCPMetrics interface {
 
 	// TCP metrics
 	AddOpenTCPConnection(ip net.Addr)
-	AddAuthenticatedTCPConnection(ip net.Addr, accessKey string)
 	AddClosedTCPConnection(ip net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
 }
@@ -122,6 +121,7 @@ type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, trans
 type ShadowsocksTCPMetrics interface {
 	// Shadowsocks TCP metrics
 	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+	AddAuthenticatedTCPConnection(ip net.Addr, accessKey string)
 }
 
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
