@@ -39,7 +39,7 @@ func (a fakeAddr) String() string  { return string(a) }
 func (a fakeAddr) Network() string { return "" }
 
 func TestMethodsDontPanic(t *testing.T) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry(), true)
 	proxyMetrics := metrics.ProxyMetrics{
 		ClientProxy: 1,
 		ProxyTarget: 2,
@@ -68,7 +68,7 @@ func TestASNLabel(t *testing.T) {
 func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T) {
 	since = func(time.Time) time.Duration { return 3 * time.Second }
 	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+	ssMetrics := newPrometheusOutlineMetrics(nil, reg, true)
 	accessKey := "key-1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
@@ -89,7 +89,7 @@ func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T
 func TestIPKeyActivityPerKey(t *testing.T) {
 	since = func(time.Time) time.Duration { return 3 * time.Second }
 	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+	ssMetrics := newPrometheusOutlineMetrics(nil, reg, true)
 	accessKey := "key-1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
@@ -116,7 +116,7 @@ func TestIPKeyActivityPerKey(t *testing.T) {
 func TestIPKeyActivityPerLocation(t *testing.T) {
 	since = func(time.Time) time.Duration { return 5 * time.Second }
 	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
+	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg, true)
 	accessKey := "key-1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
@@ -139,7 +139,7 @@ func TestIPKeyActivityPerLocation(t *testing.T) {
 }
 
 func BenchmarkOpenTCP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry(), false)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ssMetrics.AddOpenTCPConnection(fakeAddr("127.0.0.1:9"))
@@ -147,7 +147,7 @@ func BenchmarkOpenTCP(b *testing.B) {
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry(), false)
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
@@ -162,7 +162,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 }
 
 func BenchmarkProbe(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry(), false)
 	status := "ERR_REPLAY"
 	drainResult := "other"
 	port := 12345
@@ -174,7 +174,7 @@ func BenchmarkProbe(b *testing.B) {
 }
 
 func BenchmarkClientUDP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry(), false)
 	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
 	accessKey := "key 1"
 	status := "OK"
@@ -188,7 +188,7 @@ func BenchmarkClientUDP(b *testing.B) {
 }
 
 func BenchmarkTargetUDP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry(), false)
 	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
 	accessKey := "key 1"
 	status := "OK"
@@ -200,7 +200,7 @@ func BenchmarkTargetUDP(b *testing.B) {
 }
 
 func BenchmarkNAT(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry(), false)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")

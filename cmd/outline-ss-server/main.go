@@ -227,14 +227,15 @@ func readConfig(filename string) (*Config, error) {
 
 func main() {
 	var flags struct {
-		ConfigFile    string
-		MetricsAddr   string
-		IPCountryDB   string
-		IPASNDB       string
-		natTimeout    time.Duration
-		replayHistory int
-		Verbose       bool
-		Version       bool
+		ConfigFile                     string
+		MetricsAddr                    string
+		IPCountryDB                    string
+		IPASNDB                        string
+		natTimeout                     time.Duration
+		replayHistory                  int
+		EnableIPKeyConnectivityMetrics bool
+		Verbose                        bool
+		Version                        bool
 	}
 	flag.StringVar(&flags.ConfigFile, "config", "", "Configuration filename")
 	flag.StringVar(&flags.MetricsAddr, "metrics", "", "Address for the Prometheus metrics")
@@ -242,6 +243,7 @@ func main() {
 	flag.StringVar(&flags.IPASNDB, "ip_asn_db", "", "Path to the ip-to-ASN mmdb file")
 	flag.DurationVar(&flags.natTimeout, "udptimeout", defaultNatTimeout, "UDP tunnel timeout")
 	flag.IntVar(&flags.replayHistory, "replay_history", 0, "Replay buffer size (# of handshakes)")
+	flag.BoolVar(&flags.EnableIPKeyConnectivityMetrics, "enable_ip_key_connectivity_metrics", false, "Enables the collection and reporting of IPKey connectivity metrics")
 	flag.BoolVar(&flags.Verbose, "verbose", false, "Enables verbose logging output")
 	flag.BoolVar(&flags.Version, "version", false, "The version of the server")
 
@@ -284,7 +286,7 @@ func main() {
 	}
 	defer ip2info.Close()
 
-	m := newPrometheusOutlineMetrics(ip2info, prometheus.DefaultRegisterer)
+	m := newPrometheusOutlineMetrics(ip2info, prometheus.DefaultRegisterer, flags.EnableIPKeyConnectivityMetrics)
 	m.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
 	if err != nil {
