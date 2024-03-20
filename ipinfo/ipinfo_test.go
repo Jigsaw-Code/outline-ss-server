@@ -46,60 +46,47 @@ func (a *badAddr) Network() string {
 	return "bad"
 }
 
-func TestGetIPInfoFromAddrIPInfoDisabledReturnsEmptyIPInfo(t *testing.T) {
+func TestGetIPInfoFromAddr(t *testing.T) {
 	var emptyInfo IPInfo
+	noInfoMap := &noopMap{}
 
-	info, err := GetIPInfoFromAddr(nil, &badAddr{"127.0.0.1:port"})
-
+	// IP info disabled
+	info, err := GetIPInfoFromAddr(nil, nil)
 	require.Equal(t, emptyInfo, info)
 	require.NoError(t, err)
-}
 
-func TestGetIPInfoFromAddrNilAddressReturnsError(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&noopMap{}, nil)
-
+	// Nil address
+	info, err = GetIPInfoFromAddr(noInfoMap, nil)
 	require.Error(t, err)
 	require.Equal(t, errParseAddr, info.CountryCode)
-}
 
-func TestGetIPInfoFromAddrHostNoPortReturnsError(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&noopMap{}, &badAddr{"host-no-port"})
-
+	// Can't split host:port in address
+	info, err = GetIPInfoFromAddr(noInfoMap, &badAddr{"host-no-port"})
 	require.Error(t, err)
 	require.Equal(t, errParseAddr, info.CountryCode)
-}
 
-func TestGetIPInfoFromAddrHostIsNotIPReturnsError(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&noopMap{}, &badAddr{"host-is-not-ip:port"})
-
+	// Host is not an IP
+	info, err = GetIPInfoFromAddr(noInfoMap, &badAddr{"host-is-not-ip:port"})
 	require.Error(t, err)
 	require.Equal(t, errParseAddr, info.CountryCode)
-}
 
-func TestGetIPInfoFromAddrLocalhostAddressReturnsLocalLocation(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&noopMap{}, &badAddr{"127.0.0.1:port"})
-
+	// Localhost address
+	info, err = GetIPInfoFromAddr(noInfoMap, &badAddr{"127.0.0.1:port"})
 	require.NoError(t, err)
 	require.Equal(t, localLocation, info.CountryCode)
-}
 
-func TestGetIPInfoFromAddrLocalNetworkAddressReturnsUnknownLocation(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&noopMap{}, &badAddr{"10.0.0.1:port"})
-
+	// Local network address
+	info, err = GetIPInfoFromAddr(noInfoMap, &badAddr{"10.0.0.1:port"})
 	require.NoError(t, err)
 	require.Equal(t, unknownLocation, info.CountryCode)
-}
 
-func TestGetIPInfoFromAddrNoCountryFoundReturnsUnknownLocation(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&noopMap{}, &badAddr{"8.8.8.8:port"})
-
+	// No country found
+	info, err = GetIPInfoFromAddr(noInfoMap, &badAddr{"8.8.8.8:port"})
 	require.NoError(t, err)
 	require.Equal(t, unknownLocation, info.CountryCode)
-}
 
-func TestGetIPInfoFromAddrFailedDBLookupReturnsError(t *testing.T) {
-	info, err := GetIPInfoFromAddr(&badMap{}, &badAddr{"8.8.8.8:port"})
-
+	// Failed DB lookup
+	info, err = GetIPInfoFromAddr(&badMap{}, &badAddr{"8.8.8.8:port"})
 	require.Error(t, err)
 	require.Equal(t, errDbLookupError, info.CountryCode)
 }

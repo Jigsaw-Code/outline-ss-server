@@ -61,7 +61,7 @@ func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 
 	if addr == nil {
 		info.CountryCode = errParseAddr
-		return info, errors.New("address cannot be nil")
+		return info, fmt.Errorf("address cannot be nil")
 	}
 	hostname, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
