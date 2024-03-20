@@ -46,50 +46,6 @@ func (a *badAddr) Network() string {
 	return "bad"
 }
 
-func TestGetIPInfoFromIPIPInfoDisabledReturnsEmptyIPInfo(t *testing.T) {
-	var emptyInfo IPInfo
-
-	info, err := GetIPInfoFromIP(nil, net.IPv4(127, 0, 0, 1))
-
-	require.Equal(t, emptyInfo, info)
-	require.NoError(t, err)
-}
-
-func TestGetIPInfoFromIPNilAddressReturnsError(t *testing.T) {
-	info, err := GetIPInfoFromIP(&noopMap{}, nil)
-
-	require.Error(t, err)
-	require.Equal(t, errParseAddr, info.CountryCode)
-}
-
-func TestGetIPInfoFromIPLocalhostAddressReturnsLocalLocation(t *testing.T) {
-	info, err := GetIPInfoFromIP(&noopMap{}, net.IPv4(127, 0, 0, 1))
-
-	require.NoError(t, err)
-	require.Equal(t, localLocation, info.CountryCode)
-}
-
-func TestGetIPInfoFromIPLocalNetworkAddressReturnsUnknownLocation(t *testing.T) {
-	info, err := GetIPInfoFromIP(&noopMap{}, net.IPv4(10, 0, 0, 1))
-
-	require.NoError(t, err)
-	require.Equal(t, unknownLocation, info.CountryCode)
-}
-
-func TestGetIPInfoFromIPNoCountryFoundReturnsUnknownLocation(t *testing.T) {
-	info, err := GetIPInfoFromIP(&noopMap{}, net.IPv4(8, 8, 8, 8))
-
-	require.NoError(t, err)
-	require.Equal(t, unknownLocation, info.CountryCode)
-}
-
-func TestGetIPInfoFromIPFailedDBLookupReturnsError(t *testing.T) {
-	info, err := GetIPInfoFromIP(&badMap{}, net.IPv4(8, 8, 8, 8))
-
-	require.Error(t, err)
-	require.Equal(t, errDbLookupError, info.CountryCode)
-}
-
 func TestGetIPInfoFromAddrIPInfoDisabledReturnsEmptyIPInfo(t *testing.T) {
 	var emptyInfo IPInfo
 

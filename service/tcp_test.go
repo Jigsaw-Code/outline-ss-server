@@ -223,7 +223,7 @@ type probeTestMetrics struct {
 
 var _ TCPMetrics = (*probeTestMetrics)(nil)
 
-func (m *probeTestMetrics) AddClosedTCPConnection(addr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *probeTestMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()
@@ -232,10 +232,11 @@ func (m *probeTestMetrics) AddClosedTCPConnection(addr net.Addr, accessKey strin
 func (m *probeTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
-func (m *probeTestMetrics) AddOpenTCPConnection(addr net.Addr) {
+func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 }
 
-func (m *probeTestMetrics) AddAuthenticatedTCPConnection(ip net.Addr, accessKey string) {}
+func (m *probeTestMetrics) AddAuthenticatedTCPConnection(clientInfo ipinfo.IPInfo, ip net.Addr, accessKey string) {
+}
 
 func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
 	m.mu.Lock()

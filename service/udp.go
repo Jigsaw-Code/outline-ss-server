@@ -36,8 +36,8 @@ type UDPMetrics interface {
 	// UDP metrics
 	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
 	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
-	AddUDPNatEntry(ip net.Addr, accessKey string)
-	RemoveUDPNatEntry(ip net.Addr, accessKey string)
+	AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string)
+	RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string)
 
 	// Shadowsocks metrics
 	AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
@@ -357,11 +357,11 @@ func (m *natmap) del(key string) net.PacketConn {
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo ipinfo.IPInfo, keyID string) *natconn {
 	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, clientInfo)
 
-	m.metrics.AddUDPNatEntry(clientAddr, keyID)
+	m.metrics.AddUDPNatEntry(clientInfo, clientAddr, keyID)
 	m.running.Add(1)
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID, m.metrics)
-		m.metrics.RemoveUDPNatEntry(clientAddr, keyID)
+		m.metrics.RemoveUDPNatEntry(clientInfo, clientAddr, keyID)
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
 		}
@@ -475,6 +475,8 @@ func (m *NoOpUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, access
 }
 func (m *NoOpUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
-func (m *NoOpUDPMetrics) AddUDPNatEntry(ip net.Addr, accessKey string)                       {}
-func (m *NoOpUDPMetrics) RemoveUDPNatEntry(ip net.Addr, accessKey string)                    {}
+func (m *NoOpUDPMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+}
+func (m *NoOpUDPMetrics) RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+}
 func (m *NoOpUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

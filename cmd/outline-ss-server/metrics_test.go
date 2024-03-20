@@ -38,6 +38,13 @@ type fakeAddr string
 func (a fakeAddr) String() string  { return string(a) }
 func (a fakeAddr) Network() string { return "" }
 
+// SetTime sets the processing clock to be t until changed.
+func SetNow(t time.Time) {
+	Now = func() time.Time {
+		return t
+	}
+}
+
 func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry())
 	proxyMetrics := metrics.ProxyMetrics{
@@ -46,15 +53,16 @@ func TestMethodsDontPanic(t *testing.T) {
 		TargetProxy: 3,
 		ProxyClient: 4,
 	}
+	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
-	ssMetrics.AddOpenTCPConnection(fakeAddr("127.0.0.1:9"))
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
-	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
-	ssMetrics.AddUDPPacketFromClient(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "2", "OK", 10, 20)
-	ssMetrics.AddUDPPacketFromTarget(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, "3", "OK", 10, 20)
-	ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
-	ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
+	ssMetrics.AddOpenTCPConnection(ipInfo)
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "key-1")
+	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddUDPPacketFromClient(ipInfo, "2", "OK", 10, 20)
+	ssMetrics.AddUDPPacketFromTarget(ipInfo, "3", "OK", 10, 20)
+	ssMetrics.AddUDPNatEntry(ipInfo, fakeAddr("127.0.0.1:9"), "key-1")
+	ssMetrics.RemoveUDPNatEntry(ipInfo, fakeAddr("127.0.0.1:9"), "key-1")
 	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
 	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
 	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
@@ -66,88 +74,106 @@ func TestASNLabel(t *testing.T) {
 }
 
 func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T) {
-	since = func(time.Time) time.Duration { return 3 * time.Second }
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	accessKey := "key-1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
 	duration := time.Minute
 
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey)
-	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey)
+	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
 
 	err := promtest.GatherAndCompare(
 		reg,
 		strings.NewReader(""),
-		"shadowsocks_ip_key_connectivity_seconds",
+		"shadowsocks_tunnel_time_seconds",
 	)
 	require.NoError(t, err, "unexpectedly found metric value")
 }
 
 func TestIPKeyActivityPerKey(t *testing.T) {
-	since = func(time.Time) time.Duration { return 3 * time.Second }
+	SetNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	accessKey := "key-1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
 	duration := time.Minute
 
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey)
-	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
-	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey, status, data, duration)
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey)
+	SetNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
+	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
+	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey, status, data, duration)
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_ip_key_connectivity_seconds Time at least 1 connection was open for a (IP, access key) pair, per key
-	# TYPE shadowsocks_ip_key_connectivity_seconds counter
-	shadowsocks_ip_key_connectivity_seconds{access_key="key-1"} 3
+	# HELP shadowsocks_tunnel_time_seconds Time at least 1 connection was open for a (IP, access key) pair, per key
+	# TYPE shadowsocks_tunnel_time_seconds counter
+	shadowsocks_tunnel_time_seconds{access_key="key-1"} 15
 `)
 	err := promtest.GatherAndCompare(
 		reg,
 		expected,
-		"shadowsocks_ip_key_connectivity_seconds",
+		"shadowsocks_tunnel_time_seconds",
 	)
 	require.NoError(t, err, "unexpected metric value found")
 }
 
 func TestIPKeyActivityPerLocation(t *testing.T) {
-	since = func(time.Time) time.Duration { return 5 * time.Second }
+	SetNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
+	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
+	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key-1"
-	status := "OK"
-	data := metrics.ProxyMetrics{}
-	duration := time.Minute
 
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, addr, accessKey)
+	SetNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
+	ssMetrics.AddClosedTCPConnection(ipInfo, addr, accessKey, "OK", metrics.ProxyMetrics{}, time.Minute)
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_ip_key_connectivity_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location
-	# TYPE shadowsocks_ip_key_connectivity_seconds_per_location counter
-	shadowsocks_ip_key_connectivity_seconds_per_location{asn="",location="XL"} 5
+	# HELP shadowsocks_tunnel_time_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location
+	# TYPE shadowsocks_tunnel_time_seconds_per_location counter
+	shadowsocks_tunnel_time_seconds_per_location{asn="100",location="US"} 5
 `)
 	err := promtest.GatherAndCompare(
 		reg,
 		expected,
-		"shadowsocks_ip_key_connectivity_seconds_per_location",
+		"shadowsocks_tunnel_time_seconds_per_location",
 	)
 	require.NoError(t, err, "unexpected metric value found")
 }
 
+func TestIPKeyActivityPerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
+	reg := prometheus.NewPedanticRegistry()
+	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+
+	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, fakeAddr("127.0.0.1:9"), "key-1", "OK", metrics.ProxyMetrics{}, time.Minute)
+
+	err := promtest.GatherAndCompare(
+		reg,
+		strings.NewReader(""),
+		"shadowsocks_tunnel_time_seconds",
+	)
+	require.NoError(t, err, "unexpectedly found metric value")
+}
+
 func BenchmarkOpenTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddOpenTCPConnection(fakeAddr("127.0.0.1:9"))
+		ssMetrics.AddOpenTCPConnection(ipinfo)
 	}
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
@@ -156,7 +182,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddClosedTCPConnection(addr, accessKey, status, data, duration)
+		ssMetrics.AddClosedTCPConnection(ipinfo, addr, accessKey, status, data, duration)
 		ssMetrics.AddTCPCipherSearch(true, timeToCipher)
 	}
 }
@@ -201,9 +227,10 @@ func BenchmarkTargetUDP(b *testing.B) {
 
 func BenchmarkNAT(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")
-		ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")
+		ssMetrics.AddUDPNatEntry(ipinfo, fakeAddr("127.0.0.1:9"), "key-0")
+		ssMetrics.RemoveUDPNatEntry(ipinfo, fakeAddr("127.0.0.1:9"), "key-0")
 	}
 }
