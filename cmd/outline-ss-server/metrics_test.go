@@ -38,8 +38,8 @@ type fakeAddr string
 func (a fakeAddr) String() string  { return string(a) }
 func (a fakeAddr) Network() string { return "" }
 
-// SetTime sets the processing clock to be t until changed.
-func SetNow(t time.Time) {
+// Sets the processing clock to be t until changed.
+func setNow(t time.Time) {
 	Now = func() time.Time {
 		return t
 	}
@@ -95,7 +95,7 @@ func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T
 }
 
 func TestIPKeyActivityPerKey(t *testing.T) {
-	SetNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
+	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
 	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
@@ -106,7 +106,7 @@ func TestIPKeyActivityPerKey(t *testing.T) {
 
 	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey)
 	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey)
-	SetNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
+	setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey, status, data, duration)
 
@@ -124,7 +124,7 @@ func TestIPKeyActivityPerKey(t *testing.T) {
 }
 
 func TestIPKeyActivityPerLocation(t *testing.T) {
-	SetNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
+	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
 	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
@@ -132,7 +132,7 @@ func TestIPKeyActivityPerLocation(t *testing.T) {
 	accessKey := "key-1"
 
 	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, addr, accessKey)
-	SetNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
+	setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 	ssMetrics.AddClosedTCPConnection(ipInfo, addr, accessKey, "OK", metrics.ProxyMetrics{}, time.Minute)
 
 	expected := strings.NewReader(`
