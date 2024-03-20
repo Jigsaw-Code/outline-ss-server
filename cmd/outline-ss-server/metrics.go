@@ -35,7 +35,7 @@ var since = time.Since
 
 type outlineMetrics struct {
 	ipinfo.IPInfoMap
-	*activeIPKeyTracker
+	activeIPKeyTracker
 
 	buildInfo            *prometheus.GaugeVec
 	accessKeys           prometheus.Gauge
@@ -154,7 +154,7 @@ func newActiveIPKeyTracker(callback func(IPKey, time.Duration)) *activeIPKeyTrac
 // `ip2info` to convert IP addresses to countries, and reports all
 // metrics to Prometheus via `registerer`. `ip2info` may be nil, but
 // `registerer` must not be.
-func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer, enableIPKeyConnectivity bool) *outlineMetrics {
+func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) *outlineMetrics {
 	m := &outlineMetrics{
 		IPInfoMap: ip2info,
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -256,10 +256,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 				Help:      "Entries removed from the UDP NAT table",
 			}),
 	}
-	if enableIPKeyConnectivity {
-		m.activeIPKeyTracker = newActiveIPKeyTracker(m.reportIPKeyActivity)
-	}
-	logger.Debugf("tracker: %v", m.activeIPKeyTracker)
+	m.activeIPKeyTracker = *newActiveIPKeyTracker(m.reportIPKeyActivity)
 
 	// TODO: Is it possible to pass where to register the collectors?
 	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
@@ -298,9 +295,7 @@ func (m *outlineMetrics) reportIPKeyActivity(ipKey IPKey, duration time.Duration
 }
 
 func (m *outlineMetrics) AddAuthenticatedTCPConnection(addr net.Addr, accessKey string) {
-	if m.activeIPKeyTracker != nil {
-		m.activeIPKeyTracker.startConnection(addr, accessKey)
-	}
+	m.activeIPKeyTracker.startConnection(addr, accessKey)
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.
@@ -334,9 +329,7 @@ func (m *outlineMetrics) AddClosedTCPConnection(addr net.Addr, accessKey, status
 	addIfNonZero(data.ProxyClient, m.dataBytes, "c<p", "tcp", accessKey)
 	addIfNonZero(data.ProxyClient, m.dataBytesPerLocation, "c<p", "tcp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 
-	if m.activeIPKeyTracker != nil {
-		m.activeIPKeyTracker.stopConnection(addr, accessKey)
-	}
+	m.activeIPKeyTracker.stopConnection(addr, accessKey)
 }
 
 func (m *outlineMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
@@ -357,17 +350,13 @@ func (m *outlineMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 func (m *outlineMetrics) AddUDPNatEntry(addr net.Addr, accessKey string) {
 	m.udpAddedNatEntries.Inc()
 
-	if m.activeIPKeyTracker != nil {
-		m.activeIPKeyTracker.startConnection(addr, accessKey)
-	}
+	m.activeIPKeyTracker.startConnection(addr, accessKey)
 }
 
 func (m *outlineMetrics) RemoveUDPNatEntry(addr net.Addr, accessKey string) {
 	m.udpRemovedNatEntries.Inc()
 
-	if m.activeIPKeyTracker != nil {
-		m.activeIPKeyTracker.stopConnection(addr, accessKey)
-	}
+	m.activeIPKeyTracker.stopConnection(addr, accessKey)
 }
 
 func (m *outlineMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
