@@ -116,7 +116,7 @@ func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 func (m *natTestMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
 	m.natEntriesAdded++
 }
-func (m *natTestMetrics) RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *natTestMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
 func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 

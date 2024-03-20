@@ -333,7 +333,7 @@ func (m *outlineMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net
 	m.tunnelTimeTracker.startConnection(clientInfo, clientAddr, accessKey)
 }
 
-func (m *outlineMetrics) RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpRemovedNatEntries.Inc()
 
 	m.tunnelTimeTracker.stopConnection(clientAddr, accessKey)

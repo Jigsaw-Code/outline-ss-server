@@ -270,7 +270,7 @@ func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 func (m *fakeUDPMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
 	m.natAdded++
 }
-func (m *fakeUDPMetrics) RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *fakeUDPMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	// Not tested because it requires waiting for a long timeout.
 }
 func (m *fakeUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

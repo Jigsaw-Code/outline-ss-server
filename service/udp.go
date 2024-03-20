@@ -37,7 +37,7 @@ type UDPMetrics interface {
 	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
 	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
 	AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string)
-	RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string)
+	RemoveUDPNatEntry(clientAddr net.Addr, accessKey string)
 
 	// Shadowsocks metrics
 	AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
@@ -361,7 +361,7 @@ func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *
 	m.running.Add(1)
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID, m.metrics)
-		m.metrics.RemoveUDPNatEntry(clientInfo, clientAddr, keyID)
+		m.metrics.RemoveUDPNatEntry(clientAddr, keyID)
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
 		}
@@ -477,6 +477,6 @@ func (m *NoOpUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 }
 func (m *NoOpUDPMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
 }
-func (m *NoOpUDPMetrics) RemoveUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *NoOpUDPMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
 func (m *NoOpUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
