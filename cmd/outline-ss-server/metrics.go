@@ -62,6 +62,16 @@ type outlineMetrics struct {
 var _ service.TCPMetrics = (*outlineMetrics)(nil)
 var _ service.UDPMetrics = (*outlineMetrics)(nil)
 
+// Converts a [net.Addr] to a [netip.Addr].
+func toIPAddr(addr net.Addr) (d *netip.Addr, err error) {
+	hostname, _, _ := net.SplitHostPort(addr.String())
+	ip, err := netip.ParseAddr(hostname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert client IP address: %w", err)
+	}
+	return &ip, err
+}
+
 type ReportTunnelTimeFunc func(IPKey, ipinfo.IPInfo, time.Duration)
 
 type activeClient struct {
@@ -109,8 +119,11 @@ func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
 
 // Registers a new active connection for a client [net.Addr] and access key.
 func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
-	hostname, _, _ := net.SplitHostPort(clientAddr.String())
-	ipKey := IPKey{ip: netip.MustParseAddr(hostname), accessKey: accessKey}
+	ip, err := toIPAddr(clientAddr)
+	if err != nil {
+		return
+	}
+	ipKey := IPKey{*ip, accessKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -128,8 +141,11 @@ func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr
 
 // Removes an active connection for a client [net.Addr] and access key.
 func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string) {
-	hostname, _, _ := net.SplitHostPort(clientAddr.String())
-	ipKey := IPKey{ip: netip.MustParseAddr(hostname), accessKey: accessKey}
+	ip, err := toIPAddr(clientAddr)
+	if err != nil {
+		return
+	}
+	ipKey := IPKey{*ip, accessKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
