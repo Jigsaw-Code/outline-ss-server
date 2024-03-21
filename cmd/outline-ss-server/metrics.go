@@ -75,7 +75,7 @@ type IPKey struct {
 }
 
 type tunnelTimeTracker struct {
-	activeClients    map[IPKey]activeClient
+	activeClients    map[IPKey]*activeClient
 	reportTunnelTime ReportTunnelTimeFunc
 }
 
@@ -91,14 +91,12 @@ func (t *tunnelTimeTracker) reportAll(now time.Time) {
 }
 
 // Reports time connected for a given active client.
-func (t *tunnelTimeTracker) reportDuration(c activeClient, now time.Time) {
+func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
 	connDuration := now.Sub(c.startTime)
 	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
 	t.reportTunnelTime(c.IPKey, c.clientInfo, connDuration)
-
 	// Reset the start time now that it's been reported.
 	c.startTime = Now()
-	t.activeClients[c.IPKey] = c
 }
 
 // Registers a new active connection for a client [net.Addr] and access key.
@@ -108,7 +106,7 @@ func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr
 
 	c, exists := t.activeClients[ipKey]
 	if !exists {
-		c = activeClient{ipKey, clientInfo, 0, Now()}
+		c = &activeClient{ipKey, clientInfo, 0, Now()}
 	}
 	c.connectionCount++
 	t.activeClients[ipKey] = c
@@ -119,7 +117,6 @@ func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string
 	hostname, _, _ := net.SplitHostPort(clientAddr.String())
 	ipKey := IPKey{ip: hostname, accessKey: accessKey}
 
-	c := t.activeClients[ipKey]
 	c, exists := t.activeClients[ipKey]
 	if !exists {
 		logger.Warningf("Failed to find active client")
@@ -131,11 +128,10 @@ func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string
 		delete(t.activeClients, ipKey)
 		return
 	}
-	t.activeClients[ipKey] = c
 }
 
 func newTunnelTimeTracker(report ReportTunnelTimeFunc) *tunnelTimeTracker {
-	tracker := &tunnelTimeTracker{activeClients: make(map[IPKey]activeClient), reportTunnelTime: report}
+	tracker := &tunnelTimeTracker{activeClients: make(map[IPKey]*activeClient), reportTunnelTime: report}
 	ticker := time.NewTicker(tunnelTimeTrackerReportingInterval)
 	go func() {
 		for t := range ticker.C {
