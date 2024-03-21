@@ -57,7 +57,7 @@ func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
 	ssMetrics.AddOpenTCPConnection(ipInfo)
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "key-1")
+	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "0")
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
 	ssMetrics.AddUDPPacketFromClient(ipInfo, "2", "OK", 10, 20)
 	ssMetrics.AddUDPPacketFromTarget(ipInfo, "3", "OK", 10, 20)

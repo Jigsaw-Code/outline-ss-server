@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
@@ -63,6 +64,7 @@ var _ service.UDPMetrics = (*outlineMetrics)(nil)
 type ReportTunnelTimeFunc func(IPKey, ipinfo.IPInfo, time.Duration)
 
 type activeClient struct {
+	mu              sync.Mutex
 	IPKey           IPKey
 	clientInfo      ipinfo.IPInfo
 	connectionCount int
@@ -82,7 +84,7 @@ type tunnelTimeTracker struct {
 // Reports time connected for all active clients, called at a regular interval.
 func (t *tunnelTimeTracker) reportAll(now time.Time) {
 	if len(t.activeClients) == 0 {
-		logger.Debugf("No active clients. No IPKey activity to report.")
+		logger.Debugf("No active clients. No TunnelTime activity to report.")
 		return
 	}
 	for _, c := range t.activeClients {
@@ -92,6 +94,8 @@ func (t *tunnelTimeTracker) reportAll(now time.Time) {
 
 // Reports time connected for a given active client.
 func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	connDuration := now.Sub(c.startTime)
 	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
 	t.reportTunnelTime(c.IPKey, c.clientInfo, connDuration)
@@ -106,7 +110,11 @@ func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr
 
 	c, exists := t.activeClients[ipKey]
 	if !exists {
-		c = &activeClient{ipKey, clientInfo, 0, Now()}
+		c = &activeClient{
+			IPKey:      ipKey,
+			clientInfo: clientInfo,
+			startTime:  Now(),
+		}
 	}
 	c.connectionCount++
 	t.activeClients[ipKey] = c
@@ -122,7 +130,9 @@ func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string
 		logger.Warningf("Failed to find active client")
 		return
 	}
+	c.mu.Lock()
 	c.connectionCount--
+	c.mu.Unlock()
 	if c.connectionCount <= 0 {
 		t.reportDuration(c, Now())
 		delete(t.activeClients, ipKey)
