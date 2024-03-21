@@ -77,6 +77,7 @@ type IPKey struct {
 }
 
 type tunnelTimeTracker struct {
+	mu               sync.Mutex
 	activeClients    map[IPKey]*activeClient
 	reportTunnelTime ReportTunnelTimeFunc
 }
@@ -87,6 +88,8 @@ func (t *tunnelTimeTracker) reportAll(now time.Time) {
 		logger.Debugf("No active clients. No TunnelTime activity to report.")
 		return
 	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	for _, c := range t.activeClients {
 		t.reportDuration(c, now)
 	}
@@ -108,6 +111,8 @@ func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr
 	hostname, _, _ := net.SplitHostPort(clientAddr.String())
 	ipKey := IPKey{ip: hostname, accessKey: accessKey}
 
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	c, exists := t.activeClients[ipKey]
 	if !exists {
 		c = &activeClient{
@@ -125,6 +130,8 @@ func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string
 	hostname, _, _ := net.SplitHostPort(clientAddr.String())
 	ipKey := IPKey{ip: hostname, accessKey: accessKey}
 
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	c, exists := t.activeClients[ipKey]
 	if !exists {
 		logger.Warningf("Failed to find active client")
