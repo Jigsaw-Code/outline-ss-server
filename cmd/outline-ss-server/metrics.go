@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -72,7 +73,7 @@ type activeClient struct {
 }
 
 type IPKey struct {
-	ip        string
+	ip        netip.Addr
 	accessKey string
 }
 
@@ -109,7 +110,7 @@ func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
 // Registers a new active connection for a client [net.Addr] and access key.
 func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
 	hostname, _, _ := net.SplitHostPort(clientAddr.String())
-	ipKey := IPKey{ip: hostname, accessKey: accessKey}
+	ipKey := IPKey{ip: netip.MustParseAddr(hostname), accessKey: accessKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -128,7 +129,7 @@ func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr
 // Removes an active connection for a client [net.Addr] and access key.
 func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string) {
 	hostname, _, _ := net.SplitHostPort(clientAddr.String())
-	ipKey := IPKey{ip: hostname, accessKey: accessKey}
+	ipKey := IPKey{ip: netip.MustParseAddr(hostname), accessKey: accessKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
