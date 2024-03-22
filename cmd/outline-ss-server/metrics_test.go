@@ -73,45 +73,16 @@ func TestASNLabel(t *testing.T) {
 	require.Equal(t, "100", asnLabel(100))
 }
 
-func TestTunnelTimePerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T) {
-	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
-	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
-	accessKey := "key-1"
-	status := "OK"
-	data := metrics.ProxyMetrics{}
-	duration := time.Minute
-
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey)
-	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
-
-	err := promtest.GatherAndCompare(
-		reg,
-		strings.NewReader(""),
-		"shadowsocks_tunnel_time_seconds",
-	)
-	require.NoError(t, err, "unexpectedly found metric value")
-}
-
 func TestTunnelTimePerKey(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
-	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
-	accessKey := "key-1"
-	status := "OK"
-	data := metrics.ProxyMetrics{}
-	duration := time.Minute
 
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
 	setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
-	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
-	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey, status, data, duration)
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_tunnel_time_seconds Time at least 1 connection was open for a (IP, access key) pair, per key
+	# HELP shadowsocks_tunnel_time_seconds Time at least 1 connection was open for a (IP, access key) pair, per key.
 	# TYPE shadowsocks_tunnel_time_seconds counter
 	shadowsocks_tunnel_time_seconds{access_key="key-1"} 15
 `)
@@ -127,16 +98,12 @@ func TestTunnelTimePerLocation(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
-	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
-	addr := fakeAddr("127.0.0.1:9")
-	accessKey := "key-1"
 
-	ssMetrics.AddAuthenticatedTCPConnection(addr, accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
 	setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
-	ssMetrics.AddClosedTCPConnection(ipInfo, addr, accessKey, "OK", metrics.ProxyMetrics{}, time.Minute)
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_tunnel_time_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location
+	# HELP shadowsocks_tunnel_time_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location.
 	# TYPE shadowsocks_tunnel_time_seconds_per_location counter
 	shadowsocks_tunnel_time_seconds_per_location{asn="",location="XL"} 5
 `)
@@ -152,7 +119,7 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
 
-	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{CountryCode: "US", ASN: 100}, fakeAddr("127.0.0.1:9"), "key-1", "OK", metrics.ProxyMetrics{}, time.Minute)
+	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{}, fakeAddr("127.0.0.1:9"), "key-1", "OK", metrics.ProxyMetrics{}, time.Minute)
 
 	err := promtest.GatherAndCompare(
 		reg,
