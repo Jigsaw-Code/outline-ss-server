@@ -113,7 +113,7 @@ func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, access
 }
 func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
-func (m *natTestMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *natTestMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.natEntriesAdded++
 }
 func (m *natTestMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {

@@ -235,7 +235,7 @@ func (m *probeTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 }
 
-func (m *probeTestMetrics) AddAuthenticatedTCPConnection(clientInfo ipinfo.IPInfo, ip net.Addr, accessKey string) {
+func (m *probeTestMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
 
 func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {

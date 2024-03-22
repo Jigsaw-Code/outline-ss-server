@@ -41,7 +41,7 @@ type TCPMetrics interface {
 
 	// TCP metrics
 	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
-	AddAuthenticatedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string)
+	AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string)
 	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
 }
@@ -344,7 +344,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 		h.absorbProbe(listenerPort, outerConn, authErr.Status, proxyMetrics)
 		return id, authErr
 	}
-	h.m.AddAuthenticatedTCPConnection(clientInfo, innerConn.RemoteAddr(), id)
+	h.m.AddAuthenticatedTCPConnection(innerConn.RemoteAddr(), id)
 
 	// Read target address and dial it.
 	tgtAddr, err := getProxyRequest(innerConn)
@@ -401,7 +401,7 @@ func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
 func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
-func (m *NoOpTCPMetrics) AddAuthenticatedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *NoOpTCPMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
 func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
 }

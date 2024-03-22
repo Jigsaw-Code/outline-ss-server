@@ -88,6 +88,7 @@ type IPKey struct {
 }
 
 type tunnelTimeTracker struct {
+	ipinfo.IPInfoMap
 	mu               sync.Mutex
 	activeClients    map[IPKey]*activeClient
 	reportTunnelTime ReportTunnelTimeFunc
@@ -118,7 +119,7 @@ func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
 }
 
 // Registers a new active connection for a client [net.Addr] and access key.
-func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (t *tunnelTimeTracker) startConnection(clientAddr net.Addr, accessKey string) {
 	ip, err := toIPAddr(clientAddr)
 	if err != nil {
 		return
@@ -129,6 +130,7 @@ func (t *tunnelTimeTracker) startConnection(clientInfo ipinfo.IPInfo, clientAddr
 	defer t.mu.Unlock()
 	c, exists := t.activeClients[ipKey]
 	if !exists {
+		clientInfo, _ := ipinfo.GetIPInfoFromAddr(t.IPInfoMap, clientAddr)
 		c = &activeClient{
 			IPKey:      ipKey,
 			clientInfo: clientInfo,
@@ -164,8 +166,12 @@ func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string
 	}
 }
 
-func newTunnelTimeTracker(report ReportTunnelTimeFunc) *tunnelTimeTracker {
-	tracker := &tunnelTimeTracker{activeClients: make(map[IPKey]*activeClient), reportTunnelTime: report}
+func newTunnelTimeTracker(ip2info ipinfo.IPInfoMap, report ReportTunnelTimeFunc) *tunnelTimeTracker {
+	tracker := &tunnelTimeTracker{
+		IPInfoMap:        ip2info,
+		activeClients:    make(map[IPKey]*activeClient),
+		reportTunnelTime: report,
+	}
 	ticker := time.NewTicker(tunnelTimeTrackerReportingInterval)
 	go func() {
 		for t := range ticker.C {
@@ -281,7 +287,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 				Help:      "Entries removed from the UDP NAT table",
 			}),
 	}
-	m.tunnelTimeTracker = *newTunnelTimeTracker(m.addTunnelTime)
+	m.tunnelTimeTracker = *newTunnelTimeTracker(ip2info, m.addTunnelTime)
 
 	// TODO: Is it possible to pass where to register the collectors?
 	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
@@ -309,8 +315,8 @@ func (m *outlineMetrics) addTunnelTime(ipKey IPKey, clientInfo ipinfo.IPInfo, du
 	m.TunnelTimePerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Add(duration.Seconds())
 }
 
-func (m *outlineMetrics) AddAuthenticatedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
-	m.tunnelTimeTracker.startConnection(clientInfo, clientAddr, accessKey)
+func (m *outlineMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
+	m.tunnelTimeTracker.startConnection(clientAddr, accessKey)
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.
@@ -357,10 +363,10 @@ func (m *outlineMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 	addIfNonZero(int64(proxyClientBytes), m.dataBytesPerLocation, "c<p", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 }
 
-func (m *outlineMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *outlineMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpAddedNatEntries.Inc()
 
-	m.tunnelTimeTracker.startConnection(clientInfo, clientAddr, accessKey)
+	m.tunnelTimeTracker.startConnection(clientAddr, accessKey)
 }
 
 func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {

@@ -57,11 +57,11 @@ func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
 	ssMetrics.AddOpenTCPConnection(ipInfo)
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "0")
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "0")
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
 	ssMetrics.AddUDPPacketFromClient(ipInfo, "2", "OK", 10, 20)
 	ssMetrics.AddUDPPacketFromTarget(ipInfo, "3", "OK", 10, 20)
-	ssMetrics.AddUDPNatEntry(ipInfo, fakeAddr("127.0.0.1:9"), "key-1")
+	ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
 	ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
 	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
 	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
@@ -82,8 +82,8 @@ func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T
 	data := metrics.ProxyMetrics{}
 	duration := time.Minute
 
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey)
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
 
 	err := promtest.GatherAndCompare(
@@ -104,8 +104,8 @@ func TestIPKeyActivityPerKey(t *testing.T) {
 	data := metrics.ProxyMetrics{}
 	duration := time.Minute
 
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey)
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:1"), accessKey)
 	setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), accessKey, status, data, duration)
 	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:1"), accessKey, status, data, duration)
@@ -131,14 +131,14 @@ func TestIPKeyActivityPerLocation(t *testing.T) {
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key-1"
 
-	ssMetrics.AddAuthenticatedTCPConnection(ipInfo, addr, accessKey)
+	ssMetrics.AddAuthenticatedTCPConnection(addr, accessKey)
 	setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 	ssMetrics.AddClosedTCPConnection(ipInfo, addr, accessKey, "OK", metrics.ProxyMetrics{}, time.Minute)
 
 	expected := strings.NewReader(`
 	# HELP shadowsocks_tunnel_time_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location
 	# TYPE shadowsocks_tunnel_time_seconds_per_location counter
-	shadowsocks_tunnel_time_seconds_per_location{asn="100",location="US"} 5
+	shadowsocks_tunnel_time_seconds_per_location{asn="",location="XL"} 5
 `)
 	err := promtest.GatherAndCompare(
 		reg,
@@ -227,10 +227,9 @@ func BenchmarkTargetUDP(b *testing.B) {
 
 func BenchmarkNAT(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
-	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPNatEntry(ipinfo, fakeAddr("127.0.0.1:9"), "key-0")
+		ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")
 		ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-0")
 	}
 }

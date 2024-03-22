@@ -36,7 +36,7 @@ type UDPMetrics interface {
 	// UDP metrics
 	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
 	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
-	AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string)
+	AddUDPNatEntry(clientAddr net.Addr, accessKey string)
 	RemoveUDPNatEntry(clientAddr net.Addr, accessKey string)
 
 	// Shadowsocks metrics
@@ -357,7 +357,7 @@ func (m *natmap) del(key string) net.PacketConn {
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo ipinfo.IPInfo, keyID string) *natconn {
 	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, clientInfo)
 
-	m.metrics.AddUDPNatEntry(clientInfo, clientAddr, keyID)
+	m.metrics.AddUDPNatEntry(clientAddr, keyID)
 	m.running.Add(1)
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID, m.metrics)
@@ -475,7 +475,7 @@ func (m *NoOpUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, access
 }
 func (m *NoOpUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
-func (m *NoOpUDPMetrics) AddUDPNatEntry(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string) {
+func (m *NoOpUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
 func (m *NoOpUDPMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
