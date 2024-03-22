@@ -45,6 +45,37 @@ const (
 	unknownLocation CountryCode = "ZZ"
 )
 
+// GetIPInfoFromIP is a helper function to call [IPInfoMap].GetIPInfo using a [net.IP].
+// It uses special country codes to indicate errors:
+//   - "XL": IP is not global ("L" is for "Local").
+//   - "XD": database error looking up the country code ("D" is for "DB").
+//   - "ZZ": lookup returned an empty country code (same as the Unicode unknown location).
+func GetIPInfoFromIP(ip2info IPInfoMap, ip net.IP) (IPInfo, error) {
+	var info IPInfo
+	if ip2info == nil {
+		// Location is disabled. return empty info.
+		return info, nil
+	}
+
+	if ip == nil {
+		info.CountryCode = errParseAddr
+		return info, errors.New("IP cannot be nil")
+	}
+
+	if !ip.IsGlobalUnicast() {
+		info.CountryCode = localLocation
+		return info, nil
+	}
+	info, err := ip2info.GetIPInfo(ip)
+	if err != nil {
+		info.CountryCode = errDbLookupError
+	}
+	if info.CountryCode == "" {
+		info.CountryCode = unknownLocation
+	}
+	return info, err
+}
+
 // GetIPInfoFromAddr is a helper function to extract the IP address from the [net.Addr]
 // and call [IPInfoMap].GetIPInfo.
 // It uses special country codes to indicate errors:
@@ -54,14 +85,9 @@ const (
 //   - "ZZ": lookup returned an empty country code (same as the Unicode unknown location).
 func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 	var info IPInfo
-	if ip2info == nil {
-		// Location is disabled. return empty info.
-		return info, nil
-	}
-
 	if addr == nil {
 		info.CountryCode = errParseAddr
-		return info, fmt.Errorf("address cannot be nil")
+		return info, errors.New("address cannot be nil")
 	}
 	hostname, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
@@ -74,16 +100,5 @@ func GetIPInfoFromAddr(ip2info IPInfoMap, addr net.Addr) (IPInfo, error) {
 		return info, errors.New("failed to parse address as IP")
 	}
 
-	if !ip.IsGlobalUnicast() {
-		info.CountryCode = localLocation
-		return info, nil
-	}
-	info, err = ip2info.GetIPInfo(ip)
-	if err != nil {
-		info.CountryCode = errDbLookupError
-	}
-	if info.CountryCode == "" {
-		info.CountryCode = unknownLocation
-	}
-	return info, err
+	return GetIPInfoFromIP(ip2info, ip)
 }

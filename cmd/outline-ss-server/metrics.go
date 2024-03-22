@@ -63,13 +63,22 @@ var _ service.TCPMetrics = (*outlineMetrics)(nil)
 var _ service.UDPMetrics = (*outlineMetrics)(nil)
 
 // Converts a [net.Addr] to a [netip.Addr].
-func toIPAddr(addr net.Addr) (d *netip.Addr, err error) {
+func toIPAddr(addr net.Addr) (a *netip.Addr, err error) {
 	hostname, _, _ := net.SplitHostPort(addr.String())
 	ip, err := netip.ParseAddr(hostname)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert client IP address: %w", err)
 	}
 	return &ip, err
+}
+
+// Converts a [net.Addr] to an [IPKey].
+func toIPKey(addr net.Addr, accessKey string) (ipKey *IPKey) {
+	ip, err := toIPAddr(addr)
+	if err != nil {
+		return nil
+	}
+	return &IPKey{*ip, accessKey}
 }
 
 type ReportTunnelTimeFunc func(IPKey, ipinfo.IPInfo, time.Duration)
@@ -119,18 +128,12 @@ func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
 }
 
 // Registers a new active connection for a client [net.Addr] and access key.
-func (t *tunnelTimeTracker) startConnection(clientAddr net.Addr, accessKey string) {
-	ip, err := toIPAddr(clientAddr)
-	if err != nil {
-		return
-	}
-	ipKey := IPKey{*ip, accessKey}
-
+func (t *tunnelTimeTracker) startConnection(ipKey IPKey) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	c, exists := t.activeClients[ipKey]
 	if !exists {
-		clientInfo, _ := ipinfo.GetIPInfoFromAddr(t.IPInfoMap, clientAddr)
+		clientInfo, _ := ipinfo.GetIPInfoFromIP(t.IPInfoMap, net.IP(ipKey.ip.AsSlice()))
 		c = &activeClient{
 			IPKey:      ipKey,
 			clientInfo: clientInfo,
@@ -142,13 +145,7 @@ func (t *tunnelTimeTracker) startConnection(clientAddr net.Addr, accessKey strin
 }
 
 // Removes an active connection for a client [net.Addr] and access key.
-func (t *tunnelTimeTracker) stopConnection(clientAddr net.Addr, accessKey string) {
-	ip, err := toIPAddr(clientAddr)
-	if err != nil {
-		return
-	}
-	ipKey := IPKey{*ip, accessKey}
-
+func (t *tunnelTimeTracker) stopConnection(ipKey IPKey) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	c, exists := t.activeClients[ipKey]
@@ -316,7 +313,7 @@ func (m *outlineMetrics) addTunnelTime(ipKey IPKey, clientInfo ipinfo.IPInfo, du
 }
 
 func (m *outlineMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
-	m.tunnelTimeTracker.startConnection(clientAddr, accessKey)
+	m.tunnelTimeTracker.startConnection(*toIPKey(clientAddr, accessKey))
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.
@@ -345,7 +342,7 @@ func (m *outlineMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, client
 	addIfNonZero(data.ProxyClient, m.dataBytes, "c<p", "tcp", accessKey)
 	addIfNonZero(data.ProxyClient, m.dataBytesPerLocation, "c<p", "tcp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 
-	m.tunnelTimeTracker.stopConnection(clientAddr, accessKey)
+	m.tunnelTimeTracker.stopConnection(*toIPKey(clientAddr, accessKey))
 }
 
 func (m *outlineMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
@@ -366,13 +363,13 @@ func (m *outlineMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 func (m *outlineMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpAddedNatEntries.Inc()
 
-	m.tunnelTimeTracker.startConnection(clientAddr, accessKey)
+	m.tunnelTimeTracker.startConnection(*toIPKey(clientAddr, accessKey))
 }
 
 func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpRemovedNatEntries.Inc()
 
-	m.tunnelTimeTracker.stopConnection(clientAddr, accessKey)
+	m.tunnelTimeTracker.stopConnection(*toIPKey(clientAddr, accessKey))
 }
 
 func (m *outlineMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
