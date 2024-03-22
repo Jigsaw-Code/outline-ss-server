@@ -75,7 +75,6 @@ func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
 type ReportTunnelTimeFunc func(IPKey, ipinfo.IPInfo, time.Duration)
 
 type activeClient struct {
-	mu              sync.Mutex
 	IPKey           IPKey
 	clientInfo      ipinfo.IPInfo
 	connectionCount int
@@ -109,8 +108,6 @@ func (t *tunnelTimeTracker) reportAll(now time.Time) {
 
 // Reports time connected for a given active client.
 func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	connDuration := now.Sub(c.startTime)
 	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
 	t.reportTunnelTime(c.IPKey, c.clientInfo, connDuration)
@@ -144,9 +141,7 @@ func (t *tunnelTimeTracker) stopConnection(ipKey IPKey) {
 		logger.Warningf("Failed to find active client")
 		return
 	}
-	c.mu.Lock()
 	c.connectionCount--
-	c.mu.Unlock()
 	if c.connectionCount <= 0 {
 		t.reportDuration(c, Now())
 		delete(t.activeClients, ipKey)
