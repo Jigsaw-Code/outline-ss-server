@@ -73,7 +73,7 @@ func TestASNLabel(t *testing.T) {
 	require.Equal(t, "100", asnLabel(100))
 }
 
-func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T) {
+func TestTunnelTimePerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
 	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
@@ -94,7 +94,7 @@ func TestIPKeyActivityPerKeyDoesNotReportUnlessAllConnectionsClosed(t *testing.T
 	require.NoError(t, err, "unexpectedly found metric value")
 }
 
-func TestIPKeyActivityPerKey(t *testing.T) {
+func TestTunnelTimePerKey(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
@@ -123,7 +123,7 @@ func TestIPKeyActivityPerKey(t *testing.T) {
 	require.NoError(t, err, "unexpected metric value found")
 }
 
-func TestIPKeyActivityPerLocation(t *testing.T) {
+func TestTunnelTimePerLocation(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
@@ -148,7 +148,7 @@ func TestIPKeyActivityPerLocation(t *testing.T) {
 	require.NoError(t, err, "unexpected metric value found")
 }
 
-func TestIPKeyActivityPerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
+func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
 

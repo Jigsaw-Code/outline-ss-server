@@ -62,23 +62,14 @@ type outlineMetrics struct {
 var _ service.TCPMetrics = (*outlineMetrics)(nil)
 var _ service.UDPMetrics = (*outlineMetrics)(nil)
 
-// Converts a [net.Addr] to a [netip.Addr].
-func toIPAddr(addr net.Addr) (a *netip.Addr, err error) {
+// Converts a [net.Addr] to an [IPKey].
+func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
 	hostname, _, _ := net.SplitHostPort(addr.String())
 	ip, err := netip.ParseAddr(hostname)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert client IP address: %w", err)
+		return nil, fmt.Errorf("failed to convert IP address: %w", err)
 	}
-	return &ip, err
-}
-
-// Converts a [net.Addr] to an [IPKey].
-func toIPKey(addr net.Addr, accessKey string) (ipKey *IPKey) {
-	ip, err := toIPAddr(addr)
-	if err != nil {
-		return nil
-	}
-	return &IPKey{*ip, accessKey}
+	return &IPKey{ip, accessKey}, nil
 }
 
 type ReportTunnelTimeFunc func(IPKey, ipinfo.IPInfo, time.Duration)
@@ -313,7 +304,10 @@ func (m *outlineMetrics) addTunnelTime(ipKey IPKey, clientInfo ipinfo.IPInfo, du
 }
 
 func (m *outlineMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
-	m.tunnelTimeTracker.startConnection(*toIPKey(clientAddr, accessKey))
+	ipKey, err := toIPKey(clientAddr, accessKey)
+	if err == nil {
+		m.tunnelTimeTracker.startConnection(*ipKey)
+	}
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.
@@ -342,7 +336,10 @@ func (m *outlineMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, client
 	addIfNonZero(data.ProxyClient, m.dataBytes, "c<p", "tcp", accessKey)
 	addIfNonZero(data.ProxyClient, m.dataBytesPerLocation, "c<p", "tcp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 
-	m.tunnelTimeTracker.stopConnection(*toIPKey(clientAddr, accessKey))
+	ipKey, err := toIPKey(clientAddr, accessKey)
+	if err == nil {
+		m.tunnelTimeTracker.stopConnection(*ipKey)
+	}
 }
 
 func (m *outlineMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
@@ -363,13 +360,19 @@ func (m *outlineMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, access
 func (m *outlineMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpAddedNatEntries.Inc()
 
-	m.tunnelTimeTracker.startConnection(*toIPKey(clientAddr, accessKey))
+	ipKey, err := toIPKey(clientAddr, accessKey)
+	if err == nil {
+		m.tunnelTimeTracker.startConnection(*ipKey)
+	}
 }
 
 func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpRemovedNatEntries.Inc()
 
-	m.tunnelTimeTracker.stopConnection(*toIPKey(clientAddr, accessKey))
+	ipKey, err := toIPKey(clientAddr, accessKey)
+	if err == nil {
+		m.tunnelTimeTracker.stopConnection(*ipKey)
+	}
 }
 
 func (m *outlineMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
