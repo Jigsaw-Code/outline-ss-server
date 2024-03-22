@@ -89,7 +89,7 @@ type IPKey struct {
 
 type tunnelTimeTracker struct {
 	ipinfo.IPInfoMap
-	mu               sync.Mutex
+	mu               sync.Mutex // Protects the activeClients map.
 	activeClients    map[IPKey]*activeClient
 	reportTunnelTime ReportTunnelTimeFunc
 }
