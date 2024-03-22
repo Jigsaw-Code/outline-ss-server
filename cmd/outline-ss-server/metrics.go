@@ -31,8 +31,8 @@ import (
 // How often to report the active IP key TunnelTime.
 const tunnelTimeTrackerReportingInterval = 5 * time.Second
 
-// Now is stubbable for testing.
-var Now = time.Now
+// `now` is stubbable for testing.
+var now = time.Now
 
 type outlineMetrics struct {
 	ipinfo.IPInfoMap
@@ -107,12 +107,12 @@ func (t *tunnelTimeTracker) reportAll(now time.Time) {
 }
 
 // Reports time connected for a given active client.
-func (t *tunnelTimeTracker) reportDuration(c *activeClient, now time.Time) {
-	connDuration := now.Sub(c.startTime)
+func (t *tunnelTimeTracker) reportDuration(c *activeClient, tNow time.Time) {
+	connDuration := tNow.Sub(c.startTime)
 	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
 	t.reportTunnelTime(c.IPKey, c.clientInfo, connDuration)
 	// Reset the start time now that it's been reported.
-	c.startTime = Now()
+	c.startTime = tNow
 }
 
 // Registers a new active connection for a client [net.Addr] and access key.
@@ -125,7 +125,7 @@ func (t *tunnelTimeTracker) startConnection(ipKey IPKey) {
 		c = &activeClient{
 			IPKey:      ipKey,
 			clientInfo: clientInfo,
-			startTime:  Now(),
+			startTime:  now(),
 		}
 	}
 	c.connectionCount++
@@ -143,7 +143,7 @@ func (t *tunnelTimeTracker) stopConnection(ipKey IPKey) {
 	}
 	c.connectionCount--
 	if c.connectionCount <= 0 {
-		t.reportDuration(c, Now())
+		t.reportDuration(c, now())
 		delete(t.activeClients, ipKey)
 		return
 	}

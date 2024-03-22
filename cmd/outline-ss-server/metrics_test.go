@@ -40,7 +40,7 @@ func (a fakeAddr) Network() string { return "" }
 
 // Sets the processing clock to be t until changed.
 func setNow(t time.Time) {
-	Now = func() time.Time {
+	now = func() time.Time {
 		return t
 	}
 }
