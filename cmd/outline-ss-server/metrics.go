@@ -97,7 +97,6 @@ func (c *tunnelTimeCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.tunnelTimePerLocation
 }
 
-// Collects time connected for all active clients.
 func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -107,14 +106,14 @@ func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
 		if client.connCount > 0 {
 			connDuration += tNow.Sub(client.startTime)
 		}
-		logger.Debugf("Reporting activity for key `%v`, duration: %v", ipKey.accessKey, connDuration)
+		logger.Debugf("Collecting TunnelTime for key `%v`, duration: %v", ipKey.accessKey, connDuration)
 		ch <- prometheus.MustNewConstMetric(c.tunnelTimePerKey, prometheus.CounterValue, connDuration.Seconds(), ipKey.accessKey)
 		ch <- prometheus.MustNewConstMetric(c.tunnelTimePerLocation, prometheus.CounterValue, connDuration.Seconds(), client.info.CountryCode.String(), asnLabel(client.info.ASN))
 		if client.connCount == 0 {
 			delete(c.activeClients, ipKey)
 			continue
 		}
-		// Reset the start time now that it's been reported.
+		// Reset the timing components now that TunnelTime has been reported.
 		client.startTime = tNow
 		client.connDuration = 0
 	}
