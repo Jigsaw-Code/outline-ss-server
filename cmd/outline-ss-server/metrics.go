@@ -121,6 +121,9 @@ func (t *tunnelTimeTracker) startConnection(ipKey IPKey) {
 	c, exists := t.activeClients[ipKey]
 	if !exists {
 		clientInfo, _ := ipinfo.GetIPInfoFromIP(t.IPInfoMap, net.IP(ipKey.ip.AsSlice()))
+		// Initialize the TunnelTime for this IPKey with default value of 0:
+		// https://prometheus.io/docs/practices/instrumentation/#avoid-missing-metrics
+		t.reportTunnelTime(ipKey, clientInfo, 0)
 		c = &activeClient{
 			clientInfo: clientInfo,
 			startTime:  now(),
