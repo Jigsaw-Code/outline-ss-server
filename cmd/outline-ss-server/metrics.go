@@ -75,7 +75,6 @@ func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
 type ReportTunnelTimeFunc func(IPKey, ipinfo.IPInfo, time.Duration)
 
 type activeClient struct {
-	IPKey           IPKey
 	clientInfo      ipinfo.IPInfo
 	connectionCount int
 	startTime       time.Time
@@ -101,16 +100,16 @@ func (t *tunnelTimeTracker) reportAll(now time.Time) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, c := range t.activeClients {
-		t.reportDuration(c, now)
+	for ipKey, c := range t.activeClients {
+		t.reportDuration(ipKey, c, now)
 	}
 }
 
 // Reports time connected for a given active client.
-func (t *tunnelTimeTracker) reportDuration(c *activeClient, tNow time.Time) {
+func (t *tunnelTimeTracker) reportDuration(ipKey IPKey, c *activeClient, tNow time.Time) {
 	connDuration := tNow.Sub(c.startTime)
-	logger.Debugf("Reporting activity for key `%v`, duration: %v", c.IPKey.accessKey, connDuration)
-	t.reportTunnelTime(c.IPKey, c.clientInfo, connDuration)
+	logger.Debugf("Reporting activity for key `%v`, duration: %v", ipKey.accessKey, connDuration)
+	t.reportTunnelTime(ipKey, c.clientInfo, connDuration)
 	// Reset the start time now that it's been reported.
 	c.startTime = tNow
 }
@@ -123,7 +122,6 @@ func (t *tunnelTimeTracker) startConnection(ipKey IPKey) {
 	if !exists {
 		clientInfo, _ := ipinfo.GetIPInfoFromIP(t.IPInfoMap, net.IP(ipKey.ip.AsSlice()))
 		c = &activeClient{
-			IPKey:      ipKey,
 			clientInfo: clientInfo,
 			startTime:  now(),
 		}
@@ -143,7 +141,7 @@ func (t *tunnelTimeTracker) stopConnection(ipKey IPKey) {
 	}
 	c.connectionCount--
 	if c.connectionCount <= 0 {
-		t.reportDuration(c, now())
+		t.reportDuration(ipKey, c, now())
 		delete(t.activeClients, ipKey)
 		return
 	}
