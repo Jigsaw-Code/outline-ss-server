@@ -60,10 +60,13 @@ var _ service.UDPMetrics = (*outlineMetrics)(nil)
 
 // Converts a [net.Addr] to an [IPKey].
 func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
-	hostname, _, _ := net.SplitHostPort(addr.String())
+	hostname, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create IPKey: %w", err)
+	}
 	ip, err := netip.ParseAddr(hostname)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert IP address: %w", err)
+		return nil, fmt.Errorf("failed to create IPKey: %w", err)
 	}
 	return &IPKey{ip, accessKey}, nil
 }
