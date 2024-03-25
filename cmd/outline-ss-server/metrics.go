@@ -75,10 +75,9 @@ func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
 // around until they are inactive, or get reported to Prometheus, whichever
 // comes last.
 type activeClient struct {
-	info       ipinfo.IPInfo
-	connCount  int // The active connection count.
-	startTime  time.Time
-	tunnelTime time.Duration // If the client has become inactive, this holds the tunneltime.
+	info      ipinfo.IPInfo
+	connCount int // The active connection count.
+	startTime time.Time
 }
 
 type IPKey struct {
@@ -91,13 +90,13 @@ type tunnelTimeCollector struct {
 	mu            sync.Mutex // Protects the activeClients map.
 	activeClients map[IPKey]*activeClient
 
-	tunnelTimePerKey      *prometheus.Desc
-	tunnelTimePerLocation *prometheus.Desc
+	tunnelTimePerKey      *prometheus.CounterVec
+	tunnelTimePerLocation *prometheus.CounterVec
 }
 
 func (c *tunnelTimeCollector) Describe(ch chan<- *prometheus.Desc) {
-	ch <- c.tunnelTimePerKey
-	ch <- c.tunnelTimePerLocation
+	c.tunnelTimePerKey.Describe(ch)
+	c.tunnelTimePerLocation.Describe(ch)
 }
 
 func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
@@ -105,29 +104,20 @@ func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
 	defer c.mu.Unlock()
 	tNow := now()
 	for ipKey, client := range c.activeClients {
-		var tunnelTime = client.tunnelTime
-		if client.connCount > 0 {
-			tunnelTime += tNow.Sub(client.startTime)
-		}
-		logger.Debugf("Collecting TunnelTime for key `%v`, duration: %v", ipKey.accessKey, tunnelTime)
-
-		tunnelTimePerKey, perKeyErr := prometheus.NewConstMetric(c.tunnelTimePerKey, prometheus.CounterValue, tunnelTime.Seconds(), ipKey.accessKey)
-		tunnelTimePerLocation, perLocationErr := prometheus.NewConstMetric(c.tunnelTimePerLocation, prometheus.CounterValue, tunnelTime.Seconds(), client.info.CountryCode.String(), asnLabel(client.info.ASN))
-		if perKeyErr != nil || perLocationErr != nil {
-			logger.Error("Error collecting TunnelTime metrics")
-			return
-		}
-		ch <- tunnelTimePerKey
-		ch <- tunnelTimePerLocation
-
-		if client.connCount == 0 {
-			delete(c.activeClients, ipKey)
-			continue
-		}
-		// Reset the timing components now that TunnelTime has been reported.
-		client.startTime = tNow
-		client.tunnelTime = 0
+		c.reportTunnelTime(ipKey, client, tNow)
 	}
+	c.tunnelTimePerKey.Collect(ch)
+	c.tunnelTimePerLocation.Collect(ch)
+}
+
+// Calculates and reports the tunnel time for a given active client.
+func (c *tunnelTimeCollector) reportTunnelTime(ipKey IPKey, client *activeClient, tNow time.Time) {
+	tunnelTime := tNow.Sub(client.startTime)
+	logger.Debugf("Reporting tunnel time for key `%v`, duration: %v", ipKey.accessKey, tunnelTime)
+	c.tunnelTimePerKey.WithLabelValues(ipKey.accessKey).Add(tunnelTime.Seconds())
+	c.tunnelTimePerLocation.WithLabelValues(client.info.CountryCode.String(), asnLabel(client.info.ASN)).Add(tunnelTime.Seconds())
+	// Reset the start time now that the tunnel time has been reported.
+	client.startTime = tNow
 }
 
 // Registers a new active connection for a client [net.Addr] and access key.
@@ -137,13 +127,7 @@ func (c *tunnelTimeCollector) startConnection(ipKey IPKey) {
 	client, exists := c.activeClients[ipKey]
 	if !exists {
 		clientInfo, _ := ipinfo.GetIPInfoFromIP(c.ip2info, net.IP(ipKey.ip.AsSlice()))
-		client = &activeClient{info: clientInfo}
-	}
-	if client.connCount == 0 {
-		// This client is new or was recently stopped (before it was measured and
-		// deleted by the metrics reporter). Reset the start time so we are
-		// accurately capturing this new session.
-		client.startTime = now()
+		client = &activeClient{info: clientInfo, startTime: now()}
 	}
 	client.connCount++
 	c.activeClients[ipKey] = client
@@ -159,8 +143,9 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 		return
 	}
 	client.connCount--
-	if client.connCount == 0 {
-		client.tunnelTime = now().Sub(client.startTime)
+	if client.connCount <= 0 {
+		c.reportTunnelTime(ipKey, client, now())
+		delete(c.activeClients, ipKey)
 	}
 }
 
@@ -169,16 +154,16 @@ func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap, registerer prometheus.Regi
 		ip2info:       ip2info,
 		activeClients: make(map[IPKey]*activeClient),
 
-		tunnelTimePerKey: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, "", "tunnel_time_seconds"),
-			"Tunnel time, per access key.",
-			[]string{"access_key"}, nil,
-		),
-		tunnelTimePerLocation: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, "", "tunnel_time_seconds_per_location"),
-			"Tunnel time, per location.",
-			[]string{"location", "asn"}, nil,
-		),
+		tunnelTimePerKey: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "tunnel_time_seconds",
+			Help:      "Tunnel time, per access key.",
+		}, []string{"access_key"}),
+		tunnelTimePerLocation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "tunnel_time_seconds_per_location",
+			Help:      "Tunnel time, per location.",
+		}, []string{"location", "asn"}),
 	}
 }
 
