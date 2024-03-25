@@ -344,7 +344,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 		h.absorbProbe(listenerPort, outerConn, authErr.Status, proxyMetrics)
 		return id, authErr
 	}
-	h.m.AddAuthenticatedTCPConnection(innerConn.RemoteAddr(), id)
+	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
 
 	// Read target address and dial it.
 	tgtAddr, err := getProxyRequest(innerConn)

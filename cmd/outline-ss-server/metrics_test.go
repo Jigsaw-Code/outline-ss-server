@@ -82,7 +82,7 @@ func TestTunnelTimePerKey(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_tunnel_time_seconds Time at least 1 connection was open for a (IP, access key) pair, per key.
+	# HELP shadowsocks_tunnel_time_seconds Tunnel time, per access key.
 	# TYPE shadowsocks_tunnel_time_seconds counter
 	shadowsocks_tunnel_time_seconds{access_key="key-1"} 15
 `)
@@ -103,7 +103,7 @@ func TestTunnelTimePerLocation(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_tunnel_time_seconds_per_location Time at least 1 connection was open for a (IP, access key) pair, per location.
+	# HELP shadowsocks_tunnel_time_seconds_per_location Tunnel time, per location.
 	# TYPE shadowsocks_tunnel_time_seconds_per_location counter
 	shadowsocks_tunnel_time_seconds_per_location{asn="",location="XL"} 5
 `)
