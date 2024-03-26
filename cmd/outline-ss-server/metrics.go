@@ -100,12 +100,12 @@ func (c *tunnelTimeCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	tNow := now()
+	c.mu.Lock()
 	for ipKey, client := range c.activeClients {
 		c.reportTunnelTime(ipKey, client, tNow)
 	}
+	c.mu.Unlock()
 	c.tunnelTimePerKey.Collect(ch)
 	c.tunnelTimePerLocation.Collect(ch)
 }
@@ -128,9 +128,9 @@ func (c *tunnelTimeCollector) startConnection(ipKey IPKey) {
 	if !exists {
 		clientInfo, _ := ipinfo.GetIPInfoFromIP(c.ip2info, net.IP(ipKey.ip.AsSlice()))
 		client = &activeClient{info: clientInfo, startTime: now()}
+		c.activeClients[ipKey] = client
 	}
 	client.connCount++
-	c.activeClients[ipKey] = client
 }
 
 // Removes an active connection for a client [net.Addr] and access key.
