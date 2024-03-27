@@ -35,12 +35,12 @@ jobs:
       - name: Run Benchmark (previous)
         run: |
           cd previous
-          go test -bench=. -benchmem -benchtime=100ms -count=8 > benchmark.txt
+          go test -bench=. -benchmem -benchtime=100ms -count=10 ./... > benchmark.txt
 
       - name: Run Benchmark (new)
         run: |
           cd new
-          go test -bench=. -benchmem -benchtime=100ms -count=8 > benchmark.txt
+          go test -bench=. -benchmem -benchtime=100ms -count=10 ./... > benchmark.txt
 
       - name: Run Benchstat
         run: benchstat previous/benchmark.txt new/benchmark.txt
