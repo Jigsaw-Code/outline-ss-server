@@ -12,6 +12,7 @@ jobs:
   bench:
     name: Performance regression check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout (previous)
         uses: actions/checkout@v3
