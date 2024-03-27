@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version-file: '${{ github.workspace }}/new/go.mod'
+          go-version-file: '${{ github.workspace }}/go.mod'
 
       - name: Get dependencies
         run: go mod download
