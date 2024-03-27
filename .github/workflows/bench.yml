@@ -29,10 +29,10 @@ jobs:
          go install golang.org/x/perf/cmd/benchstat@latest
          echo "New Commit:"
          git log -1 --format="%H"
-         go test -bench=. -benchmem -benchtime=100ms -count=10 > /tmp/new.txt
+         go test -bench=. -benchmem -benchtime=100ms -count=10 ./... > /tmp/new.txt
          git reset --hard HEAD
          git checkout $GITHUB_BASE_REF
          echo "Base Commit:"
          git log -1 --format="%H"
-         go test -bench=. -benchmem -benchtime=100ms -count=10 > /tmp/old.txt
+         go test -bench=. -benchmem -benchtime=100ms -count=10 ./... > /tmp/old.txt
          $GOBIN/benchstat /tmp/old.txt /tmp/new.txt
