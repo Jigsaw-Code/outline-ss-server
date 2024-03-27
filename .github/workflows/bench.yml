@@ -34,11 +34,13 @@ jobs:
         run: go install golang.org/x/perf/cmd/benchstat@latest
 
       - name: Run Benchmark (previous)
+        timeout-minutes: 5
         run: |
           cd previous
           go test -bench=. -benchmem -benchtime=100ms -count=10 ./... > benchmark.txt
 
       - name: Run Benchmark (new)
+        timeout-minutes: 5
         run: |
           cd new
           go test -bench=. -benchmem -benchtime=100ms -count=10 ./... > benchmark.txt
