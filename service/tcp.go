@@ -47,23 +47,6 @@ type TCPMetrics interface {
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
 }
 
-type bufferedConn struct {
-	r *bufio.Reader
-	net.Conn
-}
-
-func newBufferedConn(c net.Conn) bufferedConn {
-	return bufferedConn{bufio.NewReader(c), c}
-}
-
-func (b bufferedConn) Peek(n int) ([]byte, error) {
-	return b.r.Peek(n)
-}
-
-func (b bufferedConn) Read(p []byte) (int, error) {
-	return b.r.Read(p)
-}
-
 func remoteIP(conn net.Conn) net.IP {
 	addr := conn.RemoteAddr()
 	if addr == nil {
@@ -94,10 +77,10 @@ func debugTCP(cipherID, template string, val interface{}) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(bufferedConn bufferedConn, clientIP net.IP, cipherList CipherList) (*CipherEntry, []byte, time.Duration, error) {
+func findAccessKey(bufReader *bufio.Reader, clientIP net.IP, cipherList CipherList) (*CipherEntry, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
-	firstBytes, err := bufferedConn.Peek(bytesForKeyFinding)
+	firstBytes, err := bufReader.Peek(bytesForKeyFinding)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("reading header failed: %w", err)
 	}
@@ -146,9 +129,9 @@ type ShadowsocksTCPMetrics interface {
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
-		bufferedConn := newBufferedConn(clientConn)
+		bufConn := onet.NewBufferedConn(clientConn)
 		// Find the cipher and acess key id.
-		cipherEntry, clientSalt, timeToCipher, keyErr := findAccessKey(bufferedConn, remoteIP(clientConn), ciphers)
+		cipherEntry, clientSalt, timeToCipher, keyErr := findAccessKey(bufConn.R, remoteIP(bufConn), ciphers)
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
 			const status = "ERR_CIPHER"
@@ -172,8 +155,8 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 			return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
 		}
 
-		ssr := shadowsocks.NewReader(bufferedConn, cipherEntry.CryptoKey)
-		ssw := shadowsocks.NewWriter(bufferedConn, cipherEntry.CryptoKey)
+		ssr := shadowsocks.NewReader(bufConn, cipherEntry.CryptoKey)
+		ssw := shadowsocks.NewWriter(bufConn, cipherEntry.CryptoKey)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 		return id, transport.WrapConn(clientConn, ssr, ssw), nil
 	}
@@ -296,22 +279,27 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func getProxyRequest(bufferedConn bufferedConn) (string, error) {
-	firstByte, err := bufferedConn.Peek(1)
+func getProxyRequest(bufConn onet.BufferedConn) (string, error) {
+	firstByte, err := bufConn.Peek(1)
 	if err != nil {
 		return "", fmt.Errorf("reading header failed: %w", err)
 	}
 
-	// TODO(fortuna): Add support for HTTP CONNECT or SOCKS5:
-	// case 5: SOCKS5 (protocol version)
-	// case "C": HTTP CONNECT (first char of method)
 	switch firstByte[0] {
 
 	// Shadowsocks address types follow the SOCKS5 address format:
 	// See https://shadowsocks.org/doc/what-is-shadowsocks.html#addressing.
 	case socks.AtypIPv4, socks.AtypDomainName, socks.AtypIPv6:
 		logger.Debug("Proxy protocol detected: Shadowsocks")
-		return proxy.ParseShadowsocks(bufferedConn)
+		return proxy.ParseShadowsocks(bufConn)
+
+	case 0x05:
+		logger.Debug("Proxy protocol detected: SOCKS5")
+		return proxy.ParseSocks(bufConn)
+
+	case 0x43:
+		logger.Debug("Proxy protocol detected: HTTP CONNECT")
+		return proxy.ParseHttp(bufConn)
 
 	default:
 		logger.Warningf("Unknown proxy protocol (first byte: % x)", firstByte)
@@ -377,9 +365,9 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
 
-	bufferedConn := newBufferedConn(innerConn)
+	bufConn := onet.NewBufferedConn(innerConn)
 	// Read target address and dial it.
-	tgtAddr, err := getProxyRequest(bufferedConn)
+	tgtAddr, err := getProxyRequest(bufConn)
 	// Clear the deadline for the target address
 	outerConn.SetReadDeadline(time.Time{})
 	if err != nil {
