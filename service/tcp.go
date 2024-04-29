@@ -31,8 +31,8 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
+	"github.com/Jigsaw-Code/outline-ss-server/service/proxy"
 	logging "github.com/op/go-logging"
-	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 // TCPMetrics is used to report metrics on TCP connections.
@@ -282,11 +282,7 @@ func getProxyRequest(clientConn transport.StreamConn) (string, error) {
 	// case 1, 3 or 4: Shadowsocks (address type)
 	// case 5: SOCKS5 (protocol version)
 	// case "C": HTTP CONNECT (first char of method)
-	tgtAddr, err := socks.ReadAddr(clientConn)
-	if err != nil {
-		return "", err
-	}
-	return tgtAddr.String(), nil
+	return proxy.ParseShadowsocks(clientConn)
 }
 
 func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
