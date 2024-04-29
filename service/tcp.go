@@ -15,7 +15,7 @@
 package service
 
 import (
-	"bytes"
+	"bufio"
 	"container/list"
 	"context"
 	"errors"
@@ -44,6 +44,23 @@ type TCPMetrics interface {
 	AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string)
 	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
+}
+
+type bufferedConn struct {
+	r *bufio.Reader
+	net.Conn
+}
+
+func newBufferedConn(c net.Conn) bufferedConn {
+	return bufferedConn{bufio.NewReader(c), c}
+}
+
+func (b bufferedConn) Peek(n int) ([]byte, error) {
+	return b.r.Peek(n)
+}
+
+func (b bufferedConn) Read(p []byte) (int, error) {
+	return b.r.Read(p)
 }
 
 func remoteIP(conn net.Conn) net.IP {
@@ -76,12 +93,12 @@ func debugTCP(cipherID, template string, val interface{}) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
+func findAccessKey(bufferedConn bufferedConn, clientIP net.IP, cipherList CipherList) (*CipherEntry, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
-	firstBytes := make([]byte, bytesForKeyFinding)
-	if n, err := io.ReadFull(clientReader, firstBytes); err != nil {
-		return nil, clientReader, nil, 0, fmt.Errorf("reading header failed after %d bytes: %w", n, err)
+	firstBytes, err := bufferedConn.Peek(bytesForKeyFinding)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("reading header failed: %w", err)
 	}
 
 	findStartTime := time.Now()
@@ -89,13 +106,13 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 	timeToCipher := time.Since(findStartTime)
 	if entry == nil {
 		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
-		return nil, clientReader, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
+		return nil, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
 	}
 
 	// Move the active cipher to the front, so that the search is quicker next time.
 	cipherList.MarkUsedByClientIP(elt, clientIP)
 	salt := firstBytes[:entry.CryptoKey.SaltSize()]
-	return entry, io.MultiReader(bytes.NewReader(firstBytes), clientReader), salt, timeToCipher, nil
+	return entry, salt, timeToCipher, nil
 }
 
 // Implements a trial decryption search.  This assumes that all ciphers are AEAD.
@@ -128,8 +145,9 @@ type ShadowsocksTCPMetrics interface {
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+		bufferedConn := newBufferedConn(clientConn)
 		// Find the cipher and acess key id.
-		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers)
+		cipherEntry, clientSalt, timeToCipher, keyErr := findAccessKey(bufferedConn, remoteIP(clientConn), ciphers)
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
 			const status = "ERR_CIPHER"
@@ -153,8 +171,8 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 			return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
 		}
 
-		ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
-		ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
+		ssr := shadowsocks.NewReader(bufferedConn, cipherEntry.CryptoKey)
+		ssw := shadowsocks.NewWriter(bufferedConn, cipherEntry.CryptoKey)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 		return id, transport.WrapConn(clientConn, ssr, ssw), nil
 	}
