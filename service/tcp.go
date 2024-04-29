@@ -33,6 +33,7 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/Jigsaw-Code/outline-ss-server/service/proxy"
 	logging "github.com/op/go-logging"
+	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 // TCPMetrics is used to report metrics on TCP connections.
@@ -295,12 +296,28 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func getProxyRequest(clientConn transport.StreamConn) (string, error) {
-	// TODO(fortuna): Use Shadowsocks proxy, HTTP CONNECT or SOCKS5 based on first byte:
-	// case 1, 3 or 4: Shadowsocks (address type)
+func getProxyRequest(bufferedConn bufferedConn) (string, error) {
+	firstByte, err := bufferedConn.Peek(1)
+	if err != nil {
+		return "", fmt.Errorf("reading header failed: %w", err)
+	}
+
+	// TODO(fortuna): Add support for HTTP CONNECT or SOCKS5:
 	// case 5: SOCKS5 (protocol version)
 	// case "C": HTTP CONNECT (first char of method)
-	return proxy.ParseShadowsocks(clientConn)
+	switch firstByte[0] {
+
+	// Shadowsocks address types follow the SOCKS5 address format:
+	// See https://shadowsocks.org/doc/what-is-shadowsocks.html#addressing.
+	case socks.AtypIPv4, socks.AtypDomainName, socks.AtypIPv6:
+		logger.Debug("Proxy protocol detected: Shadowsocks")
+		return proxy.ParseShadowsocks(bufferedConn)
+
+	default:
+		logger.Warningf("Unknown proxy protocol (first byte: % x)", firstByte)
+		return "", fmt.Errorf("unsupported proxy protocol")
+
+	}
 }
 
 func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
@@ -360,8 +377,9 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
 
+	bufferedConn := newBufferedConn(innerConn)
 	// Read target address and dial it.
-	tgtAddr, err := getProxyRequest(innerConn)
+	tgtAddr, err := getProxyRequest(bufferedConn)
 	// Clear the deadline for the target address
 	outerConn.SetReadDeadline(time.Time{})
 	if err != nil {
