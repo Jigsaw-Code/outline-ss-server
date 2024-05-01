@@ -15,7 +15,7 @@
 package service
 
 import (
-	"bytes"
+	"bufio"
 	"container/list"
 	"context"
 	"errors"
@@ -31,6 +31,7 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
+	"github.com/Jigsaw-Code/outline-ss-server/service/proxy"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
@@ -76,12 +77,12 @@ func debugTCP(cipherID, template string, val interface{}) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
+func findAccessKey(bufReader *bufio.Reader, clientIP net.IP, cipherList CipherList) (*CipherEntry, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
-	firstBytes := make([]byte, bytesForKeyFinding)
-	if n, err := io.ReadFull(clientReader, firstBytes); err != nil {
-		return nil, clientReader, nil, 0, fmt.Errorf("reading header failed after %d bytes: %w", n, err)
+	firstBytes, err := bufReader.Peek(bytesForKeyFinding)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("reading header failed: %w", err)
 	}
 
 	findStartTime := time.Now()
@@ -89,13 +90,13 @@ func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherLis
 	timeToCipher := time.Since(findStartTime)
 	if entry == nil {
 		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
-		return nil, clientReader, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
+		return nil, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
 	}
 
 	// Move the active cipher to the front, so that the search is quicker next time.
 	cipherList.MarkUsedByClientIP(elt, clientIP)
 	salt := firstBytes[:entry.CryptoKey.SaltSize()]
-	return entry, io.MultiReader(bytes.NewReader(firstBytes), clientReader), salt, timeToCipher, nil
+	return entry, salt, timeToCipher, nil
 }
 
 // Implements a trial decryption search.  This assumes that all ciphers are AEAD.
@@ -128,8 +129,9 @@ type ShadowsocksTCPMetrics interface {
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+		bufConn := onet.NewBufConn(clientConn)
 		// Find the cipher and acess key id.
-		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers)
+		cipherEntry, clientSalt, timeToCipher, keyErr := findAccessKey(bufConn.Reader, remoteIP(bufConn), ciphers)
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
 			const status = "ERR_CIPHER"
@@ -153,8 +155,8 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 			return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
 		}
 
-		ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
-		ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
+		ssr := shadowsocks.NewReader(bufConn, cipherEntry.CryptoKey)
+		ssw := shadowsocks.NewWriter(bufConn, cipherEntry.CryptoKey)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
 		return id, transport.WrapConn(clientConn, ssr, ssw), nil
 	}
@@ -277,16 +279,37 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func getProxyRequest(clientConn transport.StreamConn) (string, error) {
-	// TODO(fortuna): Use Shadowsocks proxy, HTTP CONNECT or SOCKS5 based on first byte:
-	// case 1, 3 or 4: Shadowsocks (address type)
-	// case 5: SOCKS5 (protocol version)
-	// case "C": HTTP CONNECT (first char of method)
-	tgtAddr, err := socks.ReadAddr(clientConn)
+func getProxyRequest(bufConn onet.BufConn) (string, error) {
+	// We try to identify the used proxy protocols based on the first byte received.
+	firstByte, err := bufConn.Peek(1)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading header failed: %w", err)
 	}
-	return tgtAddr.String(), nil
+
+	switch firstByte[0] {
+
+	// Shadowsocks: The first character represents the address type. Note that Shadowsocks address types
+	// follow the SOCKS5 address format. See https://shadowsocks.org/doc/what-is-shadowsocks.html#addressing.
+	case socks.AtypIPv4, socks.AtypDomainName, socks.AtypIPv6:
+		logger.Debug("Proxy protocol detected: Shadowsocks")
+		return proxy.ParseShadowsocks(bufConn)
+
+	// SOCKS5: The first character represents the protocol version (05). See
+	// https://datatracker.ietf.org/doc/html/rfc1928#autoid-4.
+	case 0x05:
+		logger.Debug("Proxy protocol detected: SOCKS5")
+		return proxy.ParseSocks(bufConn)
+
+	// HTTP CONNECT: The first character of the "CONNECT" method ("C").
+	case 0x43:
+		logger.Debug("Proxy protocol detected: HTTP CONNECT")
+		return proxy.ParseHTTP(bufConn)
+
+	default:
+		logger.Warningf("Unknown proxy protocol (first byte: % x)", firstByte)
+		return "", fmt.Errorf("unsupported proxy protocol")
+
+	}
 }
 
 func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
@@ -346,8 +369,9 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
 
+	bufConn := onet.NewBufConn(innerConn)
 	// Read target address and dial it.
-	tgtAddr, err := getProxyRequest(innerConn)
+	tgtAddr, err := getProxyRequest(bufConn)
 	// Clear the deadline for the target address
 	outerConn.SetReadDeadline(time.Time{})
 	if err != nil {

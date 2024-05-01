@@ -15,6 +15,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -101,7 +102,7 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 		}
 		clientIP := clientConn.RemoteAddr().(*net.TCPAddr).IP
 		b.StartTimer()
-		findAccessKey(clientConn, clientIP, cipherList)
+		findAccessKey(bufio.NewReader(clientConn), clientIP, cipherList)
 		b.StopTimer()
 	}
 }
@@ -199,17 +200,14 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 		cipherNumber := byte(n % numCiphers)
 		reader, writer := io.Pipe()
 		clientIP := net.IPv4(192, 0, 2, cipherNumber)
-		addr := &net.TCPAddr{IP: clientIP, Port: 54321}
-		c := conn{clientAddr: addr, reader: reader, writer: writer}
 		cipher := cipherEntries[cipherNumber].CryptoKey
 		go shadowsocks.NewWriter(writer, cipher).Write(makeTestPayload(50))
 		b.StartTimer()
-		_, _, _, _, err := findAccessKey(&c, clientIP, cipherList)
+		_, _, _, err := findAccessKey(bufio.NewReader(reader), clientIP, cipherList)
 		b.StopTimer()
 		if err != nil {
 			b.Error(err)
 		}
-		c.Close()
 	}
 }
 
