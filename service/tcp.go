@@ -299,7 +299,7 @@ func getProxyRequest(bufConn onet.BufferedConn) (string, error) {
 
 	case 0x43:
 		logger.Debug("Proxy protocol detected: HTTP CONNECT")
-		return proxy.ParseHttp(bufConn)
+		return proxy.ParseHTTP(bufConn)
 
 	default:
 		logger.Warningf("Unknown proxy protocol (first byte: % x)", firstByte)

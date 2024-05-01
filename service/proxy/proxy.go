@@ -39,7 +39,7 @@ func ParseSocks(rw io.ReadWriter) (string, error) {
 	return tgtAddr.String(), nil
 }
 
-func ParseHttp(conn onet.BufferedConn) (string, error) {
+func ParseHTTP(conn onet.BufferedConn) (string, error) {
 	req, err := http.ReadRequest(conn.R)
 	if err != nil {
 		return "", err
