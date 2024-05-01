@@ -129,9 +129,9 @@ type ShadowsocksTCPMetrics interface {
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
-		bufConn := onet.NewBufferedConn(clientConn)
+		bufConn := onet.NewBufConn(clientConn)
 		// Find the cipher and acess key id.
-		cipherEntry, clientSalt, timeToCipher, keyErr := findAccessKey(bufConn.R, remoteIP(bufConn), ciphers)
+		cipherEntry, clientSalt, timeToCipher, keyErr := findAccessKey(bufConn.Reader, remoteIP(bufConn), ciphers)
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
 			const status = "ERR_CIPHER"
@@ -279,7 +279,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }
 
-func getProxyRequest(bufConn onet.BufferedConn) (string, error) {
+func getProxyRequest(bufConn onet.BufConn) (string, error) {
 	firstByte, err := bufConn.Peek(1)
 	if err != nil {
 		return "", fmt.Errorf("reading header failed: %w", err)
@@ -365,7 +365,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
 
-	bufConn := onet.NewBufferedConn(innerConn)
+	bufConn := onet.NewBufConn(innerConn)
 	// Read target address and dial it.
 	tgtAddr, err := getProxyRequest(bufConn)
 	// Clear the deadline for the target address

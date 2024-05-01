@@ -19,19 +19,21 @@ import (
 	"net"
 )
 
-type BufferedConn struct {
-	R *bufio.Reader
+// BufConn wraps an original [net.Conn] and a [bufio.Reader] to allow reads
+// without losing bytes in the buffer.
+type BufConn struct {
+	*bufio.Reader
 	net.Conn
 }
 
-func NewBufferedConn(c net.Conn) BufferedConn {
-	return BufferedConn{bufio.NewReader(c), c}
+func NewBufConn(conn net.Conn) BufConn {
+	return BufConn{Reader: bufio.NewReader(conn), Conn: conn}
 }
 
-func (b BufferedConn) Peek(n int) ([]byte, error) {
-	return b.R.Peek(n)
+func (c BufConn) Peek(n int) ([]byte, error) {
+	return c.Reader.Peek(n)
 }
 
-func (b BufferedConn) Read(p []byte) (int, error) {
-	return b.R.Read(p)
+func (c BufConn) Read(p []byte) (int, error) {
+	return c.Reader.Read(p)
 }
