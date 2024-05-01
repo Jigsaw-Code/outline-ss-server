@@ -280,6 +280,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 }
 
 func getProxyRequest(bufConn onet.BufConn) (string, error) {
+	// We try to identify the used proxy protocols based on the first byte received.
 	firstByte, err := bufConn.Peek(1)
 	if err != nil {
 		return "", fmt.Errorf("reading header failed: %w", err)
@@ -287,16 +288,19 @@ func getProxyRequest(bufConn onet.BufConn) (string, error) {
 
 	switch firstByte[0] {
 
-	// Shadowsocks address types follow the SOCKS5 address format:
-	// See https://shadowsocks.org/doc/what-is-shadowsocks.html#addressing.
+	// Shadowsocks: The first character represents the address type. Note that Shadowsocks address types
+	// follow the SOCKS5 address format. See https://shadowsocks.org/doc/what-is-shadowsocks.html#addressing.
 	case socks.AtypIPv4, socks.AtypDomainName, socks.AtypIPv6:
 		logger.Debug("Proxy protocol detected: Shadowsocks")
 		return proxy.ParseShadowsocks(bufConn)
 
+	// SOCKS5: The first character represents the protocol version (05). See
+	// https://datatracker.ietf.org/doc/html/rfc1928#autoid-4.
 	case 0x05:
 		logger.Debug("Proxy protocol detected: SOCKS5")
 		return proxy.ParseSocks(bufConn)
 
+	// HTTP CONNECT: The first character of the "CONNECT" method ("C").
 	case 0x43:
 		logger.Debug("Proxy protocol detected: HTTP CONNECT")
 		return proxy.ParseHTTP(bufConn)
