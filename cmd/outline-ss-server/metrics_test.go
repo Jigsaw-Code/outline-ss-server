@@ -22,6 +22,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
+	"github.com/op/go-logging"
 	"github.com/prometheus/client_golang/prometheus"
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
@@ -43,6 +44,10 @@ func setNow(t time.Time) {
 	now = func() time.Time {
 		return t
 	}
+}
+
+func init() {
+	logging.SetLevel(logging.INFO, "")
 }
 
 func TestMethodsDontPanic(t *testing.T) {
