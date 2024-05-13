@@ -149,6 +149,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		ssMetrics.AddAuthenticatedTCPConnection(addr, accessKey)
 		ssMetrics.AddClosedTCPConnection(ipinfo, addr, accessKey, status, data, duration)
 		ssMetrics.AddTCPCipherSearch(true, timeToCipher)
 	}
