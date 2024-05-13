@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -107,7 +108,7 @@ func startUDPEchoServer(t testing.TB) (*net.UDPConn, *sync.WaitGroup) {
 				t.Logf("Failed to read from UDP conn: %v", err)
 				return
 			}
-			conn.WriteTo(buf[:n], clientAddr)
+			_, err = conn.WriteTo(buf[:n], clientAddr)
 			if err != nil {
 				t.Fatalf("Failed to write: %v", err)
 			}
@@ -335,7 +336,7 @@ func TestUDPEcho(t *testing.T) {
 	proxyConn.Close()
 	<-done
 	// Verify that the expected metrics were reported.
-	snapshot := cipherList.SnapshotForClientIP(nil)
+	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	keyID := snapshot[0].Value.(*service.CipherEntry).ID
 
 	if testMetrics.natAdded != 1 {

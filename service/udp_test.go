@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher ti
 // generates when localhost access is attempted
 func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
-	cipher := ciphers.SnapshotForClientIP(nil)[0].Value.(*CipherEntry).CryptoKey
+	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
 	handler := NewPacketHandler(timeout, ciphers, metrics)
@@ -403,7 +404,7 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 	}
 	testPayload := makeTestPayload(50)
 	textBuf := make([]byte, serverUDPBufferSize)
-	testIP := net.ParseIP("192.0.2.1")
+	testIP := netip.MustParseAddr("192.0.2.1")
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		findAccessKeyUDP(testIP, textBuf, testPayload, cipherList)
@@ -420,8 +421,8 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 	}
 	testBuf := make([]byte, serverUDPBufferSize)
 	packets := [numCiphers][]byte{}
-	ips := [numCiphers]net.IP{}
-	snapshot := cipherList.SnapshotForClientIP(nil)
+	ips := [numCiphers]netip.Addr{}
+	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	for i, element := range snapshot {
 		packets[i] = make([]byte, 0, serverUDPBufferSize)
 		plaintext := makeTestPayload(50)
@@ -429,7 +430,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 		if err != nil {
 			b.Error(err)
 		}
-		ips[i] = net.IPv4(192, 0, 2, byte(i))
+		ips[i] = netip.AddrFrom4([4]byte{192, 0, 2, byte(i)})
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
@@ -452,15 +453,15 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	}
 	testBuf := make([]byte, serverUDPBufferSize)
 	plaintext := makeTestPayload(50)
-	snapshot := cipherList.SnapshotForClientIP(nil)
+	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	cryptoKey := snapshot[0].Value.(*CipherEntry).CryptoKey
 	packet, err := shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, cryptoKey)
 	require.Nil(b, err)
 
 	const numIPs = 100 // Must be <256
-	ips := [numIPs]net.IP{}
+	ips := [numIPs]netip.Addr{}
 	for i := 0; i < numIPs; i++ {
-		ips[i] = net.IPv4(192, 0, 2, byte(i))
+		ips[i] = netip.AddrFrom4([4]byte{192, 0, 2, byte(i)})
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {

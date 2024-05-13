@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 	"syscall"
 	"time"
@@ -46,19 +47,19 @@ type TCPMetrics interface {
 	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
 }
 
-func remoteIP(conn net.Conn) net.IP {
+func remoteIP(conn net.Conn) netip.Addr {
 	addr := conn.RemoteAddr()
 	if addr == nil {
-		return nil
+		return netip.Addr{}
 	}
 	if tcpaddr, ok := addr.(*net.TCPAddr); ok {
-		return tcpaddr.IP
+		return tcpaddr.AddrPort().Addr()
 	}
-	ipstr, _, err := net.SplitHostPort(addr.String())
+	addrPort, err := netip.ParseAddrPort(addr.String())
 	if err == nil {
-		return net.ParseIP(ipstr)
+		return addrPort.Addr()
 	}
-	return nil
+	return netip.Addr{}
 }
 
 // Wrapper for logger.Debugf during TCP access key searches.
@@ -76,7 +77,7 @@ func debugTCP(cipherID, template string, val interface{}) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(clientReader io.Reader, clientIP net.IP, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
+func findAccessKey(clientReader io.Reader, clientIP netip.Addr, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
 	firstBytes := make([]byte, bytesForKeyFinding)
@@ -264,7 +265,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
-	id, connError := h.handleConnection(ctx, h.port, clientInfo, measuredClientConn, &proxyMetrics)
+	id, connError := h.handleConnection(ctx, measuredClientConn, &proxyMetrics)
 
 	connDuration := time.Since(connStart)
 	status := "OK"
@@ -327,7 +328,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 	return nil
 }
 
-func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, clientInfo ipinfo.IPInfo, outerConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
 	readDeadline := time.Now().Add(h.readTimeout)
 	if deadline, ok := ctx.Deadline(); ok {
@@ -341,7 +342,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
-		h.absorbProbe(listenerPort, outerConn, authErr.Status, proxyMetrics)
+		h.absorbProbe(outerConn, authErr.Status, proxyMetrics)
 		return id, authErr
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
@@ -369,12 +370,12 @@ func (h *tcpHandler) handleConnection(ctx context.Context, listenerPort int, cli
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (h *tcpHandler) absorbProbe(listenerPort int, clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	h.m.AddTCPProbe(status, drainResult, listenerPort, proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, h.port, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {

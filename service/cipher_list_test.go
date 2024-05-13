@@ -16,18 +16,18 @@ package service
 
 import (
 	"math/rand"
-	"net"
+	"net/netip"
 	"testing"
 )
 
 func BenchmarkLocking(b *testing.B) {
-	var ip net.IP
+	var ip netip.Addr
 
 	ciphers, _ := MakeTestCiphers([]string{"secret"})
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			entries := ciphers.SnapshotForClientIP(nil)
+			entries := ciphers.SnapshotForClientIP(netip.Addr{})
 			ciphers.MarkUsedByClientIP(entries[0], ip)
 		}
 	})
@@ -43,20 +43,20 @@ func BenchmarkSnapshot(b *testing.B) {
 
 	// Shuffling simulates the behavior of a real server, where successive
 	// ciphers are not expected to be nearby in memory.
-	entries := ciphers.SnapshotForClientIP(nil)
+	entries := ciphers.SnapshotForClientIP(netip.Addr{})
 	rand.Shuffle(N, func(i, j int) {
 		entries[i], entries[j] = entries[j], entries[i]
 	})
 	for _, entry := range entries {
 		// Reorder the list to match the shuffle
 		// (actually in reverse, but it doesn't matter).
-		ciphers.MarkUsedByClientIP(entry, nil)
+		ciphers.MarkUsedByClientIP(entry, netip.Addr{})
 	}
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			ciphers.SnapshotForClientIP(nil)
+			ciphers.SnapshotForClientIP(netip.Addr{})
 		}
 	})
 }
