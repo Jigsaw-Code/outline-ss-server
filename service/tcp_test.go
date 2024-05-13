@@ -369,7 +369,6 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	discardListener, discardWait := startDiscardServer(t)
 	initialBytes := makeClientBytesBasic(t, cipher, discardListener.Addr().String())
 	for numBytesToSend := 0; numBytesToSend < len(initialBytes); numBytesToSend++ {
-		t.Logf("Sending %v bytes", numBytesToSend)
 		bytesToSend := initialBytes[:numBytesToSend]
 		err := probe(listener.Addr().(*net.TCPAddr), bytesToSend)
 		require.NoError(t, err, "Failed for %v bytes sent: %v", numBytesToSend, err)
@@ -406,7 +405,6 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	initialBytes := makeClientBytesBasic(t, cipher, discardListener.Addr().String())
 	bytesToSend := make([]byte, len(initialBytes))
 	for byteToModify := 0; byteToModify < len(initialBytes); byteToModify++ {
-		t.Logf("Modifying byte %v", byteToModify)
 		copy(bytesToSend, initialBytes)
 		bytesToSend[byteToModify] = 255 - bytesToSend[byteToModify]
 		err := probe(listener.Addr().(*net.TCPAddr), bytesToSend)
@@ -443,7 +441,6 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	initialBytes := makeClientBytesCoalesced(t, cipher, discardListener.Addr().String())
 	bytesToSend := make([]byte, len(initialBytes))
 	for byteToModify := 0; byteToModify < len(initialBytes); byteToModify++ {
-		t.Logf("Modifying byte %v", byteToModify)
 		copy(bytesToSend, initialBytes)
 		bytesToSend[byteToModify] = 255 - bytesToSend[byteToModify]
 		err := probe(listener.Addr().(*net.TCPAddr), bytesToSend)
