@@ -21,11 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type fakeAddr string
-
-func (a fakeAddr) String() string  { return string(a) }
-func (a fakeAddr) Network() string { return "" }
-
 func TestResolveAddrReturnsTCPAddr(t *testing.T) {
 	addr, err := ResolveAddr("tcp://0.0.0.0:9000")
 
