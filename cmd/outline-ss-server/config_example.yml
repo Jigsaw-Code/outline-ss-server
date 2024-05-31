@@ -1,15 +1,23 @@
-keys:
-  - id: user-0
-    port: 9000
-    cipher: chacha20-ietf-poly1305
-    secret: Secret0
+services:
+  - listeners:
+      - type: direct
+        address: "tcp://[::]:9000"
+      - type: direct
+        address: "udp://[::]:9000"
+    keys:
+        - id: user-0
+          cipher: chacha20-ietf-poly1305
+          secret: Secret0
+        - id: user-1
+          cipher: chacha20-ietf-poly1305
+          secret: Secret1
 
-  - id: user-1
-    port: 9000
-    cipher: chacha20-ietf-poly1305
-    secret: Secret1
-
-  - id: user-2
-    port: 9001
-    cipher: chacha20-ietf-poly1305
-    secret: Secret2
+  - listeners:
+      - type: direct
+        address: "tcp://[::]:9001"
+      - type: direct
+        address: "udp://[::]:9001"
+    keys:
+        - id: user-2
+          cipher: chacha20-ietf-poly1305
+          secret: Secret2

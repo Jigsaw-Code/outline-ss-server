@@ -1,0 +1,82 @@
+// Copyright 2024 Jigsaw Operations LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package net
+
+import (
+	"net"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+type fakeAddr string
+
+func (a fakeAddr) String() string  { return string(a) }
+func (a fakeAddr) Network() string { return "" }
+
+func TestResolveAddrReturnsTCPAddr(t *testing.T) {
+	addr, err := ResolveAddr("tcp://0.0.0.0:9000")
+
+	require.NoError(t, err)
+	if _, ok := addr.(*net.TCPAddr); !ok {
+		t.Errorf("expected a *net.TCPAddr; it is a %T", addr)
+	}
+}
+
+func TestResolveAddrReturnsUDPAddr(t *testing.T) {
+	addr, err := ResolveAddr("udp://[::]:9001")
+
+	require.NoError(t, err)
+	if _, ok := addr.(*net.UDPAddr); !ok {
+		t.Errorf("expected a *net.UDPAddr; it is a %T", addr)
+	}
+}
+
+func TestResolveAddrReturnsUnixAddr(t *testing.T) {
+	addr, err := ResolveAddr("unix:///path/to/stream_socket")
+
+	require.NoError(t, err)
+	if _, ok := addr.(*net.UnixAddr); !ok {
+		t.Errorf("expected a *net.UnixAddr; it is a %T", addr)
+	}
+}
+
+func TestResolveAddrReturnsErrorForUnknownScheme(t *testing.T) {
+	addr, err := ResolveAddr("foobar")
+
+	require.Nil(t, addr)
+	require.Error(t, err)
+}
+
+func TestGetPortFromTCPAddr(t *testing.T) {
+	port, err := GetPort(&net.TCPAddr{IP: net.ParseIP("1.2.3.4"), Port: 1234})
+
+	require.NoError(t, err)
+	require.Equal(t, 1234, port)
+}
+
+func TestGetPortFromUDPPAddr(t *testing.T) {
+	port, err := GetPort(&net.UDPAddr{IP: net.ParseIP("1.2.3.4"), Port: 5678})
+
+	require.NoError(t, err)
+	require.Equal(t, 5678, port)
+}
+
+func TestGetPortReturnsErrorForUnsupportedAddressType(t *testing.T) {
+	port, err := GetPort(&net.UnixAddr{Name: "/path/to/foo", Net: "unix"})
+
+	require.Equal(t, -1, port)
+	require.Error(t, err)
+}

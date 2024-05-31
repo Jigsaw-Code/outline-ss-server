@@ -28,13 +28,14 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/op/go-logging"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v2"
 )
 
 var logger *logging.Logger
@@ -47,6 +48,8 @@ const tcpReadTimeout time.Duration = 59 * time.Second
 
 // A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
 const defaultNatTimeout time.Duration = 5 * time.Minute
+
+var directListenerType = "direct"
 
 func init() {
 	var prefix = "%{level:.1s}%{time:2006-01-02T15:04:05.000Z07:00} %{pid} %{shortfile}]"
@@ -125,26 +128,67 @@ func (s *SSServer) removePort(portNum int) error {
 }
 
 func (s *SSServer) loadConfig(filename string) error {
-	config, err := readConfig(filename)
+	config, err := ReadConfig(filename)
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 
 	portChanges := make(map[int]int)
 	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
-	for _, keyConfig := range config.Keys {
-		portChanges[keyConfig.Port] = 1
-		cipherList, ok := portCiphers[keyConfig.Port]
-		if !ok {
-			cipherList = list.New()
-			portCiphers[keyConfig.Port] = cipherList
+	for _, serviceConfig := range config.Services {
+		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
+			return fmt.Errorf("must specify at least 1 listener and 1 key per service")
 		}
-		cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
-		if err != nil {
-			return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+		addrs := []net.Addr{}
+		for _, listener := range serviceConfig.Listeners {
+			switch t := listener.Type; t {
+			// TODO: Support more listener types.
+			case directListenerType:
+				addr, err := onet.ResolveAddr(listener.Address)
+				if err != nil {
+					return fmt.Errorf("failed to resolve direct address: %v: %w", listener.Address, err)
+				}
+				addrs = append(addrs, addr)
+				port, err := onet.GetPort(addr)
+				if err != nil {
+					return err
+				}
+				portChanges[int(port)] = 1
+			default:
+				return fmt.Errorf("unsupported listener type: %s", t)
+			}
 		}
-		entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
-		cipherList.PushBack(&entry)
+
+		type key struct {
+			c string
+			s string
+		}
+		existingCipher := make(map[key]bool)
+		for _, keyConfig := range serviceConfig.Keys {
+			for _, addr := range addrs {
+				port, err := onet.GetPort(addr)
+				if err != nil {
+					return err
+				}
+				cipherList, ok := portCiphers[port]
+				if !ok {
+					cipherList = list.New()
+					portCiphers[port] = cipherList
+				}
+				_, ok = existingCipher[key{keyConfig.Cipher, keyConfig.Secret}]
+				if ok {
+					logger.Debugf("encryption key already exists for port=%v, ID=`%v`. Skipping.", port, keyConfig.ID)
+					continue
+				}
+				cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
+				if err != nil {
+					return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+				}
+				entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
+				cipherList.PushBack(&entry)
+				existingCipher[key{keyConfig.Cipher, keyConfig.Secret}] = true
+			}
+		}
 	}
 	for port := range s.ports {
 		portChanges[port] = portChanges[port] - 1
@@ -160,11 +204,13 @@ func (s *SSServer) loadConfig(filename string) error {
 			}
 		}
 	}
+	numServices := 0
 	for portNum, cipherList := range portCiphers {
 		s.ports[portNum].cipherList.Update(cipherList)
+		numServices += cipherList.Len()
 	}
-	logger.Infof("Loaded %v access keys over %v ports", len(config.Keys), len(s.ports))
-	s.m.SetNumAccessKeys(len(config.Keys), len(portCiphers))
+	logger.Infof("Loaded %v access keys over %v ports", numServices, len(s.ports))
+	s.m.SetNumAccessKeys(numServices, len(s.ports))
 	return nil
 }
 
@@ -201,28 +247,6 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 		}
 	}()
 	return server, nil
-}
-
-type Config struct {
-	Keys []struct {
-		ID     string
-		Port   int
-		Cipher string
-		Secret string
-	}
-}
-
-func readConfig(filename string) (*Config, error) {
-	config := Config{}
-	configData, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-	err = yaml.Unmarshal(configData, &config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
-	}
-	return &config, nil
 }
 
 func main() {
