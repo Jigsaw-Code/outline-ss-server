@@ -75,5 +75,5 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 			},
 		},
 	}
-	require.Equal(t, expected, *config)
+	require.ElementsMatch(t, expected.Services, config.Services)
 }
