@@ -179,7 +179,6 @@ func (s *SSServer) loadConfig(filename string) error {
 			switch t := listener.Type; t {
 			// TODO: Support more listener types.
 			case directListenerType:
-				//var addr net.Addr
 				addr, err := onet.ResolveAddr(listener.Address)
 				if err != nil {
 					return fmt.Errorf("failed to resolve direct address: %v: %w", listener.Address, err)
