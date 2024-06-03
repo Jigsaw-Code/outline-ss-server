@@ -75,25 +75,16 @@ type SSServer struct {
 	ports       map[int]*ssPort
 }
 
-func (s *SSServer) startPort(portNum int) error {
+func (s *SSServer) startTCP(portNum int, cipherList service.CipherList) (*net.TCPListener, error) {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks TCP service failed to start on port %v: %w", portNum, err)
+		return nil, fmt.Errorf("Shadowsocks TCP service failed to start on port %v: %w", portNum, err)
 	}
 	logger.Infof("Shadowsocks TCP service listening on %v", listener.Addr().String())
-	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: portNum})
-	if err != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks UDP service failed to start on port %v: %w", portNum, err)
-	}
-	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
-	port := &ssPort{tcpListener: listener, packetConn: packetConn, cipherList: service.NewCipherList()}
-	authFunc := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m)
+	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 	// TODO: Register initial data metrics at zero.
 	tcpHandler := service.NewTCPHandler(portNum, authFunc, s.m, tcpReadTimeout)
-	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m)
-	s.ports[portNum] = port
 	accept := func() (transport.StreamConn, error) {
 		conn, err := listener.AcceptTCP()
 		if err == nil {
@@ -102,8 +93,19 @@ func (s *SSServer) startPort(portNum int) error {
 		return conn, err
 	}
 	go service.StreamServe(accept, tcpHandler.Handle)
-	go packetHandler.Handle(port.packetConn)
-	return nil
+	return listener, nil
+}
+
+func (s *SSServer) startUDP(portNum int, cipherList service.CipherList) (*net.UDPConn, error) {
+	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: portNum})
+	if err != nil {
+		//lint:ignore ST1005 Shadowsocks is capitalized.
+		return nil, fmt.Errorf("Shadowsocks UDP service failed to start on port %v: %w", portNum, err)
+	}
+	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
+	packetHandler := service.NewPacketHandler(s.natTimeout, cipherList, s.m)
+	go packetHandler.Handle(packetConn)
+	return packetConn, nil
 }
 
 func (s *SSServer) removePort(portNum int) error {
@@ -199,9 +201,16 @@ func (s *SSServer) loadConfig(filename string) error {
 				return fmt.Errorf("failed to remove port %v: %w", portNum, err)
 			}
 		} else if count == +1 {
-			if err := s.startPort(portNum); err != nil {
+			cipherList := service.NewCipherList()
+			tcpListener, err := s.startTCP(portNum, cipherList)
+			if err != nil {
 				return err
 			}
+			packetConn, err := s.startUDP(portNum, cipherList)
+			if err != nil {
+				return err
+			}
+			s.ports[portNum] = &ssPort{tcpListener, packetConn, cipherList}
 		}
 	}
 	numServices := 0
