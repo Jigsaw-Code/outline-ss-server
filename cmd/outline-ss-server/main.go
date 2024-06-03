@@ -18,6 +18,7 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -62,29 +63,28 @@ func init() {
 	logger = logging.MustGetLogger("")
 }
 
-type ssPort struct {
-	tcpListener *net.TCPListener
-	packetConn  net.PacketConn
-	cipherList  service.CipherList
+type ssListener struct {
+	io.Closer
+	cipherList service.CipherList
 }
 
 type SSServer struct {
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	ports       map[int]*ssPort
+	listeners   map[string]*ssListener
 }
 
-func (s *SSServer) startTCP(portNum int, cipherList service.CipherList) (*net.TCPListener, error) {
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
+func (s *SSServer) startDirectTCP(addr *net.TCPAddr, cipherList service.CipherList) (*net.TCPListener, error) {
+	listener, err := net.ListenTCP("tcp", addr)
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return nil, fmt.Errorf("Shadowsocks TCP service failed to start on port %v: %w", portNum, err)
+		return nil, fmt.Errorf("Shadowsocks TCP service failed to start on address %v: %w", addr.String(), err)
 	}
 	logger.Infof("Shadowsocks TCP service listening on %v", listener.Addr().String())
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 	// TODO: Register initial data metrics at zero.
-	tcpHandler := service.NewTCPHandler(portNum, authFunc, s.m, tcpReadTimeout)
+	tcpHandler := service.NewTCPHandler(addr.Port, authFunc, s.m, tcpReadTimeout)
 	accept := func() (transport.StreamConn, error) {
 		conn, err := listener.AcceptTCP()
 		if err == nil {
@@ -96,11 +96,11 @@ func (s *SSServer) startTCP(portNum int, cipherList service.CipherList) (*net.TC
 	return listener, nil
 }
 
-func (s *SSServer) startUDP(portNum int, cipherList service.CipherList) (*net.UDPConn, error) {
-	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: portNum})
+func (s *SSServer) startDirectUDP(addr *net.UDPAddr, cipherList service.CipherList) (*net.UDPConn, error) {
+	packetConn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return nil, fmt.Errorf("Shadowsocks UDP service failed to start on port %v: %w", portNum, err)
+		return nil, fmt.Errorf("Shadowsocks UDP service failed to start on address %v: %w", addr.String(), err)
 	}
 	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
 	packetHandler := service.NewPacketHandler(s.natTimeout, cipherList, s.m)
@@ -108,24 +108,29 @@ func (s *SSServer) startUDP(portNum int, cipherList service.CipherList) (*net.UD
 	return packetConn, nil
 }
 
-func (s *SSServer) removePort(portNum int) error {
-	port, ok := s.ports[portNum]
+func (s *SSServer) start(addr net.Addr, cipherList service.CipherList) (io.Closer, error) {
+	switch t := addr.(type) {
+	case *net.TCPAddr:
+		return s.startDirectTCP(t, cipherList)
+	case *net.UDPAddr:
+		return s.startDirectUDP(t, cipherList)
+	default:
+		return nil, fmt.Errorf("unable to start address: %s", t)
+	}
+}
+
+func (s *SSServer) remove(addr string) error {
+	listener, ok := s.listeners[addr]
 	if !ok {
-		return fmt.Errorf("port %v doesn't exist", portNum)
+		return fmt.Errorf("address %v doesn't exist", addr)
 	}
-	tcpErr := port.tcpListener.Close()
-	udpErr := port.packetConn.Close()
-	delete(s.ports, portNum)
-	if tcpErr != nil {
+	err := listener.Close()
+	delete(s.listeners, addr)
+	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks TCP service on port %v failed to stop: %w", portNum, tcpErr)
+		return fmt.Errorf("Shadowsocks service on address %v failed to stop: %w", addr, err)
 	}
-	logger.Infof("Shadowsocks TCP service on port %v stopped", portNum)
-	if udpErr != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks UDP service on port %v failed to stop: %w", portNum, udpErr)
-	}
-	logger.Infof("Shadowsocks UDP service on port %v stopped", portNum)
+	logger.Infof("Shadowsocks service on address %v stopped", addr)
 	return nil
 }
 
@@ -135,98 +140,90 @@ func (s *SSServer) loadConfig(filename string) error {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 
-	portChanges := make(map[int]int)
-	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
+	uniqueCiphers := 0
+	addrChanges := make(map[string]int)
+	type addrWithCiphers struct {
+		address net.Addr
+		ciphers *list.List // Values are *List of *CipherEntry.
+	}
+	addrs := make(map[string]*addrWithCiphers)
 	for _, serviceConfig := range config.Services {
 		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
 			return fmt.Errorf("must specify at least 1 listener and 1 key per service")
 		}
-		addrs := []net.Addr{}
+
+		ciphers := list.New()
+		type cipherKey struct {
+			cipher string
+			secret string
+		}
+		existingCiphers := make(map[cipherKey]bool)
+		for _, keyConfig := range serviceConfig.Keys {
+			key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
+			_, ok := existingCiphers[key]
+			if ok {
+				logger.Debugf("encryption key already exists for ID=`%v`. Skipping.", keyConfig.ID)
+				continue
+			}
+			cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
+			if err != nil {
+				return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+			}
+			entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
+			ciphers.PushBack(&entry)
+			existingCiphers[key] = true
+		}
+		uniqueCiphers += ciphers.Len()
+
 		for _, listener := range serviceConfig.Listeners {
 			switch t := listener.Type; t {
 			// TODO: Support more listener types.
 			case directListenerType:
+				//var addr net.Addr
 				addr, err := onet.ResolveAddr(listener.Address)
 				if err != nil {
 					return fmt.Errorf("failed to resolve direct address: %v: %w", listener.Address, err)
 				}
-				addrs = append(addrs, addr)
-				port, err := onet.GetPort(addr)
-				if err != nil {
-					return err
-				}
-				portChanges[int(port)] = 1
+				addrChanges[listener.Address] = 1
+				addrs[listener.Address] = &addrWithCiphers{addr, ciphers}
 			default:
 				return fmt.Errorf("unsupported listener type: %s", t)
 			}
 		}
-
-		type key struct {
-			c string
-			s string
-		}
-		existingCipher := make(map[key]bool)
-		for _, keyConfig := range serviceConfig.Keys {
-			for _, addr := range addrs {
-				port, err := onet.GetPort(addr)
-				if err != nil {
-					return err
-				}
-				cipherList, ok := portCiphers[port]
-				if !ok {
-					cipherList = list.New()
-					portCiphers[port] = cipherList
-				}
-				_, ok = existingCipher[key{keyConfig.Cipher, keyConfig.Secret}]
-				if ok {
-					logger.Debugf("encryption key already exists for port=%v, ID=`%v`. Skipping.", port, keyConfig.ID)
-					continue
-				}
-				cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
-				if err != nil {
-					return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
-				}
-				entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
-				cipherList.PushBack(&entry)
-				existingCipher[key{keyConfig.Cipher, keyConfig.Secret}] = true
-			}
-		}
 	}
-	for port := range s.ports {
-		portChanges[port] = portChanges[port] - 1
+	for listener := range s.listeners {
+		addrChanges[listener] = addrChanges[listener] - 1
 	}
-	for portNum, count := range portChanges {
+	for addr, count := range addrChanges {
 		if count == -1 {
-			if err := s.removePort(portNum); err != nil {
-				return fmt.Errorf("failed to remove port %v: %w", portNum, err)
+			if err := s.remove(addr); err != nil {
+				return fmt.Errorf("failed to remove address %v: %w", addr, err)
 			}
 		} else if count == +1 {
 			cipherList := service.NewCipherList()
-			tcpListener, err := s.startTCP(portNum, cipherList)
+			listener, err := s.start(addrs[addr].address, cipherList)
 			if err != nil {
 				return err
 			}
-			packetConn, err := s.startUDP(portNum, cipherList)
-			if err != nil {
-				return err
-			}
-			s.ports[portNum] = &ssPort{tcpListener, packetConn, cipherList}
+			s.listeners[addr] = &ssListener{Closer: listener, cipherList: cipherList}
 		}
 	}
-	numServices := 0
-	for portNum, cipherList := range portCiphers {
-		s.ports[portNum].cipherList.Update(cipherList)
-		numServices += cipherList.Len()
+	for addr, addrWithCiphers := range addrs {
+		listener, ok := s.listeners[addr]
+		if !ok {
+			return fmt.Errorf("unable to find listener for address: %v", addr)
+		}
+		listener.cipherList.Update(addrWithCiphers.ciphers)
 	}
-	logger.Infof("Loaded %v access keys over %v ports", numServices, len(s.ports))
-	s.m.SetNumAccessKeys(numServices, len(s.ports))
+	logger.Infof("Loaded %v access keys over %v listeners", uniqueCiphers, len(s.listeners))
+	s.m.SetNumAccessKeys(uniqueCiphers, len(s.listeners))
 	return nil
 }
 
 // Stop serving on all ports.
 func (s *SSServer) Stop() error {
-	for portNum := range s.ports {
-		if err := s.removePort(portNum); err != nil {
+	for addr := range s.listeners {
+		if err := s.remove(addr); err != nil {
 			return err
 		}
 	}
@@ -239,7 +236,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 		natTimeout:  natTimeout,
 		m:           sm,
 		replayCache: service.NewReplayCache(replayHistory),
-		ports:       make(map[int]*ssPort),
+		listeners:   make(map[string]*ssListener),
 	}
 	err := server.loadConfig(filename)
 	if err != nil {
