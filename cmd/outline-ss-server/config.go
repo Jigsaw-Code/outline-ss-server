@@ -37,16 +37,17 @@ type Key struct {
 	Secret string
 }
 
+type LegacyKeyService struct {
+	Key  `yaml:",inline"`
+	Port int
+}
+
 type Config struct {
 	Services []Service
 
-	// Deprecated: Keys exists for historical compatibility. This is ignored if top-level `services` is specified.
-	Keys []struct {
-		ID     string
-		Port   int
-		Cipher string
-		Secret string
-	}
+	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
+	// using the newer `services` format.
+	Keys []LegacyKeyService
 }
 
 // Reads a config from a filename and parses it as a [Config].
@@ -60,27 +61,28 @@ func ReadConfig(filename string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-	if config.Services == nil {
-		// This is a deprecated config format. We need to transform it to to the new format.
-		ports := make(map[int][]Key)
-		for _, keyConfig := range config.Keys {
-			ports[keyConfig.Port] = append(ports[keyConfig.Port], Key{
-				ID:     keyConfig.ID,
-				Cipher: keyConfig.Cipher,
-				Secret: keyConfig.Secret,
-			})
+
+	// Specifying keys in `config.Keys` is a deprecated config format. We need to
+	// transform it to to the new format.
+	ports := make(map[int][]Key)
+	for _, keyConfig := range config.Keys {
+		ports[keyConfig.Port] = append(ports[keyConfig.Port], Key{
+			ID:     keyConfig.ID,
+			Cipher: keyConfig.Cipher,
+			Secret: keyConfig.Secret,
+		})
+	}
+	for port, keys := range ports {
+		s := Service{
+			Listeners: []Listener{
+				Listener{Type: "direct", Address: fmt.Sprintf("tcp://[::]:%d", port)},
+				Listener{Type: "direct", Address: fmt.Sprintf("udp://[::]:%d", port)},
+			},
+			Keys: keys,
 		}
-		for port, keys := range ports {
-			s := Service{
-				Listeners: []Listener{
-					Listener{Type: "direct", Address: fmt.Sprintf("tcp://[::]:%d", port)},
-					Listener{Type: "direct", Address: fmt.Sprintf("udp://[::]:%d", port)},
-				},
-				Keys: keys,
-			}
-			config.Services = append(config.Services, s)
-		}
+		config.Services = append(config.Services, s)
 	}
 	config.Keys = nil
+
 	return &config, nil
 }
