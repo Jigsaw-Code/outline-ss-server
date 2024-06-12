@@ -16,8 +16,6 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 
 	"gopkg.in/yaml.v2"
@@ -87,34 +85,4 @@ func ReadConfig(filename string) (*Config, error) {
 	config.Keys = nil
 
 	return &config, nil
-}
-
-// Resolves a URL-style listen address specification as a [net.Addr].
-//
-// Examples:
-//
-//	udp6://127.0.0.1:8000
-//	unix:///tmp/foo.sock
-//	tcp://127.0.0.1:9002
-func ResolveAddr(addr string) (net.Addr, error) {
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, err
-	}
-	switch u.Scheme {
-	case "tcp", "tcp4", "tcp6":
-		return net.ResolveTCPAddr(u.Scheme, u.Host)
-	case "udp", "udp4", "udp6":
-		return net.ResolveUDPAddr(u.Scheme, u.Host)
-	case "unix", "unixgram", "unixpacket":
-		var path string
-		if u.Opaque != "" {
-			path = u.Opaque
-		} else {
-			path = u.Path
-		}
-		return net.ResolveUnixAddr(u.Scheme, path)
-	default:
-		return nil, net.UnknownNetworkError(u.Scheme)
-	}
 }

@@ -21,6 +21,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -74,48 +75,58 @@ type SSServer struct {
 	listeners   map[string]*ssListener
 }
 
-func (s *SSServer) startDirectTCP(addr *net.TCPAddr, cipherList service.CipherList) (*net.TCPListener, error) {
-	listener, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return nil, fmt.Errorf("Shadowsocks TCP service failed to start on address %v: %w", addr.String(), err)
-	}
-	logger.Infof("Shadowsocks TCP service listening on %v", listener.Addr().String())
-	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
-	// TODO: Register initial data metrics at zero.
-	tcpHandler := service.NewTCPHandler(addr.Port, authFunc, s.m, tcpReadTimeout)
-	accept := func() (transport.StreamConn, error) {
-		conn, err := listener.AcceptTCP()
-		if err == nil {
-			conn.SetKeepAlive(true)
+func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) error {
+	switch ln := listener.(type) {
+	case net.Listener:
+		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
+		// TODO: Register initial data metrics at zero.
+		tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
+		accept := func() (transport.StreamConn, error) {
+			conn, err := ln.Accept()
+			if err == nil {
+				conn.(*net.TCPConn).SetKeepAlive(true)
+			}
+			return conn.(transport.StreamConn), err
 		}
-		return conn, err
+		go service.StreamServe(accept, tcpHandler.Handle)
+	case net.PacketConn:
+		packetHandler := service.NewPacketHandler(s.natTimeout, cipherList, s.m)
+		go packetHandler.Handle(ln)
+	default:
+		return fmt.Errorf("unknown listener type: %v", ln)
 	}
-	go service.StreamServe(accept, tcpHandler.Handle)
-	return listener, nil
+	return nil
 }
 
-func (s *SSServer) startDirectUDP(addr *net.UDPAddr, cipherList service.CipherList) (*net.UDPConn, error) {
-	packetConn, err := net.ListenUDP("udp", addr)
+func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer, error) {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	var listener io.Closer
+	switch u.Scheme {
+	case "tcp", "tcp4", "tcp6":
+		// TODO: Validate `u` address.
+		listener, err = net.Listen(u.Scheme, u.Host)
+	case "udp", "udp4", "udp6":
+		// TODO: Validate `u` address.
+		listener, err = net.ListenPacket(u.Scheme, u.Host)
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)
+	}
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return nil, fmt.Errorf("Shadowsocks UDP service failed to start on address %v: %w", addr.String(), err)
+		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
 	}
-	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
-	packetHandler := service.NewPacketHandler(s.natTimeout, cipherList, s.m)
-	go packetHandler.Handle(packetConn)
-	return packetConn, nil
-}
+	logger.Infof("Shadowsocks service listening on %v", addr)
 
-func (s *SSServer) start(addr net.Addr, cipherList service.CipherList) (io.Closer, error) {
-	switch t := addr.(type) {
-	case *net.TCPAddr:
-		return s.startDirectTCP(t, cipherList)
-	case *net.UDPAddr:
-		return s.startDirectUDP(t, cipherList)
-	default:
-		return nil, fmt.Errorf("unable to start address: %s", t)
+	err = s.serve(listener, cipherList)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serve on listener %w: %w", listener, err)
 	}
+
+	return listener, nil
 }
 
 func (s *SSServer) remove(addr string) error {
@@ -141,11 +152,7 @@ func (s *SSServer) loadConfig(filename string) error {
 
 	uniqueCiphers := 0
 	addrChanges := make(map[string]int)
-	type addrWithCiphers struct {
-		address net.Addr
-		ciphers *list.List // Values are *List of *CipherEntry.
-	}
-	addrs := make(map[string]*addrWithCiphers)
+	addrCiphers := make(map[string]*list.List) // Values are *List of *CipherEntry.
 	for _, serviceConfig := range config.Services {
 		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
 			return fmt.Errorf("must specify at least 1 listener and 1 key per service")
@@ -178,12 +185,8 @@ func (s *SSServer) loadConfig(filename string) error {
 			switch t := listener.Type; t {
 			// TODO: Support more listener types.
 			case directListenerType:
-				addr, err := ResolveAddr(listener.Address)
-				if err != nil {
-					return fmt.Errorf("failed to resolve direct address: %v: %w", listener.Address, err)
-				}
 				addrChanges[listener.Address] = 1
-				addrs[listener.Address] = &addrWithCiphers{addr, ciphers}
+				addrCiphers[listener.Address] = ciphers
 			default:
 				return fmt.Errorf("unsupported listener type: %s", t)
 			}
@@ -199,19 +202,19 @@ func (s *SSServer) loadConfig(filename string) error {
 			}
 		} else if count == +1 {
 			cipherList := service.NewCipherList()
-			listener, err := s.start(addrs[addr].address, cipherList)
+			listener, err := s.start(addr, cipherList)
 			if err != nil {
 				return err
 			}
 			s.listeners[addr] = &ssListener{Closer: listener, cipherList: cipherList}
 		}
 	}
-	for addr, addrWithCiphers := range addrs {
+	for addr, ciphers := range addrCiphers {
 		listener, ok := s.listeners[addr]
 		if !ok {
 			return fmt.Errorf("unable to find listener for address: %v", addr)
 		}
-		listener.cipherList.Update(addrWithCiphers.ciphers)
+		listener.cipherList.Update(ciphers)
 	}
 	logger.Infof("Loaded %v access keys over %v listeners", uniqueCiphers, len(s.listeners))
 	s.m.SetNumAccessKeys(uniqueCiphers, len(s.listeners))
