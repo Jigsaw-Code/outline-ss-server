@@ -54,24 +54,3 @@ func TestResolveAddrReturnsErrorForUnknownScheme(t *testing.T) {
 	require.Nil(t, addr)
 	require.Error(t, err)
 }
-
-func TestGetPortFromTCPAddr(t *testing.T) {
-	port, err := GetPort(&net.TCPAddr{IP: net.ParseIP("1.2.3.4"), Port: 1234})
-
-	require.NoError(t, err)
-	require.Equal(t, 1234, port)
-}
-
-func TestGetPortFromUDPPAddr(t *testing.T) {
-	port, err := GetPort(&net.UDPAddr{IP: net.ParseIP("1.2.3.4"), Port: 5678})
-
-	require.NoError(t, err)
-	require.Equal(t, 5678, port)
-}
-
-func TestGetPortReturnsErrorForUnsupportedAddressType(t *testing.T) {
-	port, err := GetPort(&net.UnixAddr{Name: "/path/to/foo", Net: "unix"})
-
-	require.Equal(t, -1, port)
-	require.Error(t, err)
-}

@@ -15,7 +15,6 @@
 package net
 
 import (
-	"fmt"
 	"net"
 	"net/url"
 )
@@ -47,17 +46,5 @@ func ResolveAddr(addr string) (net.Addr, error) {
 		return net.ResolveUnixAddr(u.Scheme, path)
 	default:
 		return nil, net.UnknownNetworkError(u.Scheme)
-	}
-}
-
-// Returns the port from a given address.
-func GetPort(addr net.Addr) (port int, err error) {
-	switch t := addr.(type) {
-	case *net.TCPAddr:
-		return t.Port, nil
-	case *net.UDPAddr:
-		return t.Port, nil
-	default:
-		return -1, fmt.Errorf("failed to get port from address: %v", addr)
 	}
 }
