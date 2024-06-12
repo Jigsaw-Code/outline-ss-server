@@ -15,14 +15,16 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestReadConfig(t *testing.T) {
-	config, _ := ReadConfig("./config_example.yml")
+	config, err := ReadConfig("./config_example.yml")
 
+	require.NoError(t, err)
 	expected := Config{
 		Services: []Service{
 			Service{
@@ -50,8 +52,9 @@ func TestReadConfig(t *testing.T) {
 }
 
 func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
-	config, _ := ReadConfig("./config_example.deprecated.yml")
+	config, err := ReadConfig("./config_example.deprecated.yml")
 
+	require.NoError(t, err)
 	expected := Config{
 		Services: []Service{
 			Service{
@@ -76,4 +79,30 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 		},
 	}
 	require.ElementsMatch(t, expected.Services, config.Services)
+}
+
+func TestReadConfigFromEmptyFile(t *testing.T) {
+	file, _ := os.CreateTemp("", "empty.yaml")
+
+	config, err := ReadConfig(file.Name())
+
+	require.NoError(t, err)
+	require.ElementsMatch(t, Config{}, config)
+}
+
+func TestReadConfigFromNonExistingFileFails(t *testing.T) {
+	config, err := ReadConfig("./foo")
+
+	require.Error(t, err)
+	require.ElementsMatch(t, nil, config)
+}
+
+func TestReadConfigFromIncorrectFormatFails(t *testing.T) {
+	file, _ := os.CreateTemp("", "empty.yaml")
+	file.WriteString("foo")
+
+	config, err := ReadConfig(file.Name())
+
+	require.Error(t, err)
+	require.ElementsMatch(t, Config{}, config)
 }
