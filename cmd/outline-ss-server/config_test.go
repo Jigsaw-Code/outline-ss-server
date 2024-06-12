@@ -15,6 +15,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"testing"
 
@@ -105,4 +106,38 @@ func TestReadConfigFromIncorrectFormatFails(t *testing.T) {
 
 	require.Error(t, err)
 	require.ElementsMatch(t, Config{}, config)
+}
+
+func TestResolveAddrReturnsTCPAddr(t *testing.T) {
+	addr, err := ResolveAddr("tcp://0.0.0.0:9000")
+
+	require.NoError(t, err)
+	if _, ok := addr.(*net.TCPAddr); !ok {
+		t.Errorf("expected a *net.TCPAddr; it is a %T", addr)
+	}
+}
+
+func TestResolveAddrReturnsUDPAddr(t *testing.T) {
+	addr, err := ResolveAddr("udp://[::]:9001")
+
+	require.NoError(t, err)
+	if _, ok := addr.(*net.UDPAddr); !ok {
+		t.Errorf("expected a *net.UDPAddr; it is a %T", addr)
+	}
+}
+
+func TestResolveAddrReturnsUnixAddr(t *testing.T) {
+	addr, err := ResolveAddr("unix:///path/to/stream_socket")
+
+	require.NoError(t, err)
+	if _, ok := addr.(*net.UnixAddr); !ok {
+		t.Errorf("expected a *net.UnixAddr; it is a %T", addr)
+	}
+}
+
+func TestResolveAddrReturnsErrorForUnknownScheme(t *testing.T) {
+	addr, err := ResolveAddr("foobar")
+
+	require.Nil(t, addr)
+	require.Error(t, err)
 }

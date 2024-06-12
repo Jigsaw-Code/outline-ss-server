@@ -31,7 +31,6 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/op/go-logging"
 	"github.com/prometheus/client_golang/prometheus"
@@ -179,7 +178,7 @@ func (s *SSServer) loadConfig(filename string) error {
 			switch t := listener.Type; t {
 			// TODO: Support more listener types.
 			case directListenerType:
-				addr, err := onet.ResolveAddr(listener.Address)
+				addr, err := ResolveAddr(listener.Address)
 				if err != nil {
 					return fmt.Errorf("failed to resolve direct address: %v: %w", listener.Address, err)
 				}
