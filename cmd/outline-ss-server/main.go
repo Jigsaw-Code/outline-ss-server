@@ -80,10 +80,12 @@ func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) erro
 		tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
 			conn, err := ln.Accept()
-			if err == nil {
-				conn.(*net.TCPConn).SetKeepAlive(true)
+			if err != nil {
+				return nil, err
 			}
-			return conn.(transport.StreamConn), err
+			c := conn.(*net.TCPConn)
+			c.SetKeepAlive(true)
+			return c, err
 		}
 		go service.StreamServe(accept, tcpHandler.Handle)
 	case net.PacketConn:
