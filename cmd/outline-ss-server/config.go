@@ -58,8 +58,8 @@ type Config struct {
 	Keys []LegacyKeyService
 }
 
-// Reads a config from a filename and parses it as a [Config].
-func ReadConfig(filename string) (*Config, error) {
+// readConfig attempts to read a config from a filename and parses it as a [Config].
+func readConfig(filename string) (*Config, error) {
 	config := Config{}
 	configData, err := os.ReadFile(filename)
 	if err != nil {

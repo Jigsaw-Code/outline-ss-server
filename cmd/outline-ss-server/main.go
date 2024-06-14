@@ -129,7 +129,7 @@ func (s *SSServer) remove(addr string) error {
 }
 
 func (s *SSServer) loadConfig(filename string) error {
-	config, err := ReadConfig(filename)
+	config, err := readConfig(filename)
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
