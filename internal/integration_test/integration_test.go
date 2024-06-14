@@ -133,7 +133,7 @@ func TestTCPEcho(t *testing.T) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, authFunc, testMetrics, testTimeout)
+	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
@@ -202,7 +202,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, authFunc, testMetrics, testTimeout)
+	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
@@ -384,7 +384,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, authFunc, testMetrics, testTimeout)
+	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
@@ -448,7 +448,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().(*net.TCPAddr).Port, authFunc, testMetrics, testTimeout)
+	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
