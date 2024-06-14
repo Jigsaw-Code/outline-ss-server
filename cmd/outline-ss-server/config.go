@@ -15,7 +15,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"os"
 
 	"gopkg.in/yaml.v2"
@@ -85,4 +89,46 @@ func ReadConfig(filename string) (*Config, error) {
 	config.Keys = nil
 
 	return &config, nil
+}
+
+// validateListener asserts that a listener URI conforms to the expected format.
+func validateListener(u *url.URL) error {
+	if u.Opaque != "" {
+		return errors.New("URI cannot have an opaque part")
+	}
+	if u.User != nil {
+		return errors.New("URI cannot have an userdata part")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return errors.New("URI cannot have a query part")
+	}
+	if u.Fragment != "" {
+		return errors.New("URI cannot have a fragement")
+	}
+	if u.Path != "" && u.Path != "/" {
+		return errors.New("URI path not allowed")
+	}
+	return nil
+}
+
+func NewListener(addr string) (io.Closer, error) {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	switch u.Scheme {
+	case "tcp", "tcp4", "tcp6":
+		if err := validateListener(u); err != nil {
+			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
+		}
+		return net.Listen(u.Scheme, u.Host)
+	case "udp", "udp4", "udp6":
+		if err := validateListener(u); err != nil {
+			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
+		}
+		return net.ListenPacket(u.Scheme, u.Host)
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)
+	}
 }

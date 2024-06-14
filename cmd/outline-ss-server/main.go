@@ -21,7 +21,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -98,26 +97,8 @@ func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) erro
 	return nil
 }
 
-func newListener(addr string) (io.Closer, error) {
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	switch u.Scheme {
-	case "tcp", "tcp4", "tcp6":
-		// TODO: Validate `u` address.
-		return net.Listen(u.Scheme, u.Host)
-	case "udp", "udp4", "udp6":
-		// TODO: Validate `u` address.
-		return net.ListenPacket(u.Scheme, u.Host)
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)
-	}
-}
-
 func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer, error) {
-	listener, err := newListener(addr)
+	listener, err := NewListener(addr)
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
