@@ -56,29 +56,22 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 
 	require.NoError(t, err)
 	expected := Config{
-		Services: []Service{
-			Service{
-				Listeners: []Listener{
-					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
-					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9000"},
-				},
-				Keys: []Key{
-					Key{"user-0", "chacha20-ietf-poly1305", "Secret0"},
-					Key{"user-1", "chacha20-ietf-poly1305", "Secret1"},
-				},
+		Keys: []LegacyKeyService{
+			LegacyKeyService{
+				Key:  Key{ID: "user-0", Cipher: "chacha20-ietf-poly1305", Secret: "Secret0"},
+				Port: 9000,
 			},
-			Service{
-				Listeners: []Listener{
-					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9001"},
-					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9001"},
-				},
-				Keys: []Key{
-					Key{"user-2", "chacha20-ietf-poly1305", "Secret2"},
-				},
+			LegacyKeyService{
+				Key:  Key{ID: "user-1", Cipher: "chacha20-ietf-poly1305", Secret: "Secret1"},
+				Port: 9000,
+			},
+			LegacyKeyService{
+				Key:  Key{ID: "user-2", Cipher: "chacha20-ietf-poly1305", Secret: "Secret2"},
+				Port: 9001,
 			},
 		},
 	}
-	require.ElementsMatch(t, expected.Services, config.Services)
+	require.Equal(t, expected, *config)
 }
 
 func TestReadConfigFromEmptyFile(t *testing.T) {

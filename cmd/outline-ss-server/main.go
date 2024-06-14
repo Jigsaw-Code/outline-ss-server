@@ -137,6 +137,26 @@ func (s *SSServer) loadConfig(filename string) error {
 	uniqueCiphers := 0
 	addrChanges := make(map[string]int)
 	addrCiphers := make(map[string]*list.List) // Values are *List of *CipherEntry.
+
+	for _, legacyKeyConfig := range config.Keys {
+		cryptoKey, err := shadowsocks.NewEncryptionKey(legacyKeyConfig.Cipher, legacyKeyConfig.Secret)
+		if err != nil {
+			return fmt.Errorf("failed to create encyption key for key %v: %w", legacyKeyConfig.ID, err)
+		}
+		entry := service.MakeCipherEntry(legacyKeyConfig.ID, cryptoKey, legacyKeyConfig.Secret)
+		for _, ln := range []string{"tcp", "udp"} {
+			addr := fmt.Sprintf("%s://[::]:%d", ln, legacyKeyConfig.Port)
+			addrChanges[addr] = 1
+			ciphers, ok := addrCiphers[addr]
+			if !ok {
+				ciphers = list.New()
+				addrCiphers[addr] = ciphers
+			}
+			ciphers.PushBack(&entry)
+		}
+		uniqueCiphers += 1
+	}
+
 	for _, serviceConfig := range config.Services {
 		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
 			return fmt.Errorf("must specify at least 1 listener and 1 key per service")

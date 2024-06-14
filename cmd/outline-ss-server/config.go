@@ -69,29 +69,6 @@ func ReadConfig(filename string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-
-	// Specifying keys in `config.Keys` is a deprecated config format. We need to
-	// transform it to to the new format.
-	ports := make(map[int][]Key)
-	for _, keyConfig := range config.Keys {
-		ports[keyConfig.Port] = append(ports[keyConfig.Port], Key{
-			ID:     keyConfig.ID,
-			Cipher: keyConfig.Cipher,
-			Secret: keyConfig.Secret,
-		})
-	}
-	for port, keys := range ports {
-		s := Service{
-			Listeners: []Listener{
-				Listener{Type: listenerTypeDirect, Address: fmt.Sprintf("tcp://[::]:%d", port)},
-				Listener{Type: listenerTypeDirect, Address: fmt.Sprintf("udp://[::]:%d", port)},
-			},
-			Keys: keys,
-		}
-		config.Services = append(config.Services, s)
-	}
-	config.Keys = nil
-
 	return &config, nil
 }
 
