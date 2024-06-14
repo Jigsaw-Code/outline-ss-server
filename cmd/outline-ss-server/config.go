@@ -115,6 +115,12 @@ func validateListener(u *url.URL) error {
 	return nil
 }
 
+// newListener creates a new listener from a URL-style address specification.
+//
+// Example addresses:
+//
+//	tcp4://127.0.0.1:8000
+//	udp://127.0.0.1:9000
 func newListener(addr string) (io.Closer, error) {
 	u, err := url.Parse(addr)
 	if err != nil {
