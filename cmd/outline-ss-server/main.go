@@ -49,8 +49,6 @@ const tcpReadTimeout time.Duration = 59 * time.Second
 // A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
 const defaultNatTimeout time.Duration = 5 * time.Minute
 
-var directListenerType = "direct"
-
 func init() {
 	var prefix = "%{level:.1s}%{time:2006-01-02T15:04:05.000Z07:00} %{pid} %{shortfile}]"
 	if term.IsTerminal(int(os.Stderr.Fd())) {
@@ -98,7 +96,7 @@ func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) erro
 }
 
 func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer, error) {
-	listener, err := NewListener(addr)
+	listener, err := newListener(addr)
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
@@ -107,7 +105,7 @@ func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer,
 
 	err = s.serve(listener, cipherList)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serve on listener %w: %w", listener, err)
+		return nil, fmt.Errorf("failed to serve on listener %v: %w", listener, err)
 	}
 
 	return listener, nil
@@ -168,7 +166,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		for _, listener := range serviceConfig.Listeners {
 			switch t := listener.Type; t {
 			// TODO: Support more listener types.
-			case directListenerType:
+			case listenerTypeDirect:
 				addrChanges[listener.Address] = 1
 				addrCiphers[listener.Address] = ciphers
 			default:

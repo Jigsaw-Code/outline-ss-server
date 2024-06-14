@@ -30,8 +30,12 @@ type Service struct {
 	Keys      []Key
 }
 
+type ListenerType string
+
+const listenerTypeDirect ListenerType = "direct"
+
 type Listener struct {
-	Type    string
+	Type    ListenerType
 	Address string
 }
 
@@ -79,8 +83,8 @@ func ReadConfig(filename string) (*Config, error) {
 	for port, keys := range ports {
 		s := Service{
 			Listeners: []Listener{
-				Listener{Type: "direct", Address: fmt.Sprintf("tcp://[::]:%d", port)},
-				Listener{Type: "direct", Address: fmt.Sprintf("udp://[::]:%d", port)},
+				Listener{Type: listenerTypeDirect, Address: fmt.Sprintf("tcp://[::]:%d", port)},
+				Listener{Type: listenerTypeDirect, Address: fmt.Sprintf("udp://[::]:%d", port)},
 			},
 			Keys: keys,
 		}
@@ -111,7 +115,7 @@ func validateListener(u *url.URL) error {
 	return nil
 }
 
-func NewListener(addr string) (io.Closer, error) {
+func newListener(addr string) (io.Closer, error) {
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, err

@@ -29,8 +29,8 @@ func TestReadConfig(t *testing.T) {
 		Services: []Service{
 			Service{
 				Listeners: []Listener{
-					Listener{Type: "direct", Address: "tcp://[::]:9000"},
-					Listener{Type: "direct", Address: "udp://[::]:9000"},
+					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
+					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9000"},
 				},
 				Keys: []Key{
 					Key{"user-0", "chacha20-ietf-poly1305", "Secret0"},
@@ -39,8 +39,8 @@ func TestReadConfig(t *testing.T) {
 			},
 			Service{
 				Listeners: []Listener{
-					Listener{Type: "direct", Address: "tcp://[::]:9001"},
-					Listener{Type: "direct", Address: "udp://[::]:9001"},
+					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9001"},
+					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9001"},
 				},
 				Keys: []Key{
 					Key{"user-2", "chacha20-ietf-poly1305", "Secret2"},
@@ -59,8 +59,8 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 		Services: []Service{
 			Service{
 				Listeners: []Listener{
-					Listener{Type: "direct", Address: "tcp://[::]:9000"},
-					Listener{Type: "direct", Address: "udp://[::]:9000"},
+					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
+					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9000"},
 				},
 				Keys: []Key{
 					Key{"user-0", "chacha20-ietf-poly1305", "Secret0"},
@@ -69,8 +69,8 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 			},
 			Service{
 				Listeners: []Listener{
-					Listener{Type: "direct", Address: "tcp://[::]:9001"},
-					Listener{Type: "direct", Address: "udp://[::]:9001"},
+					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9001"},
+					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9001"},
 				},
 				Keys: []Key{
 					Key{"user-2", "chacha20-ietf-poly1305", "Secret2"},
