@@ -137,7 +137,7 @@ func TestTCPEcho(t *testing.T) {
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(func() (transport.StreamConn, error) { return proxyListener.AcceptTCP() }, handler.Handle)
+		service.StreamServe(service.WrapStreamAccepter(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
