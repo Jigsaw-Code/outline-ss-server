@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bufio"
 	"container/list"
 	"flag"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/op/go-logging"
-	proxyproto "github.com/pires/go-proxyproto"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
@@ -63,6 +61,11 @@ func init() {
 
 type ListenerConfig = Listener
 
+type ClientStreamListener interface {
+	Accept() (service.IClientStreamConn, error)
+	Close() error
+}
+
 type ssListener struct {
 	io.Closer
 	cipherList service.CipherList
@@ -75,38 +78,13 @@ type SSServer struct {
 	listeners   map[ListenerConfig]*ssListener
 }
 
-func (s *SSServer) serve(lnType ListenerType, listener io.Closer, cipherList service.CipherList) error {
+func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) error {
 	switch ln := listener.(type) {
-	case net.Listener:
+	case ClientStreamListener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
 		tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
-		accept := func() (service.ClientStreamConn, error) {
-			conn, err := ln.Accept()
-			if err != nil {
-				return service.ClientStreamConn{}, err
-			}
-			c := conn.(*net.TCPConn)
-			c.SetKeepAlive(true)
-			switch lnType {
-			case listenerTypeDirect:
-				return service.ClientStreamConn{StreamConn: c, ClientAddress: c.RemoteAddr()}, err
-			case listenerTypeProxy:
-				r := bufio.NewReader(c)
-				h, err := proxyproto.Read(r)
-				if err == proxyproto.ErrNoProxyProtocol {
-					logger.Warningf("Received connection from %v without proxy header.", c.RemoteAddr())
-					return service.ClientStreamConn{StreamConn: c, ClientAddress: c.RemoteAddr()}, nil
-				}
-				if err != nil {
-					return service.ClientStreamConn{}, fmt.Errorf("error parsing proxy header: %v", err)
-				}
-				return service.ClientStreamConn{StreamConn: c, ClientAddress: h.SourceAddr}, nil
-			default:
-				return service.ClientStreamConn{}, fmt.Errorf("unknown listener config: %v", lnType)
-			}
-		}
-		go service.StreamServe(accept, tcpHandler.Handle)
+		go service.StreamServe(ln.Accept, tcpHandler.Handle)
 	case net.PacketConn:
 		packetHandler := service.NewPacketHandler(s.natTimeout, cipherList, s.m)
 		go packetHandler.Handle(ln)
@@ -117,13 +95,13 @@ func (s *SSServer) serve(lnType ListenerType, listener io.Closer, cipherList ser
 }
 
 func (s *SSServer) start(lnConfig ListenerConfig, cipherList service.CipherList) (io.Closer, error) {
-	listener, err := newListener(lnConfig.Address)
+	listener, err := Listen(lnConfig)
 	if err != nil {
 		return nil, fmt.Errorf("%s service failed to start on address %v: %w", lnConfig.Type, lnConfig.Address, err)
 	}
 	logger.Infof("%s service listening on %v", lnConfig.Type, lnConfig.Address)
 
-	err = s.serve(lnConfig.Type, listener, cipherList)
+	err = s.serve(listener, cipherList)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serve %s on listener %v: %w", lnConfig.Type, listener, err)
 	}

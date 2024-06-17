@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"gopkg.in/yaml.v2"
 )
 
@@ -120,5 +121,26 @@ func newListener(addr string) (io.Closer, error) {
 		return net.ListenPacket(u.Scheme, u.Host)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)
+	}
+}
+
+// Listen creates a new listener based on a given [Listener] config.
+func Listen(config Listener) (io.Closer, error) {
+	listener, err := newListener(config.Address)
+	if err != nil {
+		return nil, err
+	}
+	switch ln := listener.(type) {
+	case net.Listener:
+		switch config.Type {
+		case listenerTypeDirect:
+			return &service.DirectListener{Listener: ln}, nil
+		case listenerTypeProxy:
+			return &service.ProxyListener{Listener: ln}, nil
+		default:
+			return ln, err
+		}
+	default:
+		return listener, err
 	}
 }
