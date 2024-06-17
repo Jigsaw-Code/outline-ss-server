@@ -23,11 +23,13 @@ import (
 	proxyproto "github.com/pires/go-proxyproto"
 )
 
-type DirectListener struct {
+// StreamListener wraps a [net.Listener].
+type StreamListener struct {
 	net.Listener
 }
 
-func (l *DirectListener) Accept() (IClientStreamConn, error) {
+// Accept waits for and returns the next incoming connection.
+func (l *StreamListener) Accept() (IClientStreamConn, error) {
 	c, err := l.Listener.Accept()
 	if err != nil {
 		return nil, err
@@ -39,27 +41,24 @@ func (l *DirectListener) Accept() (IClientStreamConn, error) {
 // ProxyListener wraps a [net.Listener] and fetches the source of the connection from the PROXY
 // protocol header string. See https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt.
 type ProxyListener struct {
-	net.Listener
+	StreamListener
 }
 
-// Accept waits for and returns the next incoming connection.
+// Accept waits for the next incoming connection, parses the client IP from the PROXY protocol
+// header, and adds it to the connection.
 func (l *ProxyListener) Accept() (IClientStreamConn, error) {
-	c, err := l.Listener.Accept()
+	conn, err := l.StreamListener.Accept()
 	if err != nil {
 		return nil, err
 	}
-	conn := c.(transport.StreamConn)
 	r := bufio.NewReader(conn)
 	h, err := proxyproto.Read(r)
 	if err == proxyproto.ErrNoProxyProtocol {
 		logger.Warningf("Received connection from %v without proxy header.", conn.RemoteAddr())
-		return &clientStreamConn{StreamConn: conn}, nil
+		return conn, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error parsing proxy header: %v", err)
 	}
-
-	conn.(*net.TCPConn).SetKeepAlive(true)
-	clientConn := transport.WrapConn(conn, r, conn)
-	return &clientStreamConn{clientConn, h.SourceAddr}, nil
+	return &clientStreamConn{StreamConn: conn, clientAddr: h.SourceAddr}, nil
 }

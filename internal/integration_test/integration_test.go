@@ -205,7 +205,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		service.StreamServe(service.WrapStreamAccepter(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -388,7 +388,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		service.StreamServe(service.WrapStreamAccepter(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -452,7 +452,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		service.StreamServe(service.WrapStreamAccepter(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 

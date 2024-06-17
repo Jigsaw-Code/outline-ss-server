@@ -231,9 +231,9 @@ func (c *clientStreamConn) ClientAddr() net.Addr {
 	return c.StreamConn.RemoteAddr()
 }
 
-type StreamListener func() (IClientStreamConn, error)
+type StreamAccepter func() (IClientStreamConn, error)
 
-func WrapStreamListener[T IClientStreamConn](f func() (T, error)) StreamListener {
+func WrapStreamAccepter[T IClientStreamConn](f func() (T, error)) StreamAccepter {
 	return func() (IClientStreamConn, error) {
 		return f()
 	}
@@ -244,7 +244,7 @@ type StreamHandler func(ctx context.Context, conn IClientStreamConn)
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
 // via their [context.Context]. StreamServe will return after all pending handlers return.
-func StreamServe(accept StreamListener, handle StreamHandler) {
+func StreamServe(accept StreamAccepter, handle StreamHandler) {
 	var running sync.WaitGroup
 	defer running.Wait()
 	ctx, contextCancel := context.WithCancel(context.Background())

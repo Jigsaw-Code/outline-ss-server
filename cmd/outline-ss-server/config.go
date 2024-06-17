@@ -132,14 +132,11 @@ func Listen(config Listener) (io.Closer, error) {
 	}
 	switch ln := listener.(type) {
 	case net.Listener:
-		switch config.Type {
-		case listenerTypeDirect:
-			return &service.DirectListener{Listener: ln}, nil
-		case listenerTypeProxy:
-			return &service.ProxyListener{Listener: ln}, nil
-		default:
-			return ln, err
+		streamListener := &service.StreamListener{Listener: ln}
+		if config.Type == listenerTypeProxy {
+			return &service.ProxyListener{StreamListener: *streamListener}, err
 		}
+		return streamListener, err
 	default:
 		return listener, err
 	}
