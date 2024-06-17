@@ -32,7 +32,10 @@ type Service struct {
 
 type ListenerType string
 
-const listenerTypeDirect ListenerType = "direct"
+const (
+	listenerTypeDirect ListenerType = "direct"
+	listenerTypeProxy  ListenerType = "proxy_protocol"
+)
 
 type Listener struct {
 	Type    ListenerType

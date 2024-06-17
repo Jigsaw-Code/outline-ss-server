@@ -6,6 +6,7 @@ require (
 	github.com/goreleaser/goreleaser v1.18.2
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.8.0
+	github.com/pires/go-proxyproto v0.7.0
 	github.com/prometheus/client_golang v1.15.0
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/stretchr/testify v1.8.4

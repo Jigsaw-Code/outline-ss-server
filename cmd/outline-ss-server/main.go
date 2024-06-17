@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bufio"
 	"container/list"
 	"flag"
 	"fmt"
@@ -27,12 +28,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/op/go-logging"
+	proxyproto "github.com/pires/go-proxyproto"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
@@ -60,6 +61,8 @@ func init() {
 	logger = logging.MustGetLogger("")
 }
 
+type ListenerConfig = Listener
+
 type ssListener struct {
 	io.Closer
 	cipherList service.CipherList
@@ -69,23 +72,39 @@ type SSServer struct {
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	listeners   map[string]*ssListener
+	listeners   map[ListenerConfig]*ssListener
 }
 
-func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) error {
+func (s *SSServer) serve(lnType ListenerType, listener io.Closer, cipherList service.CipherList) error {
 	switch ln := listener.(type) {
 	case net.Listener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
 		tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
-		accept := func() (transport.StreamConn, error) {
+		accept := func() (service.ClientStreamConn, error) {
 			conn, err := ln.Accept()
 			if err != nil {
-				return nil, err
+				return service.ClientStreamConn{}, err
 			}
 			c := conn.(*net.TCPConn)
 			c.SetKeepAlive(true)
-			return c, err
+			switch lnType {
+			case listenerTypeDirect:
+				return service.ClientStreamConn{StreamConn: c, ClientAddress: c.RemoteAddr()}, err
+			case listenerTypeProxy:
+				r := bufio.NewReader(c)
+				h, err := proxyproto.Read(r)
+				if err == proxyproto.ErrNoProxyProtocol {
+					logger.Warningf("Received connection from %v without proxy header.", c.RemoteAddr())
+					return service.ClientStreamConn{StreamConn: c, ClientAddress: c.RemoteAddr()}, nil
+				}
+				if err != nil {
+					return service.ClientStreamConn{}, fmt.Errorf("error parsing proxy header: %v", err)
+				}
+				return service.ClientStreamConn{StreamConn: c, ClientAddress: h.SourceAddr}, nil
+			default:
+				return service.ClientStreamConn{}, fmt.Errorf("unknown listener config: %v", lnType)
+			}
 		}
 		go service.StreamServe(accept, tcpHandler.Handle)
 	case net.PacketConn:
@@ -97,34 +116,33 @@ func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) erro
 	return nil
 }
 
-func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer, error) {
-	listener, err := newListener(addr)
+func (s *SSServer) start(lnConfig ListenerConfig, cipherList service.CipherList) (io.Closer, error) {
+	listener, err := newListener(lnConfig.Address)
 	if err != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
+		return nil, fmt.Errorf("%s service failed to start on address %v: %w", lnConfig.Type, lnConfig.Address, err)
 	}
-	logger.Infof("Shadowsocks service listening on %v", addr)
+	logger.Infof("%s service listening on %v", lnConfig.Type, lnConfig.Address)
 
-	err = s.serve(listener, cipherList)
+	err = s.serve(lnConfig.Type, listener, cipherList)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serve on listener %v: %w", listener, err)
+		return nil, fmt.Errorf("failed to serve %s on listener %v: %w", lnConfig.Type, listener, err)
 	}
 
 	return listener, nil
 }
 
-func (s *SSServer) remove(addr string) error {
-	listener, ok := s.listeners[addr]
+func (s *SSServer) remove(lnConfig ListenerConfig) error {
+	listener, ok := s.listeners[lnConfig]
 	if !ok {
-		return fmt.Errorf("address %v doesn't exist", addr)
+		return fmt.Errorf("address %v doesn't exist", lnConfig.Address)
 	}
 	err := listener.Close()
-	delete(s.listeners, addr)
+	delete(s.listeners, lnConfig)
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks service on address %v failed to stop: %w", addr, err)
+		return fmt.Errorf("Shadowsocks service on address %v failed to stop: %w", lnConfig.Address, err)
 	}
-	logger.Infof("Shadowsocks service on address %v stopped", addr)
+	logger.Infof("Shadowsocks service on address %v stopped", lnConfig.Address)
 	return nil
 }
 
@@ -135,8 +153,8 @@ func (s *SSServer) loadConfig(filename string) error {
 	}
 
 	uniqueCiphers := 0
-	addrChanges := make(map[string]int)
-	addrCiphers := make(map[string]*list.List) // Values are *List of *CipherEntry.
+	listenerChanges := make(map[ListenerConfig]int)
+	listenerCiphers := make(map[ListenerConfig]*list.List) // Values are *List of *CipherEntry.
 
 	for _, legacyKeyConfig := range config.Keys {
 		cryptoKey, err := shadowsocks.NewEncryptionKey(legacyKeyConfig.Cipher, legacyKeyConfig.Secret)
@@ -145,12 +163,12 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		entry := service.MakeCipherEntry(legacyKeyConfig.ID, cryptoKey, legacyKeyConfig.Secret)
 		for _, ln := range []string{"tcp", "udp"} {
-			addr := fmt.Sprintf("%s://[::]:%d", ln, legacyKeyConfig.Port)
-			addrChanges[addr] = 1
-			ciphers, ok := addrCiphers[addr]
+			lnConfig := ListenerConfig{Type: listenerTypeDirect, Address: fmt.Sprintf("%s://[::]:%d", ln, legacyKeyConfig.Port)}
+			listenerChanges[lnConfig] = 1
+			ciphers, ok := listenerCiphers[lnConfig]
 			if !ok {
 				ciphers = list.New()
-				addrCiphers[addr] = ciphers
+				listenerCiphers[lnConfig] = ciphers
 			}
 			ciphers.PushBack(&entry)
 		}
@@ -185,38 +203,32 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		uniqueCiphers += ciphers.Len()
 
-		for _, listener := range serviceConfig.Listeners {
-			switch t := listener.Type; t {
-			// TODO: Support more listener types.
-			case listenerTypeDirect:
-				addrChanges[listener.Address] = 1
-				addrCiphers[listener.Address] = ciphers
-			default:
-				return fmt.Errorf("unsupported listener type: %s", t)
-			}
+		for _, lnConfig := range serviceConfig.Listeners {
+			listenerChanges[lnConfig] = 1
+			listenerCiphers[lnConfig] = ciphers
 		}
 	}
-	for listener := range s.listeners {
-		addrChanges[listener] = addrChanges[listener] - 1
+	for lnConfig := range s.listeners {
+		listenerChanges[lnConfig] = listenerChanges[lnConfig] - 1
 	}
-	for addr, count := range addrChanges {
+	for lnConfig, count := range listenerChanges {
 		if count == -1 {
-			if err := s.remove(addr); err != nil {
-				return fmt.Errorf("failed to remove address %v: %w", addr, err)
+			if err := s.remove(lnConfig); err != nil {
+				return fmt.Errorf("failed to remove %s listener on address %v: %w", lnConfig.Type, lnConfig.Address, err)
 			}
 		} else if count == +1 {
 			cipherList := service.NewCipherList()
-			listener, err := s.start(addr, cipherList)
+			listener, err := s.start(lnConfig, cipherList)
 			if err != nil {
 				return err
 			}
-			s.listeners[addr] = &ssListener{Closer: listener, cipherList: cipherList}
+			s.listeners[lnConfig] = &ssListener{Closer: listener, cipherList: cipherList}
 		}
 	}
-	for addr, ciphers := range addrCiphers {
-		listener, ok := s.listeners[addr]
+	for lnConfig, ciphers := range listenerCiphers {
+		listener, ok := s.listeners[lnConfig]
 		if !ok {
-			return fmt.Errorf("unable to find listener for address: %v", addr)
+			return fmt.Errorf("unable to find listener for address: %v", lnConfig.Address)
 		}
 		listener.cipherList.Update(ciphers)
 	}
@@ -227,8 +239,8 @@ func (s *SSServer) loadConfig(filename string) error {
 
 // Stop serving on all ports.
 func (s *SSServer) Stop() error {
-	for addr := range s.listeners {
-		if err := s.remove(addr); err != nil {
+	for lnConfig := range s.listeners {
+		if err := s.remove(lnConfig); err != nil {
 			return err
 		}
 	}
@@ -241,7 +253,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 		natTimeout:  natTimeout,
 		m:           sm,
 		replayCache: service.NewReplayCache(replayHistory),
-		listeners:   make(map[string]*ssListener),
+		listeners:   make(map[ListenerConfig]*ssListener),
 	}
 	err := server.loadConfig(filename)
 	if err != nil {

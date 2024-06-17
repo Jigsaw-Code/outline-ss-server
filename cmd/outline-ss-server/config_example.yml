@@ -4,6 +4,10 @@ services:
         address: "tcp://[::]:9000"
       - type: direct
         address: "udp://[::]:9000"
+      - type: proxy_protocol
+        address: "tcp://[::]:9010"
+      - type: proxy_protocol
+        address: "udp://[::]:9010"
     keys:
         - id: user-0
           cipher: chacha20-ietf-poly1305
