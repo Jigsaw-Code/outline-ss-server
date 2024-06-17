@@ -62,7 +62,7 @@ func init() {
 type ListenerConfig = Listener
 
 type ClientStreamListener interface {
-	Accept() (service.IClientStreamConn, error)
+	Accept() (service.ClientStreamConn, error)
 	Close() error
 }
 

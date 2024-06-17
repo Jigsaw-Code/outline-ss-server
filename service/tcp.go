@@ -192,7 +192,7 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 
 // TCPHandler is a Shadowsocks TCP service that can be started and stopped.
 type TCPHandler interface {
-	Handle(ctx context.Context, conn IClientStreamConn)
+	Handle(ctx context.Context, conn ClientStreamConn)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
 }
@@ -213,10 +213,10 @@ func ensureConnectionError(err error, fallbackStatus string, fallbackMsg string)
 	}
 }
 
-// IClientStreamConn wraps a [transport.StreamConn] and sets the client source of the connection.
+// ClientStreamConn wraps a [transport.StreamConn] and sets the client source of the connection.
 // This is useful for handling the PROXY protocol where the RemoteAddr() points to the
 // server/load balancer address and we need the perceived source of the connection.
-type IClientStreamConn interface {
+type ClientStreamConn interface {
 	transport.StreamConn
 	ClientAddr() net.Addr
 }
@@ -239,7 +239,7 @@ type StreamListener struct {
 }
 
 // Accept waits for and returns the next incoming connection.
-func (l *StreamListener) Accept() (IClientStreamConn, error) {
+func (l *StreamListener) Accept() (ClientStreamConn, error) {
 	c, err := l.Listener.Accept()
 	if err != nil {
 		return nil, err
@@ -256,7 +256,7 @@ type ProxyListener struct {
 
 // Accept waits for the next incoming connection, parses the client IP from the PROXY protocol
 // header, and adds it to the connection.
-func (l *ProxyListener) Accept() (IClientStreamConn, error) {
+func (l *ProxyListener) Accept() (ClientStreamConn, error) {
 	conn, err := l.StreamListener.Accept()
 	if err != nil {
 		return nil, err
@@ -273,16 +273,16 @@ func (l *ProxyListener) Accept() (IClientStreamConn, error) {
 	return &clientStreamConn{StreamConn: conn, clientAddr: h.SourceAddr}, nil
 }
 
-type StreamAccepter func() (IClientStreamConn, error)
+type StreamAccepter func() (ClientStreamConn, error)
 
 func WrapStreamAccepter[T transport.StreamConn](f func() (T, error)) StreamAccepter {
-	return func() (IClientStreamConn, error) {
+	return func() (ClientStreamConn, error) {
 		c, err := f()
 		return &clientStreamConn{StreamConn: c}, err
 	}
 }
 
-type StreamHandler func(ctx context.Context, conn IClientStreamConn)
+type StreamHandler func(ctx context.Context, conn ClientStreamConn)
 
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
@@ -316,7 +316,7 @@ func StreamServe(accept StreamAccepter, handle StreamHandler) {
 	}
 }
 
-func (h *tcpHandler) Handle(ctx context.Context, clientConn IClientStreamConn) {
+func (h *tcpHandler) Handle(ctx context.Context, clientConn ClientStreamConn) {
 	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.ClientAddr())
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
