@@ -275,7 +275,7 @@ func (l *ProxyListener) Accept() (ClientStreamConn, error) {
 
 type StreamAccepter func() (ClientStreamConn, error)
 
-func WrapStreamAccepter[T transport.StreamConn](f func() (T, error)) StreamAccepter {
+func WrapStreamListener[T transport.StreamConn](f func() (T, error)) StreamAccepter {
 	return func() (ClientStreamConn, error) {
 		c, err := f()
 		return &clientStreamConn{StreamConn: c}, err

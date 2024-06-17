@@ -284,7 +284,7 @@ func TestProbeRandom(t *testing.T) {
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -362,7 +362,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -397,7 +397,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -433,7 +433,7 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -475,7 +475,7 @@ func TestProbeServerBytesModified(t *testing.T) {
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -528,7 +528,7 @@ func TestReplayDefense(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -598,7 +598,7 @@ func TestReverseReplayDefense(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -657,7 +657,7 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 
 	done := make(chan struct{})
 	go func() {
-		StreamServe(WrapStreamAccepter(listener.AcceptTCP), handler.Handle)
+		StreamServe(WrapStreamListener(listener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -717,14 +717,14 @@ func TestStreamServeEarlyClose(t *testing.T) {
 	err = tcpListener.Close()
 	require.NoError(t, err)
 	// This should return quickly, without timing out or calling the handler.
-	StreamServe(WrapStreamAccepter(tcpListener.AcceptTCP), nil)
+	StreamServe(WrapStreamListener(tcpListener.AcceptTCP), nil)
 }
 
 // Makes sure the TCP listener returns [io.ErrClosed] on Close().
 func TestClosedTCPListenerError(t *testing.T) {
 	tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	require.NoError(t, err)
-	accept := WrapStreamAccepter(tcpListener.AcceptTCP)
+	accept := WrapStreamListener(tcpListener.AcceptTCP)
 	err = tcpListener.Close()
 	require.NoError(t, err)
 	_, err = accept()
