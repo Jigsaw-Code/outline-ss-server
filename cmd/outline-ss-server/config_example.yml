@@ -1,5 +1,7 @@
 services:
   - listeners:
+      # TODO(sbruens): Allow a string-based listener config, as a convenient short-form
+      # to create a direct listener, e.g. `- tcp://[::]:9000`.
       - type: direct
         address: "tcp://[::]:9000"
       - type: direct
