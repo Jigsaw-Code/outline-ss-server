@@ -239,7 +239,7 @@ func (m *probeTestMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
 func (m *probeTestMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
 
-func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
 	m.mu.Lock()
 	m.probeData = append(m.probeData, clientProxyBytes)
 	m.probeStatus = append(m.probeStatus, status)

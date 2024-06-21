@@ -68,7 +68,7 @@ func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics.AddUDPPacketFromTarget(ipInfo, "3", "OK", 10, 20)
 	ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
 	ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
-	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
+	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", "127.0.0.1:443", proxyMetrics.ClientProxy)
 	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
 	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
 }
@@ -168,7 +168,7 @@ func BenchmarkProbe(b *testing.B) {
 	data := metrics.ProxyMetrics{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddTCPProbe(status, drainResult, port, data.ClientProxy)
+		ssMetrics.AddTCPProbe(status, drainResult, "127.0.0.1:12345", data.ClientProxy)
 	}
 }
 
