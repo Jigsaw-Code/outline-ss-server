@@ -164,7 +164,6 @@ func BenchmarkProbe(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
 	status := "ERR_REPLAY"
 	drainResult := "other"
-	port := 12345
 	data := metrics.ProxyMetrics{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
