@@ -342,8 +342,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
-		port := outerConn.LocalAddr().(*net.TCPAddr).Port
-		h.absorbProbe(outerConn, port, authErr.Status, proxyMetrics)
+		h.absorbProbe(outerConn, authErr.Status, proxyMetrics)
 		return id, authErr
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
@@ -371,7 +370,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, port int, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
