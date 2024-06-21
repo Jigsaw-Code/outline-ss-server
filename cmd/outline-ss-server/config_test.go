@@ -21,6 +21,60 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateConfigFails(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{
+			name: "WithoutListeners",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Keys: []KeyConfig{
+							KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "WithoutKeys",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "WithUnknownListenerType",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: "foo", Address: "tcp://[::]:9000"},
+						},
+						Keys: []KeyConfig{
+							KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cfg.Validate()
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestReadConfig(t *testing.T) {
 	config, err := readConfig("./config_example.yml")
 

@@ -58,6 +58,23 @@ type Config struct {
 	Keys []LegacyKeyServiceConfig
 }
 
+// Validate checks that the config is valid.
+func (c *Config) Validate() error {
+	for _, serviceConfig := range c.Services {
+		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
+			return errors.New("must specify at least 1 listener and 1 key per service")
+		}
+
+		for _, listener := range serviceConfig.Listeners {
+			// TODO: Support more listener types.
+			if listener.Type != listenerTypeDirect {
+				return fmt.Errorf("unsupported listener type: %s", listener.Type)
+			}
+		}
+	}
+	return nil
+}
+
 // readConfig attempts to read a config from a filename and parses it as a [Config].
 func readConfig(filename string) (*Config, error) {
 	config := Config{}

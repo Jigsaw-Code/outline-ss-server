@@ -133,7 +133,9 @@ func (s *SSServer) loadConfig(filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
-
+	if err := config.Validate(); err != nil {
+		return err
+	}
 	uniqueCiphers := 0
 	addrChanges := make(map[string]int)
 	addrCiphers := make(map[string]*list.List) // Values are *List of *CipherEntry.
@@ -158,10 +160,6 @@ func (s *SSServer) loadConfig(filename string) error {
 	}
 
 	for _, serviceConfig := range config.Services {
-		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
-			return fmt.Errorf("must specify at least 1 listener and 1 key per service")
-		}
-
 		ciphers := list.New()
 		type cipherKey struct {
 			cipher string
@@ -186,14 +184,8 @@ func (s *SSServer) loadConfig(filename string) error {
 		uniqueCiphers += ciphers.Len()
 
 		for _, listener := range serviceConfig.Listeners {
-			switch t := listener.Type; t {
-			// TODO: Support more listener types.
-			case listenerTypeDirect:
-				addrChanges[listener.Address] = 1
-				addrCiphers[listener.Address] = ciphers
-			default:
-				return fmt.Errorf("unsupported listener type: %s", t)
-			}
+			addrChanges[listener.Address] = 1
+			addrCiphers[listener.Address] = ciphers
 		}
 	}
 	for listener := range s.listeners {
@@ -245,7 +237,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 	}
 	err := server.loadConfig(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed configure server: %w", err)
+		return nil, fmt.Errorf("failed to configure server: %w", err)
 	}
 	sigHup := make(chan os.Signal, 1)
 	signal.Notify(sigHup, syscall.SIGHUP)
