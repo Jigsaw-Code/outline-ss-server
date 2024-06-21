@@ -25,37 +25,37 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type Service struct {
-	Listeners []Listener
-	Keys      []Key
+type ServiceConfig struct {
+	Listeners []ListenerConfig
+	Keys      []KeyConfig
 }
 
 type ListenerType string
 
 const listenerTypeDirect ListenerType = "direct"
 
-type Listener struct {
+type ListenerConfig struct {
 	Type    ListenerType
 	Address string
 }
 
-type Key struct {
+type KeyConfig struct {
 	ID     string
 	Cipher string
 	Secret string
 }
 
-type LegacyKeyService struct {
-	Key  `yaml:",inline"`
-	Port int
+type LegacyKeyServiceConfig struct {
+	KeyConfig `yaml:",inline"`
+	Port      int
 }
 
 type Config struct {
-	Services []Service
+	Services []ServiceConfig
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
 	// using the newer `services` format.
-	Keys []LegacyKeyService
+	Keys []LegacyKeyServiceConfig
 }
 
 // readConfig attempts to read a config from a filename and parses it as a [Config].
