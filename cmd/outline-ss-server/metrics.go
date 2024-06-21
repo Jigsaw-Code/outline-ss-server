@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"strconv"
 	"sync"
 	"time"
 
@@ -357,8 +356,8 @@ func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string
 	}
 }
 
-func (m *outlineMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
-	m.tcpProbes.WithLabelValues(strconv.Itoa(port), status, drainResult).Observe(float64(clientProxyBytes))
+func (m *outlineMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
+	m.tcpProbes.WithLabelValues(listenerId, status, drainResult).Observe(float64(clientProxyBytes))
 }
 
 func (m *outlineMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {

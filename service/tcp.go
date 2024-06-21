@@ -44,7 +44,7 @@ type TCPMetrics interface {
 	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
 	AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string)
 	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
-	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
+	AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64)
 }
 
 func remoteIP(conn net.Conn) netip.Addr {
@@ -162,7 +162,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 }
 
 type tcpHandler struct {
-	port         int
+	listenerId   string
 	m            TCPMetrics
 	readTimeout  time.Duration
 	authenticate StreamAuthenticateFunc
@@ -170,8 +170,9 @@ type tcpHandler struct {
 }
 
 // NewTCPService creates a TCPService
-func NewTCPHandler(authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
+func NewTCPHandler(listenerId string, authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
+		listenerId:   listenerId,
 		m:            m,
 		readTimeout:  timeout,
 		authenticate: authenticate,
@@ -375,7 +376,7 @@ func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, port int, status stri
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	h.m.AddTCPProbe(status, drainResult, h.port, proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, h.listenerId, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {
@@ -404,6 +405,6 @@ func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
 func (m *NoOpTCPMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
-func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
 }
 func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

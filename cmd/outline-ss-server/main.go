@@ -72,12 +72,12 @@ type SSServer struct {
 	listeners   map[string]*ssListener
 }
 
-func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) error {
+func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.CipherList) error {
 	switch ln := listener.(type) {
 	case net.Listener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
+		tcpHandler := service.NewTCPHandler(addr, authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -105,7 +105,7 @@ func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer,
 	}
 	logger.Infof("Shadowsocks service listening on %v", addr)
 
-	err = s.serve(listener, cipherList)
+	err = s.serve(addr, listener, cipherList)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serve on listener %v: %w", listener, err)
 	}
