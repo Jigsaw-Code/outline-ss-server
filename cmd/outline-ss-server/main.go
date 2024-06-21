@@ -138,14 +138,14 @@ func (s *SSServer) loadConfig(filename string) error {
 	addrChanges := make(map[string]int)
 	addrCiphers := make(map[string]*list.List) // Values are *List of *CipherEntry.
 
-	for _, legacyKeyConfig := range config.Keys {
-		cryptoKey, err := shadowsocks.NewEncryptionKey(legacyKeyConfig.Cipher, legacyKeyConfig.Secret)
+	for _, legacyKeyServiceConfig := range config.Keys {
+		cryptoKey, err := shadowsocks.NewEncryptionKey(legacyKeyServiceConfig.Cipher, legacyKeyServiceConfig.Secret)
 		if err != nil {
-			return fmt.Errorf("failed to create encyption key for key %v: %w", legacyKeyConfig.ID, err)
+			return fmt.Errorf("failed to create encyption key for key %v: %w", legacyKeyServiceConfig.ID, err)
 		}
-		entry := service.MakeCipherEntry(legacyKeyConfig.ID, cryptoKey, legacyKeyConfig.Secret)
+		entry := service.MakeCipherEntry(legacyKeyServiceConfig.ID, cryptoKey, legacyKeyServiceConfig.Secret)
 		for _, ln := range []string{"tcp", "udp"} {
-			addr := fmt.Sprintf("%s://[::]:%d", ln, legacyKeyConfig.Port)
+			addr := fmt.Sprintf("%s://[::]:%d", ln, legacyKeyServiceConfig.Port)
 			addrChanges[addr] = 1
 			ciphers, ok := addrCiphers[addr]
 			if !ok {
