@@ -96,7 +96,7 @@ func validateListener(u *url.URL) error {
 //
 // Example addresses:
 //
-//	tcp4://127.0.0.1:8000
+//	tcp://127.0.0.1:8000
 //	udp://127.0.0.1:9000
 func newListener(addr string) (io.Closer, error) {
 	u, err := url.Parse(addr)
@@ -105,12 +105,12 @@ func newListener(addr string) (io.Closer, error) {
 	}
 
 	switch u.Scheme {
-	case "tcp", "tcp4", "tcp6":
+	case "tcp":
 		if err := validateListener(u); err != nil {
 			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
 		}
 		return net.Listen(u.Scheme, u.Host)
-	case "udp", "udp4", "udp6":
+	case "udp":
 		if err := validateListener(u); err != nil {
 			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
 		}
