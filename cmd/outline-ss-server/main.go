@@ -69,7 +69,7 @@ type SSServer struct {
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	listeners   map[string]*ssListener
+	listeners   map[string]*ssListener // Keys are addresses, e.g. `tcp://[::]:9000`
 }
 
 func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.CipherList) error {
