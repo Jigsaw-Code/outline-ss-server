@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -45,15 +46,15 @@ func (na *NetworkAddr) JoinHostPort() string {
 }
 
 // Listen creates a new listener for the [NetworkAddr].
-func (na *NetworkAddr) Listen() (io.Closer, error) {
+func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (io.Closer, error) {
 	address := na.JoinHostPort()
 
 	switch na.network {
 
 	case "tcp":
-		return net.Listen(na.network, address)
+		return config.Listen(ctx, na.network, address)
 	case "udp":
-		return net.ListenPacket(na.network, address)
+		return config.ListenPacket(ctx, na.network, address)
 	default:
 		return nil, fmt.Errorf("unsupported network: %s", na.network)
 	}

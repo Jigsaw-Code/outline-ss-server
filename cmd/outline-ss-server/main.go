@@ -16,6 +16,7 @@ package main
 
 import (
 	"container/list"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -79,13 +80,8 @@ func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.Cip
 		// TODO: Register initial data metrics at zero.
 		tcpHandler := service.NewTCPHandler(addr, authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
-			conn, err := ln.Accept()
-			if err != nil {
-				return nil, err
-			}
-			c := conn.(*net.TCPConn)
-			c.SetKeepAlive(true)
-			return c, err
+			c, err := ln.Accept()
+			return c.(transport.StreamConn), err
 		}
 		go service.StreamServe(accept, tcpHandler.Handle)
 	case net.PacketConn:
@@ -102,7 +98,7 @@ func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer,
 	if err != nil {
 		return nil, fmt.Errorf("error parsing listener address `%s`: %v", addr, err)
 	}
-	listener, err := listenAddr.Listen()
+	listener, err := listenAddr.Listen(context.TODO(), net.ListenConfig{KeepAlive: 0})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
