@@ -65,10 +65,23 @@ func (c *Config) Validate() error {
 			return errors.New("must specify at least 1 listener and 1 key per service")
 		}
 
-		for _, listener := range serviceConfig.Listeners {
+		for _, listenerConfig := range serviceConfig.Listeners {
 			// TODO: Support more listener types.
-			if listener.Type != listenerTypeDirect {
-				return fmt.Errorf("unsupported listener type: %s", listener.Type)
+			if listenerConfig.Type != listenerTypeDirect {
+				return fmt.Errorf("unsupported listener type: %s", listenerConfig.Type)
+			}
+
+			u, err := url.Parse(listenerConfig.Address)
+			if err != nil {
+				return err
+			}
+			switch u.Scheme {
+			case "tcp", "udp":
+				if err := validateListenerAddress(u); err != nil {
+					return fmt.Errorf("invalid listener address `%s`: %v", u, err)
+				}
+			default:
+				return fmt.Errorf("unsupported protocol: %s", u.Scheme)
 			}
 		}
 	}
@@ -89,8 +102,8 @@ func readConfig(filename string) (*Config, error) {
 	return &config, nil
 }
 
-// validateListener asserts that a listener URI conforms to the expected format.
-func validateListener(u *url.URL) error {
+// validateListenerAddress asserts that a listener URI conforms to the expected format.
+func validateListenerAddress(u *url.URL) error {
 	if u.Opaque != "" {
 		return errors.New("URI cannot have an opaque part")
 	}
@@ -123,14 +136,8 @@ func newListener(addr string) (io.Closer, error) {
 
 	switch u.Scheme {
 	case "tcp":
-		if err := validateListener(u); err != nil {
-			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
-		}
 		return net.Listen(u.Scheme, u.Host)
 	case "udp":
-		if err := validateListener(u); err != nil {
-			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
-		}
 		return net.ListenPacket(u.Scheme, u.Host)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)

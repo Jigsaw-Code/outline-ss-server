@@ -65,6 +65,21 @@ func TestValidateConfigFails(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "WithInvalidListenerAddress",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeDirect, Address: "tcp://[::]:9000/path"},
+						},
+						Keys: []KeyConfig{
+							KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

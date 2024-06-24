@@ -134,7 +134,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 	if err := config.Validate(); err != nil {
-		return err
+		return fmt.Errorf("failed to validate config: %w", err)
 	}
 	uniqueCiphers := 0
 	addrChanges := make(map[string]int)
