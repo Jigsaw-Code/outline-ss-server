@@ -92,11 +92,7 @@ func (s *SSServer) startPort(portNum int) error {
 	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m)
 	s.ports[portNum] = port
 	accept := func() (transport.StreamConn, error) {
-		conn, err := listener.AcceptTCP()
-		if err == nil {
-			conn.SetKeepAlive(true)
-		}
-		return conn, err
+		return listener.AcceptTCP()
 	}
 	go service.StreamServe(accept, tcpHandler.Handle)
 	go packetHandler.Handle(port.packetConn)
