@@ -44,7 +44,7 @@ func TestValidateConfigFails(t *testing.T) {
 				Services: []ServiceConfig{
 					ServiceConfig{
 						Listeners: []ListenerConfig{
-							ListenerConfig{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
+							ListenerConfig{Type: listenerTypeDirect, Address: "tcp/[::]:9000"},
 						},
 					},
 				},
@@ -56,7 +56,7 @@ func TestValidateConfigFails(t *testing.T) {
 				Services: []ServiceConfig{
 					ServiceConfig{
 						Listeners: []ListenerConfig{
-							ListenerConfig{Type: "foo", Address: "tcp://[::]:9000"},
+							ListenerConfig{Type: "foo", Address: "tcp/[::]:9000"},
 						},
 						Keys: []KeyConfig{
 							KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
@@ -71,7 +71,7 @@ func TestValidateConfigFails(t *testing.T) {
 				Services: []ServiceConfig{
 					ServiceConfig{
 						Listeners: []ListenerConfig{
-							ListenerConfig{Type: listenerTypeDirect, Address: "tcp://[::]:9000/path"},
+							ListenerConfig{Type: listenerTypeDirect, Address: "tcp//[::]:9000"},
 						},
 						Keys: []KeyConfig{
 							KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
@@ -98,8 +98,8 @@ func TestReadConfig(t *testing.T) {
 		Services: []ServiceConfig{
 			ServiceConfig{
 				Listeners: []ListenerConfig{
-					ListenerConfig{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
-					ListenerConfig{Type: listenerTypeDirect, Address: "udp://[::]:9000"},
+					ListenerConfig{Type: listenerTypeDirect, Address: "tcp/[::]:9000"},
+					ListenerConfig{Type: listenerTypeDirect, Address: "udp/[::]:9000"},
 				},
 				Keys: []KeyConfig{
 					KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
@@ -108,8 +108,8 @@ func TestReadConfig(t *testing.T) {
 			},
 			ServiceConfig{
 				Listeners: []ListenerConfig{
-					ListenerConfig{Type: listenerTypeDirect, Address: "tcp://[::]:9001"},
-					ListenerConfig{Type: listenerTypeDirect, Address: "udp://[::]:9001"},
+					ListenerConfig{Type: listenerTypeDirect, Address: "tcp/[::]:9001"},
+					ListenerConfig{Type: listenerTypeDirect, Address: "udp/[::]:9001"},
 				},
 				Keys: []KeyConfig{
 					KeyConfig{"user-2", "chacha20-ietf-poly1305", "Secret2"},

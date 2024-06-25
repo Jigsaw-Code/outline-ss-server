@@ -69,7 +69,7 @@ type SSServer struct {
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	listeners   map[string]*ssListener // Keys are addresses, e.g. `tcp://[::]:9000`
+	listeners   map[string]*ssListener // Keys are addresses, e.g. `tcp/[::]:9000`
 }
 
 func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.CipherList) error {
@@ -98,7 +98,11 @@ func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.Cip
 }
 
 func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer, error) {
-	listener, err := newListener(addr)
+	listenAddr, err := ParseNetworkAddr(addr)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing listener address `%s`: %v", addr, err)
+	}
+	listener, err := listenAddr.Listen()
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
@@ -147,7 +151,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 		entry := service.MakeCipherEntry(legacyKeyServiceConfig.ID, cryptoKey, legacyKeyServiceConfig.Secret)
 		for _, ln := range []string{"tcp", "udp"} {
-			addr := fmt.Sprintf("%s://[::]:%d", ln, legacyKeyServiceConfig.Port)
+			addr := fmt.Sprintf("%s/[::]:%d", ln, legacyKeyServiceConfig.Port)
 			addrChanges[addr] = 1
 			ciphers, ok := addrCiphers[addr]
 			if !ok {

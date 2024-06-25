@@ -17,9 +17,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/url"
 	"os"
 
 	"gopkg.in/yaml.v2"
@@ -71,17 +68,12 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("unsupported listener type: %s", listenerConfig.Type)
 			}
 
-			u, err := url.Parse(listenerConfig.Address)
+			network, _, _, err := SplitNetworkAddr(listenerConfig.Address)
 			if err != nil {
-				return err
+				return fmt.Errorf("invalid listener address `%s`: %v", listenerConfig.Address, err)
 			}
-			switch u.Scheme {
-			case "tcp", "udp":
-				if err := validateListenerAddress(u); err != nil {
-					return fmt.Errorf("invalid listener address `%s`: %v", u, err)
-				}
-			default:
-				return fmt.Errorf("unsupported protocol: %s", u.Scheme)
+			if network != "tcp" && network != "udp" {
+				return fmt.Errorf("unsupported network: %s", network)
 			}
 		}
 	}
@@ -100,46 +92,4 @@ func readConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 	return &config, nil
-}
-
-// validateListenerAddress asserts that a listener URI conforms to the expected format.
-func validateListenerAddress(u *url.URL) error {
-	if u.Opaque != "" {
-		return errors.New("URI cannot have an opaque part")
-	}
-	if u.User != nil {
-		return errors.New("URI cannot have an userdata part")
-	}
-	if u.RawQuery != "" || u.ForceQuery {
-		return errors.New("URI cannot have a query part")
-	}
-	if u.Fragment != "" {
-		return errors.New("URI cannot have a fragement")
-	}
-	if u.Path != "" && u.Path != "/" {
-		return errors.New("URI path not allowed")
-	}
-	return nil
-}
-
-// newListener creates a new listener from a URL-style address specification.
-//
-// Example addresses:
-//
-//	tcp://127.0.0.1:8000
-//	udp://127.0.0.1:9000
-func newListener(addr string) (io.Closer, error) {
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	switch u.Scheme {
-	case "tcp":
-		return net.Listen(u.Scheme, u.Host)
-	case "udp":
-		return net.ListenPacket(u.Scheme, u.Host)
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)
-	}
 }
