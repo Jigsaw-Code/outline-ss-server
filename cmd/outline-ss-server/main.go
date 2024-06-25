@@ -61,24 +61,19 @@ func init() {
 	logger = logging.MustGetLogger("")
 }
 
-type ssListener struct {
-	io.Closer
-	cipherList service.CipherList
-}
-
 type SSServer struct {
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	listeners   map[string]*ssListener // Keys are addresses, e.g. `tcp/[::]:9000`
+	listeners   []io.Closer
 }
 
-func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.CipherList) error {
+func (s *SSServer) serve(addr NetworkAddr, listener io.Closer, cipherList service.CipherList) error {
 	switch ln := listener.(type) {
 	case net.Listener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(addr, authFunc, s.m, tcpReadTimeout)
+		tcpHandler := service.NewTCPHandler(addr.String(), authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
 			c, err := ln.Accept()
 			return c.(transport.StreamConn), err
@@ -93,41 +88,6 @@ func (s *SSServer) serve(addr string, listener io.Closer, cipherList service.Cip
 	return nil
 }
 
-func (s *SSServer) start(addr string, cipherList service.CipherList) (io.Closer, error) {
-	listenAddr, err := ParseNetworkAddr(addr)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing listener address `%s`: %v", addr, err)
-	}
-	listener, err := listenAddr.Listen(context.TODO(), net.ListenConfig{KeepAlive: 0})
-	if err != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return nil, fmt.Errorf("Shadowsocks service failed to start on address %v: %w", addr, err)
-	}
-	logger.Infof("Shadowsocks service listening on %v", addr)
-
-	err = s.serve(addr, listener, cipherList)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serve on listener %v: %w", listener, err)
-	}
-
-	return listener, nil
-}
-
-func (s *SSServer) remove(addr string) error {
-	listener, ok := s.listeners[addr]
-	if !ok {
-		return fmt.Errorf("address %v doesn't exist", addr)
-	}
-	err := listener.Close()
-	delete(s.listeners, addr)
-	if err != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks service on address %v failed to stop: %w", addr, err)
-	}
-	logger.Infof("Shadowsocks service on address %v stopped", addr)
-	return nil
-}
-
 func (s *SSServer) loadConfig(filename string) error {
 	config, err := readConfig(filename)
 	if err != nil {
@@ -137,8 +97,9 @@ func (s *SSServer) loadConfig(filename string) error {
 		return fmt.Errorf("failed to validate config: %w", err)
 	}
 	uniqueCiphers := 0
-	addrChanges := make(map[string]int)
-	addrCiphers := make(map[string]*list.List) // Values are *List of *CipherEntry.
+	// TODO: Clone existing listeners so we can close them after starting the new ones.
+	addrs := make([]NetworkAddr, 0)
+	addrCiphers := make(map[NetworkAddr]*list.List) // Values are *List of *CipherEntry.
 
 	for _, legacyKeyServiceConfig := range config.Keys {
 		cryptoKey, err := shadowsocks.NewEncryptionKey(legacyKeyServiceConfig.Cipher, legacyKeyServiceConfig.Secret)
@@ -146,9 +107,13 @@ func (s *SSServer) loadConfig(filename string) error {
 			return fmt.Errorf("failed to create encyption key for key %v: %w", legacyKeyServiceConfig.ID, err)
 		}
 		entry := service.MakeCipherEntry(legacyKeyServiceConfig.ID, cryptoKey, legacyKeyServiceConfig.Secret)
-		for _, ln := range []string{"tcp", "udp"} {
-			addr := fmt.Sprintf("%s/[::]:%d", ln, legacyKeyServiceConfig.Port)
-			addrChanges[addr] = 1
+		for _, network := range []string{"tcp", "udp"} {
+			addr := NetworkAddr{
+				network: network,
+				Host:    "::",
+				Port:    uint(legacyKeyServiceConfig.Port),
+			}
+			addrs = append(addrs, addr)
 			ciphers, ok := addrCiphers[addr]
 			if !ok {
 				ciphers = list.New()
@@ -168,8 +133,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		existingCiphers := make(map[cipherKey]bool)
 		for _, keyConfig := range serviceConfig.Keys {
 			key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
-			_, ok := existingCiphers[key]
-			if ok {
+			if _, exists := existingCiphers[key]; exists {
 				logger.Debugf("encryption key already exists for ID=`%v`. Skipping.", keyConfig.ID)
 				continue
 			}
@@ -184,45 +148,57 @@ func (s *SSServer) loadConfig(filename string) error {
 		uniqueCiphers += ciphers.Len()
 
 		for _, listener := range serviceConfig.Listeners {
-			addrChanges[listener.Address] = 1
-			addrCiphers[listener.Address] = ciphers
-		}
-	}
-	for listener := range s.listeners {
-		addrChanges[listener] = addrChanges[listener] - 1
-	}
-	for addr, count := range addrChanges {
-		if count == -1 {
-			if err := s.remove(addr); err != nil {
-				return fmt.Errorf("failed to remove address %v: %w", addr, err)
-			}
-		} else if count == +1 {
-			cipherList := service.NewCipherList()
-			listener, err := s.start(addr, cipherList)
+			addr, err := ParseNetworkAddr(listener.Address)
 			if err != nil {
-				return err
+				return fmt.Errorf("error parsing listener address `%s`: %v", listener.Address, err)
 			}
-			s.listeners[addr] = &ssListener{Closer: listener, cipherList: cipherList}
+			addrs = append(addrs, addr)
+			addrCiphers[addr] = ciphers
 		}
 	}
-	for addr, ciphers := range addrCiphers {
-		listener, ok := s.listeners[addr]
+
+	for _, addr := range addrs {
+		cipherList := service.NewCipherList()
+		ciphers, ok := addrCiphers[addr]
 		if !ok {
-			return fmt.Errorf("unable to find listener for address: %v", addr)
+			return fmt.Errorf("unable to find ciphers for address: %v", addr)
 		}
-		listener.cipherList.Update(ciphers)
+		cipherList.Update(ciphers)
+
+		listener, err := addr.Listen(context.TODO(), net.ListenConfig{KeepAlive: 0})
+		if err != nil {
+			//lint:ignore ST1005 Shadowsocks is capitalized.
+			return fmt.Errorf("Shadowsocks %s service failed to start on address %s: %w", addr.Network(), addr.String(), err)
+		}
+		logger.Infof("Shadowsocks %s service listening on %s", addr.Network(), addr.String())
+		s.listeners = append(s.listeners, listener)
+
+		if err = s.serve(addr, listener, cipherList); err != nil {
+			return fmt.Errorf("failed to serve on listener %v: %w", listener, err)
+		}
 	}
 	logger.Infof("Loaded %v access keys over %v listeners", uniqueCiphers, len(s.listeners))
 	s.m.SetNumAccessKeys(uniqueCiphers, len(s.listeners))
 	return nil
 }
 
-// Stop serving on all ports.
+// Stop serving on all listeners.
 func (s *SSServer) Stop() error {
-	for addr := range s.listeners {
-		if err := s.remove(addr); err != nil {
-			return err
+	for _, listener := range s.listeners {
+		var addr net.Addr
+		switch ln := listener.(type) {
+		case net.Listener:
+			addr = ln.Addr()
+		case net.PacketConn:
+			addr = ln.LocalAddr()
+		default:
+			return fmt.Errorf("unknown listener type: %v", ln)
 		}
+		if err := listener.Close(); err != nil {
+			//lint:ignore ST1005 Shadowsocks is capitalized.
+			return fmt.Errorf("Shadowsocks service on address %s %s failed to stop: %w", addr.Network(), addr.String(), err)
+		}
+		logger.Infof("Shadowsocks service on address %s %s stopped", addr.Network(), addr.String())
 	}
 	return nil
 }
@@ -233,7 +209,7 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 		natTimeout:  natTimeout,
 		m:           sm,
 		replayCache: service.NewReplayCache(replayHistory),
-		listeners:   make(map[string]*ssListener),
+		listeners:   nil,
 	}
 	err := server.loadConfig(filename)
 	if err != nil {
