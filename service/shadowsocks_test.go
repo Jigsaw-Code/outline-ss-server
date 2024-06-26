@@ -29,30 +29,15 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 	b.StopTimer()
 	b.ResetTimer()
 
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	if err != nil {
-		b.Fatalf("ListenTCP failed: %v", err)
-	}
-
+	clientIP := netip.MustParseAddr("127.0.0.1")
 	cipherList, err := MakeTestCiphers(makeTestSecrets(100))
 	if err != nil {
 		b.Fatal(err)
 	}
 	testPayload := makeTestPayload(50)
 	for n := 0; n < b.N; n++ {
-		go func() {
-			conn, err := net.Dial("tcp", listener.Addr().String())
-			require.NoErrorf(b, err, "Failed to dial %v: %v", listener.Addr(), err)
-			conn.Write(testPayload)
-			conn.Close()
-		}()
-		clientConn, err := listener.AcceptTCP()
-		if err != nil {
-			b.Fatalf("AcceptTCP failed: %v", err)
-		}
-		clientIP := clientConn.RemoteAddr().(*net.TCPAddr).AddrPort().Addr()
 		b.StartTimer()
-		findAccessKey(clientConn, clientIP, 2, cipherList)
+		findAccessKey(clientIP, 2, testPayload, cipherList, NewDebugLogger("TCP"))
 		b.StopTimer()
 	}
 }
@@ -73,6 +58,7 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 	for cipherNumber, element := range snapshot {
 		cipherEntries[cipherNumber] = element.Value.(*CipherEntry)
 	}
+	testPayload := makeTestPayload(50)
 	for n := 0; n < b.N; n++ {
 		cipherNumber := byte(n % numCiphers)
 		reader, writer := io.Pipe()
@@ -82,11 +68,85 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 		cipher := cipherEntries[cipherNumber].CryptoKey
 		go shadowsocks.NewWriter(writer, cipher).Write(makeTestPayload(50))
 		b.StartTimer()
-		_, _, _, _, err := findAccessKey(&c, clientIP, 2, cipherList)
+		_, _, _, err := findAccessKey(clientIP, 2, testPayload, cipherList, NewDebugLogger("TCP"))
 		b.StopTimer()
 		if err != nil {
 			b.Error(err)
 		}
 		c.Close()
+	}
+}
+
+// Simulates receiving invalid UDP packets on a server with 100 ciphers.
+func BenchmarkUDPUnpackFail(b *testing.B) {
+	cipherList, err := MakeTestCiphers(makeTestSecrets(100))
+	if err != nil {
+		b.Fatal(err)
+	}
+	testPayload := makeTestPayload(50)
+	testIP := netip.MustParseAddr("192.0.2.1")
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		findAccessKey(testIP, serverUDPBufferSize, testPayload, cipherList, NewDebugLogger("UDP"))
+	}
+}
+
+// Simulates receiving valid UDP packets from 100 different users, each with
+// their own cipher and IP address.
+func BenchmarkUDPUnpackRepeat(b *testing.B) {
+	const numCiphers = 100 // Must be <256
+	cipherList, err := MakeTestCiphers(makeTestSecrets(numCiphers))
+	if err != nil {
+		b.Fatal(err)
+	}
+	packets := [numCiphers][]byte{}
+	ips := [numCiphers]netip.Addr{}
+	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
+	for i, element := range snapshot {
+		packets[i] = make([]byte, 0, serverUDPBufferSize)
+		plaintext := makeTestPayload(50)
+		packets[i], err = shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, element.Value.(*CipherEntry).CryptoKey)
+		if err != nil {
+			b.Error(err)
+		}
+		ips[i] = netip.AddrFrom4([4]byte{192, 0, 2, byte(i)})
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		cipherNumber := n % numCiphers
+		ip := ips[cipherNumber]
+		packet := packets[cipherNumber]
+		_, _, _, err := findAccessKey(ip, serverUDPBufferSize, packet, cipherList, NewDebugLogger("UDP"))
+		if err != nil {
+			b.Error(err)
+		}
+	}
+}
+
+// Simulates receiving valid UDP packets from 100 different IP addresses,
+// all using the same cipher.
+func BenchmarkUDPUnpackSharedKey(b *testing.B) {
+	cipherList, err := MakeTestCiphers(makeTestSecrets(1)) // One widely shared key
+	if err != nil {
+		b.Fatal(err)
+	}
+	plaintext := makeTestPayload(50)
+	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
+	cryptoKey := snapshot[0].Value.(*CipherEntry).CryptoKey
+	packet, err := shadowsocks.Pack(make([]byte, serverUDPBufferSize), plaintext, cryptoKey)
+	require.Nil(b, err)
+
+	const numIPs = 100 // Must be <256
+	ips := [numIPs]netip.Addr{}
+	for i := 0; i < numIPs; i++ {
+		ips[i] = netip.AddrFrom4([4]byte{192, 0, 2, byte(i)})
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		ip := ips[n%numIPs]
+		_, _, _, err := findAccessKey(ip, serverUDPBufferSize, packet, cipherList, NewDebugLogger("UDP"))
+		if err != nil {
+			b.Error(err)
+		}
 	}
 }

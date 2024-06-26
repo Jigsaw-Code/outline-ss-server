@@ -15,8 +15,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -29,7 +31,6 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -59,15 +60,6 @@ func remoteIP(conn net.Conn) netip.Addr {
 	return netip.Addr{}
 }
 
-// Wrapper for logger.Debugf during TCP access key searches.
-func debugTCP(cipherID, template string, val interface{}) {
-	// This is an optimization to reduce unnecessary allocations due to an interaction
-	// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
-	if logger.IsEnabledFor(logging.DEBUG) {
-		logger.Debugf("TCP(%s): "+template, cipherID, val)
-	}
-}
-
 type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
 
 // ShadowsocksTCPMetrics is used to report Shadowsocks metrics on TCP connections.
@@ -76,16 +68,29 @@ type ShadowsocksTCPMetrics interface {
 	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
 }
 
+// bytesForKeyFinding is the number of bytes to read for finding the AccessKey.
+// Is must satisfy provided >= bytesForKeyFinding >= required for every cipher in the list.
+// provided = saltSize + 2 + 2 * cipher.TagSize, the minimum number of bytes we will see in a valid connection
+// required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
+const bytesForKeyFinding = 50
+
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+		firstBytes := make([]byte, bytesForKeyFinding)
+		if n, err := io.ReadFull(clientConn, firstBytes); err != nil {
+			metrics.AddTCPCipherSearch(false, 0)
+			return "", clientConn, onet.NewConnectionError("ERR_CIPHER", fmt.Sprintf("Reading header failed after %d bytes", n), err)
+		}
+
 		// Find the cipher and acess key id.
-		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), 2, ciphers)
+		bufferSize := 2
+		cipherEntry, _, timeToCipher, keyErr := findAccessKey(remoteIP(clientConn), bufferSize, firstBytes, ciphers, NewDebugLogger("TCP"))
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
-			const status = "ERR_CIPHER"
-			return "", nil, onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
+			// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
+			return "", clientConn, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
 		}
 		var id string
 		if cipherEntry != nil {
@@ -93,6 +98,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 		}
 
 		// Check if the connection is a replay.
+		clientSalt := firstBytes[:cipherEntry.CryptoKey.SaltSize()]
 		isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
 		// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
 		if isServerSalt || !replayCache.Add(cipherEntry.ID, clientSalt) {
@@ -105,6 +111,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 			return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
 		}
 
+		clientReader := io.MultiReader(bytes.NewReader(firstBytes), clientConn)
 		ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
 		ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
