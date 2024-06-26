@@ -162,12 +162,20 @@ func TestIPFilter(t *testing.T) {
 
 	t.Run("Localhost allowed", func(t *testing.T) {
 		metrics := sendToDiscard(payloads, allowAll)
+
 		assert.Equal(t, metrics.natEntriesAdded, 1, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
+		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
+		for _, report := range metrics.upstreamPackets {
+			assert.Greater(t, report.clientProxyBytes, 0, "Expected nonzero input packet size")
+			assert.Greater(t, report.proxyTargetBytes, 0, "Expected nonzero bytes to be sent for allowed packet")
+			assert.Equal(t, report.accessKey, "id-0", "Unexpected access key: %s", report.accessKey)
+		}
 	})
 
 	t.Run("Localhost not allowed", func(t *testing.T) {
 		metrics := sendToDiscard(payloads, onet.RequirePublicIP)
-		assert.Equal(t, 0, metrics.natEntriesAdded, "Unexpected NAT entry on rejected packet")
+
+		assert.Equal(t, metrics.natEntriesAdded, 1, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
 		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
 		for _, report := range metrics.upstreamPackets {
 			assert.Greater(t, report.clientProxyBytes, 0, "Expected nonzero input packet size")
