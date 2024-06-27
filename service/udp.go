@@ -124,7 +124,6 @@ func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *Ciph
 	remoteIP := clientAddr.(*net.UDPAddr).AddrPort().Addr()
 
 	cipherEntry, textData, timeToCipher, keyErr := findAccessKey(remoteIP, serverUDPBufferSize, cipherBuf[:clientProxyBytes], h.ciphers, logDebug)
-	logDebug("test", "textdata: %v\n", textData)
 	h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 	if keyErr != nil {
 		return nil, nil, nil, 0, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
