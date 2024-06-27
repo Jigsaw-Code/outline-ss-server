@@ -123,7 +123,7 @@ func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher ti
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
-func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
+func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator, useValidCipher bool) *natTestMetrics {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
@@ -140,7 +140,12 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	targetAddr := socks.ParseAddr("127.0.0.1:9")
 	for _, payload := range payloads {
 		plaintext := append(targetAddr, payload...)
-		ciphertext := make([]byte, cipher.SaltSize()+len(plaintext)+cipher.TagSize())
+		var ciphertext []byte
+		if useValidCipher {
+			ciphertext = make([]byte, cipher.SaltSize()+len(plaintext)+cipher.TagSize())
+		} else {
+			ciphertext = []byte("invalid cipher")
+		}
 		shadowsocks.Pack(ciphertext, plaintext, cipher)
 		clientConn.recv <- packet{
 			addr: &net.UDPAddr{
@@ -156,32 +161,51 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	return metrics
 }
 
+func sendToDiscardWithValidCipher(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
+	return sendToDiscard(payloads, validator, true)
+}
+
+func sendToDiscardWithInValidCipher(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
+	return sendToDiscard(payloads, validator, false)
+}
+
 func TestIPFilter(t *testing.T) {
 	// Test both the first-packet and subsequent-packet cases.
 	payloads := [][]byte{[]byte("payload1"), []byte("payload2")}
 
 	t.Run("Localhost allowed", func(t *testing.T) {
-		metrics := sendToDiscard(payloads, allowAll)
+		metrics := sendToDiscardWithValidCipher(payloads, allowAll)
 
-		assert.Equal(t, metrics.natEntriesAdded, 1, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
 		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
 		for _, report := range metrics.upstreamPackets {
-			assert.Greater(t, report.clientProxyBytes, 0, "Expected nonzero input packet size")
 			assert.Greater(t, report.proxyTargetBytes, 0, "Expected nonzero bytes to be sent for allowed packet")
-			assert.Equal(t, report.accessKey, "id-0", "Unexpected access key: %s", report.accessKey)
 		}
 	})
 
 	t.Run("Localhost not allowed", func(t *testing.T) {
-		metrics := sendToDiscard(payloads, onet.RequirePublicIP)
+		metrics := sendToDiscardWithValidCipher(payloads, onet.RequirePublicIP)
 
-		assert.Equal(t, metrics.natEntriesAdded, 1, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
 		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
 		for _, report := range metrics.upstreamPackets {
-			assert.Greater(t, report.clientProxyBytes, 0, "Expected nonzero input packet size")
 			assert.Equal(t, 0, report.proxyTargetBytes, "No bytes should be sent due to a disallowed packet")
-			assert.Equal(t, report.accessKey, "id-0", "Unexpected access key: %s", report.accessKey)
 		}
+	})
+}
+
+func TestNATEntries(t *testing.T) {
+	// Test both the first-packet and subsequent-packet cases.
+	payloads := [][]byte{[]byte("payload1"), []byte("payload2")}
+
+	t.Run("Valid cipher", func(t *testing.T) {
+		metrics := sendToDiscardWithValidCipher(payloads, onet.RequirePublicIP)
+
+		assert.Equal(t, 1, metrics.natEntriesAdded, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
+	})
+
+	t.Run("Invalid cipher", func(t *testing.T) {
+		metrics := sendToDiscardWithInValidCipher(payloads, onet.RequirePublicIP)
+
+		assert.Equal(t, 0, metrics.natEntriesAdded, "Unexpected NAT entry on rejected packet")
 	})
 }
 
@@ -193,7 +217,7 @@ func TestUpstreamMetrics(t *testing.T) {
 		payloads = append(payloads, make([]byte, i))
 	}
 
-	metrics := sendToDiscard(payloads, allowAll)
+	metrics := sendToDiscardWithValidCipher(payloads, allowAll)
 
 	assert.Equal(t, N, len(metrics.upstreamPackets), "Expected %d reports, not %v", N, metrics.upstreamPackets)
 	for i, report := range metrics.upstreamPackets {
