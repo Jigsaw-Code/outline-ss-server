@@ -65,23 +65,23 @@ func debugUDPAddr(addr net.Addr, template string, val interface{}) {
 
 // Decrypts src into dst. It tries each cipher until it finds one that authenticates
 // correctly. dst and src must not overlap.
-func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherList) ([]byte, string, *shadowsocks.EncryptionKey, error) {
+func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherList) (*CipherEntry, []byte, error) {
 	// Try each cipher until we find one that authenticates successfully. This assumes that all ciphers are AEAD.
 	// We snapshot the list because it may be modified while we use it.
 	snapshot := cipherList.SnapshotForClientIP(clientIP)
-	for ci, entry := range snapshot {
-		id, cryptoKey := entry.Value.(*CipherEntry).ID, entry.Value.(*CipherEntry).CryptoKey
-		buf, err := shadowsocks.Unpack(dst, src, cryptoKey)
+	for ci, elt := range snapshot {
+		entry := elt.Value.(*CipherEntry)
+		buf, err := shadowsocks.Unpack(dst, src, entry.CryptoKey)
 		if err != nil {
-			debugUDP(id, "Failed to unpack: %v", err)
+			debugUDP(entry.ID, "Failed to unpack: %v", err)
 			continue
 		}
-		debugUDP(id, "Found cipher at index %d", ci)
+		debugUDP(entry.ID, "Found cipher at index %d", ci)
 		// Move the active cipher to the front, so that the search is quicker next time.
-		cipherList.MarkUsedByClientIP(entry, clientIP)
-		return buf, id, cryptoKey, nil
+		cipherList.MarkUsedByClientIP(elt, clientIP)
+		return entry, buf, nil
 	}
-	return nil, "", nil, errors.New("could not find valid UDP cipher")
+	return nil, nil, errors.New("could not find valid UDP cipher")
 }
 
 type packetHandler struct {
@@ -131,12 +131,12 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 	}
 }
 
-func (h *packetHandler) authenticate(clientConn net.PacketConn) (*natconn, []byte, int, *onet.ConnectionError) {
+func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *CipherEntry, []byte, int, *onet.ConnectionError) {
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
 	clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
 	if err != nil {
-		return nil, nil, 0, onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
+		return nil, nil, nil, 0, onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
 	}
 
 	if logger.IsEnabledFor(logging.DEBUG) {
@@ -144,34 +144,17 @@ func (h *packetHandler) authenticate(clientConn net.PacketConn) (*natconn, []byt
 		logger.Debugf("UDP(%v): Outbound packet has %d bytes", clientAddr, clientProxyBytes)
 	}
 
-	targetConn := h.nm.Get(clientAddr.String())
 	remoteIP := clientAddr.(*net.UDPAddr).AddrPort().Addr()
 
 	unpackStart := time.Now()
-	textData, keyID, cryptoKey, keyErr := findAccessKeyUDP(remoteIP, textBuf, cipherBuf[:clientProxyBytes], h.ciphers)
+	cipherEntry, textData, keyErr := findAccessKeyUDP(remoteIP, textBuf, cipherBuf[:clientProxyBytes], h.ciphers)
 	timeToCipher := time.Since(unpackStart)
 	h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 	if keyErr != nil {
-		return targetConn, nil, 0, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
+		return nil, nil, nil, 0, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
 	}
 
-	if targetConn != nil {
-		return targetConn, textData, clientProxyBytes, nil
-	}
-
-	udpConn, err := net.ListenPacket("udp", "")
-	if err != nil {
-		return targetConn, textData, clientProxyBytes, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
-	}
-
-	clientInfo, locErr := ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
-	if locErr != nil {
-		logger.Warningf("Failed client info lookup: %v", locErr)
-	}
-	debugUDPAddr(clientAddr, "Got info \"%#v\"", clientInfo)
-
-	targetConn = h.nm.Add(clientAddr, clientConn, cryptoKey, udpConn, clientInfo, keyID)
-	return targetConn, textData, clientProxyBytes, nil
+	return clientAddr, cipherEntry, textData, clientProxyBytes, nil
 }
 
 func (h *packetHandler) handleConnection(clientConn net.PacketConn) (string, ipinfo.IPInfo, int, int, *onet.ConnectionError) {
@@ -182,13 +165,25 @@ func (h *packetHandler) handleConnection(clientConn net.PacketConn) (string, ipi
 		}
 	}()
 
-	targetConn, textData, clientProxyBytes, authErr := h.authenticate(clientConn)
+	clientAddr, cipherEntry, textData, clientProxyBytes, authErr := h.authenticate(clientConn)
 	if authErr != nil {
-		var clientInfo ipinfo.IPInfo
-		if targetConn != nil {
-			clientInfo = targetConn.clientInfo
+		return "", ipinfo.IPInfo{}, clientProxyBytes, 0, authErr
+	}
+
+	targetConn := h.nm.Get(clientAddr.String())
+	if targetConn == nil {
+		udpConn, err := net.ListenPacket("udp", "")
+		if err != nil {
+			return "", ipinfo.IPInfo{}, clientProxyBytes, 0, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
 		}
-		return "", clientInfo, clientProxyBytes, 0, authErr
+
+		clientInfo, locErr := ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
+		if locErr != nil {
+			logger.Warningf("Failed client info lookup: %v", locErr)
+		}
+		debugUDPAddr(clientAddr, "Got info \"%#v\"", clientInfo)
+
+		targetConn = h.nm.Add(clientAddr, clientConn, cipherEntry.CryptoKey, udpConn, clientInfo, cipherEntry.ID)
 	}
 
 	payload, tgtUDPAddr, onetErr := h.validatePacket(textData)

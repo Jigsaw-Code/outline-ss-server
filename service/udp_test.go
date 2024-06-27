@@ -469,7 +469,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 		cipherNumber := n % numCiphers
 		ip := ips[cipherNumber]
 		packet := packets[cipherNumber]
-		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
+		_, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
 		if err != nil {
 			b.Error(err)
 		}
@@ -498,7 +498,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		ip := ips[n%numIPs]
-		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
+		_, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
 		if err != nil {
 			b.Error(err)
 		}
