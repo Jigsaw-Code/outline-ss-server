@@ -74,39 +74,6 @@ func startDiscardServer(t testing.TB) (*net.TCPListener, *sync.WaitGroup) {
 	return listener, &running
 }
 
-// Simulates receiving invalid TCP connection attempts on a server with 100 ciphers.
-func BenchmarkTCPFindCipherFail(b *testing.B) {
-	b.StopTimer()
-	b.ResetTimer()
-
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	if err != nil {
-		b.Fatalf("ListenTCP failed: %v", err)
-	}
-
-	cipherList, err := MakeTestCiphers(makeTestSecrets(100))
-	if err != nil {
-		b.Fatal(err)
-	}
-	testPayload := makeTestPayload(50)
-	for n := 0; n < b.N; n++ {
-		go func() {
-			conn, err := net.Dial("tcp", listener.Addr().String())
-			require.NoErrorf(b, err, "Failed to dial %v: %v", listener.Addr(), err)
-			conn.Write(testPayload)
-			conn.Close()
-		}()
-		clientConn, err := listener.AcceptTCP()
-		if err != nil {
-			b.Fatalf("AcceptTCP failed: %v", err)
-		}
-		clientIP := clientConn.RemoteAddr().(*net.TCPAddr).AddrPort().Addr()
-		b.StartTimer()
-		findAccessKey(clientConn, clientIP, cipherList)
-		b.StopTimer()
-	}
-}
-
 func TestCompatibleCiphers(t *testing.T) {
 	for _, cipherName := range [](string){shadowsocks.CHACHA20IETFPOLY1305, shadowsocks.AES256GCM, shadowsocks.AES192GCM, shadowsocks.AES128GCM} {
 		cryptoKey, _ := shadowsocks.NewEncryptionKey(cipherName, "dummy secret")
@@ -178,40 +145,6 @@ func (c *conn) CloseRead() error {
 
 func (c *conn) CloseWrite() error {
 	return nil
-}
-
-// Simulates receiving valid TCP connection attempts from 100 different users,
-// each with their own cipher and their own IP address.
-func BenchmarkTCPFindCipherRepeat(b *testing.B) {
-	b.StopTimer()
-	b.ResetTimer()
-
-	const numCiphers = 100 // Must be <256
-	cipherList, err := MakeTestCiphers(makeTestSecrets(numCiphers))
-	if err != nil {
-		b.Fatal(err)
-	}
-	cipherEntries := [numCiphers]*CipherEntry{}
-	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
-	for cipherNumber, element := range snapshot {
-		cipherEntries[cipherNumber] = element.Value.(*CipherEntry)
-	}
-	for n := 0; n < b.N; n++ {
-		cipherNumber := byte(n % numCiphers)
-		reader, writer := io.Pipe()
-		clientIP := netip.AddrFrom4([4]byte{192, 0, 2, cipherNumber})
-		addr := netip.AddrPortFrom(clientIP, 54321)
-		c := conn{clientAddr: net.TCPAddrFromAddrPort(addr), reader: reader, writer: writer}
-		cipher := cipherEntries[cipherNumber].CryptoKey
-		go shadowsocks.NewWriter(writer, cipher).Write(makeTestPayload(50))
-		b.StartTimer()
-		_, _, _, _, err := findAccessKey(&c, clientIP, cipherList)
-		b.StopTimer()
-		if err != nil {
-			b.Error(err)
-		}
-		c.Close()
-	}
 }
 
 // Stub metrics implementation for testing replay defense.

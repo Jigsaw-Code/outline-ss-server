@@ -433,11 +433,10 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 		b.Fatal(err)
 	}
 	testPayload := makeTestPayload(50)
-	textBuf := make([]byte, serverUDPBufferSize)
 	testIP := netip.MustParseAddr("192.0.2.1")
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		findAccessKeyUDP(testIP, textBuf, testPayload, cipherList)
+		findAccessKeyUDP(testIP, serverUDPBufferSize, testPayload, cipherList)
 	}
 }
 
@@ -449,7 +448,6 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	testBuf := make([]byte, serverUDPBufferSize)
 	packets := [numCiphers][]byte{}
 	ips := [numCiphers]netip.Addr{}
 	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
@@ -467,7 +465,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 		cipherNumber := n % numCiphers
 		ip := ips[cipherNumber]
 		packet := packets[cipherNumber]
-		_, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
+		_, _, err := findAccessKeyUDP(ip, serverUDPBufferSize, packet, cipherList)
 		if err != nil {
 			b.Error(err)
 		}
@@ -481,7 +479,6 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	testBuf := make([]byte, serverUDPBufferSize)
 	plaintext := makeTestPayload(50)
 	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	cryptoKey := snapshot[0].Value.(*CipherEntry).CryptoKey
@@ -496,7 +493,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		ip := ips[n%numIPs]
-		_, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
+		_, _, err := findAccessKeyUDP(ip, serverUDPBufferSize, packet, cipherList)
 		if err != nil {
 			b.Error(err)
 		}

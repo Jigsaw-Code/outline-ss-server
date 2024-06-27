@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -62,27 +61,6 @@ func debugUDPAddr(addr net.Addr, template string, val interface{}) {
 		// Avoid calling addr.String() unless debugging is enabled.
 		debugUDP(addr.String(), template, val)
 	}
-}
-
-// Decrypts src into dst. It tries each cipher until it finds one that authenticates
-// correctly. dst and src must not overlap.
-func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherList) (*CipherEntry, []byte, error) {
-	// Try each cipher until we find one that authenticates successfully. This assumes that all ciphers are AEAD.
-	// We snapshot the list because it may be modified while we use it.
-	snapshot := cipherList.SnapshotForClientIP(clientIP)
-	for ci, elt := range snapshot {
-		entry := elt.Value.(*CipherEntry)
-		buf, err := shadowsocks.Unpack(dst, src, entry.CryptoKey)
-		if err != nil {
-			debugUDP(entry.ID, "Failed to unpack: %v", err)
-			continue
-		}
-		debugUDP(entry.ID, "Found cipher at index %d", ci)
-		// Move the active cipher to the front, so that the search is quicker next time.
-		cipherList.MarkUsedByClientIP(elt, clientIP)
-		return entry, buf, nil
-	}
-	return nil, nil, errors.New("could not find valid UDP cipher")
 }
 
 type packetHandler struct {
@@ -134,7 +112,6 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *CipherEntry, []byte, int, *onet.ConnectionError) {
 	cipherBuf := make([]byte, serverUDPBufferSize)
-	textBuf := make([]byte, serverUDPBufferSize)
 	clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
 	if err != nil {
 		return nil, nil, nil, 0, onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
@@ -148,7 +125,7 @@ func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *Ciph
 	remoteIP := clientAddr.(*net.UDPAddr).AddrPort().Addr()
 
 	unpackStart := time.Now()
-	cipherEntry, textData, keyErr := findAccessKeyUDP(remoteIP, textBuf, cipherBuf[:clientProxyBytes], h.ciphers)
+	cipherEntry, textData, keyErr := findAccessKeyUDP(remoteIP, serverUDPBufferSize, cipherBuf[:clientProxyBytes], h.ciphers)
 	timeToCipher := time.Since(unpackStart)
 	h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 	if keyErr != nil {
