@@ -262,8 +262,8 @@ var _ service.UDPMetrics = (*fakeUDPMetrics)(nil)
 func (m *fakeUDPMetrics) GetIPInfo(ip net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{CountryCode: "QQ"}, nil
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.up = append(m.up, udpRecord{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
+func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics) {
+	m.up = append(m.up, udpRecord{clientInfo, accessKey, status, int(data.ClientProxy), int(data.ProxyTarget)})
 }
 func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 	m.down = append(m.down, udpRecord{clientInfo, accessKey, status, targetProxyBytes, proxyClientBytes})

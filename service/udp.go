@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -26,6 +27,7 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
@@ -35,7 +37,7 @@ type UDPMetrics interface {
 	ipinfo.IPInfoMap
 
 	// UDP metrics
-	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
+	AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics)
 	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
 	AddUDPNatEntry(clientAddr net.Addr, accessKey string)
 	RemoveUDPNatEntry(clientAddr net.Addr, accessKey string)
@@ -119,7 +121,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 	for {
 		status := "OK"
-		keyID, clientInfo, clientProxyBytes, proxyTargetBytes, connErr := h.handleConnection(clientConn)
+		keyID, clientInfo, proxyMetrics, connErr := h.handleConnection(context.TODO(), clientConn)
 		if connErr != nil {
 			if errors.Is(connErr.Cause, net.ErrClosed) {
 				break
@@ -127,7 +129,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			logger.Debugf("UDP Error: %v: %v", connErr.Message, connErr.Cause)
 			status = connErr.Status
 		}
-		h.m.AddUDPPacketFromClient(clientInfo, keyID, status, clientProxyBytes, proxyTargetBytes)
+		h.m.AddUDPPacketFromClient(clientInfo, keyID, status, proxyMetrics)
 	}
 }
 
@@ -157,7 +159,31 @@ func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *Ciph
 	return clientAddr, cipherEntry, textData, clientProxyBytes, nil
 }
 
-func (h *packetHandler) handleConnection(clientConn net.PacketConn) (string, ipinfo.IPInfo, int, int, *onet.ConnectionError) {
+func (h *packetHandler) proxyConnection(ctx context.Context, clientAddr net.Addr, tgtAddr net.Addr, clientConn net.PacketConn, cipherEntry CipherEntry, payload []byte, proxyMetrics *metrics.ProxyMetrics) (ipinfo.IPInfo, *onet.ConnectionError) {
+	tgtConn := h.nm.Get(clientAddr.String())
+	if tgtConn == nil {
+		clientInfo, locErr := ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
+		if locErr != nil {
+			logger.Warningf("Failed client info lookup: %v", locErr)
+		}
+		debugUDPAddr(clientAddr, "Got info \"%#v\"", clientInfo)
+
+		udpConn, err := net.ListenPacket("udp", "")
+		if err != nil {
+			return ipinfo.IPInfo{}, nil
+		}
+		tgtConn = h.nm.Add(clientAddr, clientConn, cipherEntry.CryptoKey, udpConn, clientInfo, cipherEntry.ID)
+	}
+
+	proxyTargetBytes, err := tgtConn.WriteTo(payload, tgtAddr)
+	proxyMetrics.ProxyTarget += int64(proxyTargetBytes)
+	if err != nil {
+		return tgtConn.clientInfo, onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
+	}
+	return tgtConn.clientInfo, nil
+}
+
+func (h *packetHandler) handleConnection(ctx context.Context, clientConn net.PacketConn) (string, ipinfo.IPInfo, metrics.ProxyMetrics, *onet.ConnectionError) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf("Panic in UDP loop: %v. Continuing to listen.", r)
@@ -165,44 +191,27 @@ func (h *packetHandler) handleConnection(clientConn net.PacketConn) (string, ipi
 		}
 	}()
 
+	var proxyMetrics metrics.ProxyMetrics
 	clientAddr, cipherEntry, textData, clientProxyBytes, authErr := h.authenticate(clientConn)
+	proxyMetrics.ClientProxy += int64(clientProxyBytes)
 	if authErr != nil {
-		return "", ipinfo.IPInfo{}, clientProxyBytes, 0, authErr
+		return "", ipinfo.IPInfo{}, proxyMetrics, authErr
 	}
 
-	targetConn := h.nm.Get(clientAddr.String())
-	if targetConn == nil {
-		udpConn, err := net.ListenPacket("udp", "")
-		if err != nil {
-			return "", ipinfo.IPInfo{}, clientProxyBytes, 0, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
-		}
-
-		clientInfo, locErr := ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
-		if locErr != nil {
-			logger.Warningf("Failed client info lookup: %v", locErr)
-		}
-		debugUDPAddr(clientAddr, "Got info \"%#v\"", clientInfo)
-
-		targetConn = h.nm.Add(clientAddr, clientConn, cipherEntry.CryptoKey, udpConn, clientInfo, cipherEntry.ID)
-	}
-
-	payload, tgtUDPAddr, onetErr := h.validatePacket(textData)
+	payload, tgtAddr, onetErr := h.getProxyRequest(textData)
 	if onetErr != nil {
-		return targetConn.keyID, targetConn.clientInfo, clientProxyBytes, 0, onetErr
+		return cipherEntry.ID, ipinfo.IPInfo{}, proxyMetrics, onetErr
 	}
+	debugUDPAddr(clientAddr, "Proxy exit %s", tgtAddr.String())
 
-	debugUDPAddr(targetConn.clientAddr, "Proxy exit %v", targetConn.LocalAddr())
-	proxyTargetBytes, err := targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
-	if err != nil {
-		return targetConn.keyID, targetConn.clientInfo, clientProxyBytes, proxyTargetBytes, onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
-	}
-	return targetConn.keyID, targetConn.clientInfo, clientProxyBytes, proxyTargetBytes, nil
+	clientInfo, err := h.proxyConnection(ctx, clientAddr, tgtAddr, clientConn, *cipherEntry, payload, &proxyMetrics)
+	return cipherEntry.ID, clientInfo, proxyMetrics, err
 }
 
 // Given the decrypted contents of a UDP packet, return
 // the payload and the destination address, or an error if
 // this packet cannot or should not be forwarded.
-func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+func (h *packetHandler) getProxyRequest(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
@@ -227,9 +236,7 @@ func isDNS(addr net.Addr) bool {
 
 type natconn struct {
 	net.PacketConn
-	cryptoKey  *shadowsocks.EncryptionKey
-	keyID      string
-	clientAddr net.Addr
+	cryptoKey *shadowsocks.EncryptionKey
 	// We store the client information in the NAT map to avoid recomputing it
 	// for every downstream packet in a UDP-based connection.
 	clientInfo ipinfo.IPInfo
@@ -310,12 +317,9 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(clientAddr net.Addr, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, clientInfo ipinfo.IPInfo) *natconn {
+func (m *natmap) set(clientAddr net.Addr, pc net.PacketConn, clientInfo ipinfo.IPInfo) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
-		cryptoKey:      cryptoKey,
-		keyID:          keyID,
-		clientAddr:     clientAddr,
 		clientInfo:     clientInfo,
 		defaultTimeout: m.timeout,
 	}
@@ -340,12 +344,12 @@ func (m *natmap) del(key string) net.PacketConn {
 }
 
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo ipinfo.IPInfo, keyID string) *natconn {
-	entry := m.set(clientAddr, targetConn, cryptoKey, keyID, clientInfo)
+	entry := m.set(clientAddr, targetConn, clientInfo)
 
 	m.metrics.AddUDPNatEntry(clientAddr, keyID)
 	m.running.Add(1)
 	go func() {
-		timedCopy(clientAddr, clientConn, entry, keyID, m.metrics)
+		timedCopy(clientAddr, clientConn, entry, cryptoKey, keyID, m.metrics)
 		m.metrics.RemoveUDPNatEntry(clientAddr, keyID)
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
@@ -375,13 +379,13 @@ var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
 func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn,
-	keyID string, sm UDPMetrics) {
+	cryptoKey *shadowsocks.EncryptionKey, keyID string, sm UDPMetrics) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
 	pkt := make([]byte, serverUDPBufferSize)
 
-	saltSize := targetConn.cryptoKey.SaltSize()
+	saltSize := cryptoKey.SaltSize()
 	// Leave enough room at the beginning of the packet for a max-length header (i.e. IPv6).
 	bodyStart := saltSize + maxAddrLen
 
@@ -425,7 +429,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			//           [            packBuf             ]
 			//           [          buf           ]
 			packBuf := pkt[saltStart:]
-			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, targetConn.cryptoKey) // Encrypt in-place
+			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, cryptoKey) // Encrypt in-place
 			if err != nil {
 				return onet.NewConnectionError("ERR_PACK", "Failed to pack data to client", err)
 			}
@@ -456,7 +460,7 @@ var _ UDPMetrics = (*NoOpUDPMetrics)(nil)
 func (m *NoOpUDPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
-func (m *NoOpUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *NoOpUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics) {
 }
 func (m *NoOpUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }

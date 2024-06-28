@@ -26,6 +26,7 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/assert"
@@ -93,9 +94,9 @@ func (conn *fakePacketConn) Close() error {
 }
 
 type udpReport struct {
-	clientInfo                         ipinfo.IPInfo
-	accessKey, status                  string
-	clientProxyBytes, proxyTargetBytes int
+	clientInfo        ipinfo.IPInfo
+	accessKey, status string
+	data              metrics.ProxyMetrics
 }
 
 // Stub metrics implementation for testing NAT behaviors.
@@ -109,8 +110,8 @@ var _ UDPMetrics = (*natTestMetrics)(nil)
 func (m *natTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 	return ipinfo.IPInfo{}, nil
 }
-func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
+func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, data metrics.ProxyMetrics) {
+	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, data})
 }
 func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
@@ -178,7 +179,7 @@ func TestIPFilter(t *testing.T) {
 
 		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
 		for _, report := range metrics.upstreamPackets {
-			assert.Greater(t, report.proxyTargetBytes, 0, "Expected nonzero bytes to be sent for allowed packet")
+			assert.Greater(t, int(report.data.ProxyTarget), 0, "Expected nonzero bytes to be sent for allowed packet")
 		}
 	})
 
@@ -187,7 +188,7 @@ func TestIPFilter(t *testing.T) {
 
 		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
 		for _, report := range metrics.upstreamPackets {
-			assert.Equal(t, 0, report.proxyTargetBytes, "No bytes should be sent due to a disallowed packet")
+			assert.EqualValues(t, 0, report.data.ProxyTarget, "No bytes should be sent due to a disallowed packet")
 		}
 	})
 }
@@ -197,13 +198,13 @@ func TestNATEntries(t *testing.T) {
 	payloads := [][]byte{[]byte("payload1"), []byte("payload2")}
 
 	t.Run("Valid cipher", func(t *testing.T) {
-		metrics := sendToDiscardWithValidCipher(payloads, onet.RequirePublicIP)
+		metrics := sendToDiscardWithValidCipher(payloads, allowAll)
 
 		assert.Equal(t, 1, metrics.natEntriesAdded, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
 	})
 
 	t.Run("Invalid cipher", func(t *testing.T) {
-		metrics := sendToDiscardWithInValidCipher(payloads, onet.RequirePublicIP)
+		metrics := sendToDiscardWithInValidCipher(payloads, allowAll)
 
 		assert.Equal(t, 0, metrics.natEntriesAdded, "Unexpected NAT entry on rejected packet")
 	})
@@ -221,8 +222,8 @@ func TestUpstreamMetrics(t *testing.T) {
 
 	assert.Equal(t, N, len(metrics.upstreamPackets), "Expected %d reports, not %v", N, metrics.upstreamPackets)
 	for i, report := range metrics.upstreamPackets {
-		assert.Equal(t, i+1, report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
-		assert.Greater(t, report.clientProxyBytes, report.proxyTargetBytes, "Expected nonzero input overhead (%d > %d)", report.clientProxyBytes, report.proxyTargetBytes)
+		assert.EqualValues(t, i+1, report.data.ProxyTarget, "Expected %d payload bytes, not %d", i+1, report.data.ProxyTarget)
+		assert.Greater(t, report.data.ClientProxy, report.data.ProxyTarget, "Expected nonzero input overhead (%d > %d)", report.data.ClientProxy, report.data.ProxyTarget)
 		assert.Equal(t, "id-0", report.accessKey, "Unexpected access key name: %s", report.accessKey)
 		assert.Equal(t, "OK", report.status, "Wrong status: %s", report.status)
 	}
