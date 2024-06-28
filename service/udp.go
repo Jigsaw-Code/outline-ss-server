@@ -39,9 +39,6 @@ type UDPMetrics interface {
 	AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int)
 	AddUDPNatEntry(clientAddr net.Addr, accessKey string)
 	RemoveUDPNatEntry(clientAddr net.Addr, accessKey string)
-
-	// Shadowsocks metrics
-	AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
 }
 
 // Max UDP buffer size for the server code.
@@ -63,17 +60,54 @@ func debugUDPAddr(addr net.Addr, template string, val interface{}) {
 	}
 }
 
+type PacketAuthenticateFunc func(clientConn net.PacketConn) (net.Addr, *CipherEntry, []byte, int, *onet.ConnectionError)
+
+// ShadowsocksUDPMetrics is used to report Shadowsocks metrics on UDP connections.
+type ShadowsocksUDPMetrics interface {
+	AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+}
+
+func NewShadowsocksPacketAuthenticator(ciphers CipherList, metrics ShadowsocksUDPMetrics) PacketAuthenticateFunc {
+	return func(clientConn net.PacketConn) (net.Addr, *CipherEntry, []byte, int, *onet.ConnectionError) {
+		cipherBuf := make([]byte, serverUDPBufferSize)
+		clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
+		if err != nil {
+			return nil, nil, nil, 0, onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
+		}
+
+		if logger.IsEnabledFor(logging.DEBUG) {
+			defer logger.Debugf("UDP(%v): done", clientAddr)
+			logger.Debugf("UDP(%v): Outbound packet has %d bytes", clientAddr, clientProxyBytes)
+		}
+
+		remoteIP := clientAddr.(*net.UDPAddr).AddrPort().Addr()
+
+		cipherEntry, textData, timeToCipher, keyErr := findShadowsocksAccessKey(remoteIP, serverUDPBufferSize, cipherBuf[:clientProxyBytes], ciphers, debugUDP)
+		metrics.AddUDPCipherSearch(err == nil, timeToCipher)
+		if keyErr != nil {
+			return nil, nil, nil, 0, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
+		}
+
+		return clientAddr, cipherEntry, textData, clientProxyBytes, nil
+	}
+}
+
 type packetHandler struct {
 	natTimeout        time.Duration
-	ciphers           CipherList
 	nm                *natmap
 	m                 UDPMetrics
+	authenticate      PacketAuthenticateFunc
 	targetIPValidator onet.TargetIPValidator
 }
 
 // NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics) PacketHandler {
-	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
+func NewPacketHandler(natTimeout time.Duration, authenticate PacketAuthenticateFunc, m UDPMetrics) PacketHandler {
+	return &packetHandler{
+		natTimeout:        natTimeout,
+		m:                 m,
+		authenticate:      authenticate,
+		targetIPValidator: onet.RequirePublicIP,
+	}
 }
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
@@ -108,29 +142,6 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 		}
 		h.m.AddUDPPacketFromClient(clientInfo, keyID, status, proxyMetrics)
 	}
-}
-
-func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *CipherEntry, []byte, int, *onet.ConnectionError) {
-	cipherBuf := make([]byte, serverUDPBufferSize)
-	clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
-	if err != nil {
-		return nil, nil, nil, 0, onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
-	}
-
-	if logger.IsEnabledFor(logging.DEBUG) {
-		defer logger.Debugf("UDP(%v): done", clientAddr)
-		logger.Debugf("UDP(%v): Outbound packet has %d bytes", clientAddr, clientProxyBytes)
-	}
-
-	remoteIP := clientAddr.(*net.UDPAddr).AddrPort().Addr()
-
-	cipherEntry, textData, timeToCipher, keyErr := findShadowsocksAccessKey(remoteIP, serverUDPBufferSize, cipherBuf[:clientProxyBytes], h.ciphers, debugUDP)
-	h.m.AddUDPCipherSearch(err == nil, timeToCipher)
-	if keyErr != nil {
-		return nil, nil, nil, 0, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
-	}
-
-	return clientAddr, cipherEntry, textData, clientProxyBytes, nil
 }
 
 func (h *packetHandler) proxyConnection(clientAddr net.Addr, tgtAddr net.Addr, clientConn net.PacketConn, cipherEntry CipherEntry, payload []byte, proxyMetrics *metrics.ProxyMetrics) (ipinfo.IPInfo, *onet.ConnectionError) {

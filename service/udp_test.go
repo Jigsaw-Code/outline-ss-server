@@ -127,7 +127,8 @@ func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher ti
 func sendToDiscard(ciphers CipherList, payloads [][]byte, cipher *shadowsocks.EncryptionKey, validator onet.TargetIPValidator) *natTestMetrics {
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	handler := NewPacketHandler(timeout, ciphers, metrics)
+	authFunc := NewShadowsocksPacketAuthenticator(ciphers, metrics)
+	handler := NewPacketHandler(timeout, authFunc, metrics)
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
@@ -433,7 +434,8 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(testTimeout, cipherList, testMetrics)
+	authFunc := NewShadowsocksPacketAuthenticator(cipherList, testMetrics)
+	s := NewPacketHandler(timeout, authFunc, testMetrics)
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
