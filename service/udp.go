@@ -316,7 +316,7 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(clientAddr net.Addr, pc net.PacketConn, clientInfo ipinfo.IPInfo) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, clientInfo ipinfo.IPInfo) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		clientInfo:     clientInfo,
@@ -326,7 +326,7 @@ func (m *natmap) set(clientAddr net.Addr, pc net.PacketConn, clientInfo ipinfo.I
 	m.Lock()
 	defer m.Unlock()
 
-	m.keyConn[clientAddr.String()] = entry
+	m.keyConn[key] = entry
 	return entry
 }
 
@@ -343,7 +343,7 @@ func (m *natmap) del(key string) net.PacketConn {
 }
 
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, clientInfo ipinfo.IPInfo, keyID string) *natconn {
-	entry := m.set(clientAddr, targetConn, clientInfo)
+	entry := m.set(clientAddr.String(), targetConn, clientInfo)
 
 	m.metrics.AddUDPNatEntry(clientAddr, keyID)
 	m.running.Add(1)
