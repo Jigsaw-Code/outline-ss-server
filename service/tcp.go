@@ -31,6 +31,7 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
+	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -60,6 +61,15 @@ func remoteIP(conn net.Conn) netip.Addr {
 	return netip.Addr{}
 }
 
+// Wrapper for logger.Debugf during TCP access key searches.
+func debugTCP(cipherID, template string, val interface{}) {
+	// This is an optimization to reduce unnecessary allocations due to an interaction
+	// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
+	if logger.IsEnabledFor(logging.DEBUG) {
+		logger.Debugf("TCP(%s): "+template, cipherID, val)
+	}
+}
+
 type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
 
 // ShadowsocksTCPMetrics is used to report Shadowsocks metrics on TCP connections.
@@ -86,7 +96,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 
 		// Find the cipher and acess key id.
 		bufferSize := 2
-		cipherEntry, _, timeToCipher, keyErr := findAccessKey(remoteIP(clientConn), bufferSize, firstBytes, ciphers, NewDebugLogger("TCP"))
+		cipherEntry, _, timeToCipher, keyErr := findShadowsocksAccessKey(remoteIP(clientConn), bufferSize, firstBytes, ciphers, debugTCP)
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
 			// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.

@@ -17,16 +17,3 @@ package service
 import logging "github.com/op/go-logging"
 
 var logger = logging.MustGetLogger("shadowsocks")
-
-type DebugLoggerFunc func(tag string, template string, val interface{})
-
-// NewDebugLogger creates a wrapper for logger.Debugf during proxying.
-func NewDebugLogger(protocol string) DebugLoggerFunc {
-	return func(tag string, template string, val interface{}) {
-		// This is an optimization to reduce unnecessary allocations due to an interaction
-		// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
-		if logger.IsEnabledFor(logging.DEBUG) {
-			logger.Debugf("%s(%s): "+template, protocol, tag, val)
-		}
-	}
-}

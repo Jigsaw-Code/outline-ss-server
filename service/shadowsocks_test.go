@@ -37,7 +37,7 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 	testPayload := makeTestPayload(50)
 	for n := 0; n < b.N; n++ {
 		b.StartTimer()
-		findAccessKey(clientIP, 2, testPayload, cipherList, NewDebugLogger("TCP"))
+		findShadowsocksAccessKey(clientIP, 2, testPayload, cipherList, func(tag string, template string, val interface{}) {})
 		b.StopTimer()
 	}
 }
@@ -68,7 +68,7 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 		cipher := cipherEntries[cipherNumber].CryptoKey
 		go shadowsocks.NewWriter(writer, cipher).Write(makeTestPayload(50))
 		b.StartTimer()
-		_, _, _, err := findAccessKey(clientIP, 2, testPayload, cipherList, NewDebugLogger("TCP"))
+		_, _, _, err := findShadowsocksAccessKey(clientIP, 2, testPayload, cipherList, nil)
 		b.StopTimer()
 		if err != nil {
 			b.Error(err)
@@ -87,7 +87,7 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 	testIP := netip.MustParseAddr("192.0.2.1")
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		findAccessKey(testIP, serverUDPBufferSize, testPayload, cipherList, NewDebugLogger("UDP"))
+		findShadowsocksAccessKey(testIP, serverUDPBufferSize, testPayload, cipherList, nil)
 	}
 }
 
@@ -116,7 +116,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 		cipherNumber := n % numCiphers
 		ip := ips[cipherNumber]
 		packet := packets[cipherNumber]
-		_, _, _, err := findAccessKey(ip, serverUDPBufferSize, packet, cipherList, NewDebugLogger("UDP"))
+		_, _, _, err := findShadowsocksAccessKey(ip, serverUDPBufferSize, packet, cipherList, nil)
 		if err != nil {
 			b.Error(err)
 		}
@@ -144,7 +144,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		ip := ips[n%numIPs]
-		_, _, _, err := findAccessKey(ip, serverUDPBufferSize, packet, cipherList, NewDebugLogger("UDP"))
+		_, _, _, err := findShadowsocksAccessKey(ip, serverUDPBufferSize, packet, cipherList, nil)
 		if err != nil {
 			b.Error(err)
 		}

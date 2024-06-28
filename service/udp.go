@@ -117,13 +117,14 @@ func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *Ciph
 		return nil, nil, nil, 0, onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
 	}
 
-	logDebug := NewDebugLogger("UDP")
-	defer logDebug(clientAddr.String(), "done%s", "")
-	logDebug(clientAddr.String(), "Outbound packet has %d bytes", clientProxyBytes)
+	if logger.IsEnabledFor(logging.DEBUG) {
+		defer logger.Debugf("UDP(%v): done", clientAddr)
+		logger.Debugf("UDP(%v): Outbound packet has %d bytes", clientAddr, clientProxyBytes)
+	}
 
 	remoteIP := clientAddr.(*net.UDPAddr).AddrPort().Addr()
 
-	cipherEntry, textData, timeToCipher, keyErr := findAccessKey(remoteIP, serverUDPBufferSize, cipherBuf[:clientProxyBytes], h.ciphers, logDebug)
+	cipherEntry, textData, timeToCipher, keyErr := findShadowsocksAccessKey(remoteIP, serverUDPBufferSize, cipherBuf[:clientProxyBytes], h.ciphers, debugUDP)
 	h.m.AddUDPCipherSearch(err == nil, timeToCipher)
 	if keyErr != nil {
 		return nil, nil, nil, 0, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)

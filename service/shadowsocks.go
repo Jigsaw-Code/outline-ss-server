@@ -22,8 +22,10 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 )
 
-// findAccessKey implements a trial decryption search. This assumes that all ciphers are AEAD.
-func findAccessKey(clientIP netip.Addr, bufferSize int, src []byte, cipherList CipherList, logDebug DebugLoggerFunc) (*CipherEntry, []byte, time.Duration, error) {
+type DebugLoggerFunc func(tag string, template string, val interface{})
+
+// findShadowsocksAccessKey implements a trial decryption search. This assumes that all ciphers are AEAD.
+func findShadowsocksAccessKey(clientIP netip.Addr, bufferSize int, src []byte, cipherList CipherList, logDebug DebugLoggerFunc) (*CipherEntry, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
 
