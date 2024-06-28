@@ -16,7 +16,6 @@ package service
 
 import (
 	"bytes"
-	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -71,52 +70,6 @@ func debugTCP(cipherID, template string, val interface{}) {
 	}
 }
 
-// bytesForKeyFinding is the number of bytes to read for finding the AccessKey.
-// Is must satisfy provided >= bytesForKeyFinding >= required for every cipher in the list.
-// provided = saltSize + 2 + 2 * cipher.TagSize, the minimum number of bytes we will see in a valid connection
-// required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
-const bytesForKeyFinding = 50
-
-func findAccessKey(clientReader io.Reader, clientIP netip.Addr, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
-	// We snapshot the list because it may be modified while we use it.
-	ciphers := cipherList.SnapshotForClientIP(clientIP)
-	firstBytes := make([]byte, bytesForKeyFinding)
-	if n, err := io.ReadFull(clientReader, firstBytes); err != nil {
-		return nil, clientReader, nil, 0, fmt.Errorf("reading header failed after %d bytes: %w", n, err)
-	}
-
-	findStartTime := time.Now()
-	entry, elt := findEntry(firstBytes, ciphers)
-	timeToCipher := time.Since(findStartTime)
-	if entry == nil {
-		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
-		return nil, clientReader, nil, timeToCipher, fmt.Errorf("could not find valid TCP cipher")
-	}
-
-	// Move the active cipher to the front, so that the search is quicker next time.
-	cipherList.MarkUsedByClientIP(elt, clientIP)
-	salt := firstBytes[:entry.CryptoKey.SaltSize()]
-	return entry, io.MultiReader(bytes.NewReader(firstBytes), clientReader), salt, timeToCipher, nil
-}
-
-// Implements a trial decryption search.  This assumes that all ciphers are AEAD.
-func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.Element) {
-	// To hold the decrypted chunk length.
-	chunkLenBuf := [2]byte{}
-	for ci, elt := range ciphers {
-		entry := elt.Value.(*CipherEntry)
-		cryptoKey := entry.CryptoKey
-		_, err := shadowsocks.Unpack(chunkLenBuf[:0], firstBytes[:cryptoKey.SaltSize()+2+cryptoKey.TagSize()], cryptoKey)
-		if err != nil {
-			debugTCP(entry.ID, "Failed to decrypt length: %v", err)
-			continue
-		}
-		debugTCP(entry.ID, "Found cipher at index %d", ci)
-		return entry, elt
-	}
-	return nil, nil
-}
-
 type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
 
 // ShadowsocksTCPMetrics is used to report Shadowsocks metrics on TCP connections.
@@ -125,16 +78,29 @@ type ShadowsocksTCPMetrics interface {
 	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
 }
 
+// bytesForKeyFinding is the number of bytes to read for finding the AccessKey.
+// Is must satisfy provided >= bytesForKeyFinding >= required for every cipher in the list.
+// provided = saltSize + 2 + 2 * cipher.TagSize, the minimum number of bytes we will see in a valid connection
+// required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
+const bytesForKeyFinding = 50
+
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksTCPMetrics) StreamAuthenticateFunc {
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+		firstBytes := make([]byte, bytesForKeyFinding)
+		if n, err := io.ReadFull(clientConn, firstBytes); err != nil {
+			metrics.AddTCPCipherSearch(false, 0)
+			return "", clientConn, onet.NewConnectionError("ERR_CIPHER", fmt.Sprintf("Reading header failed after %d bytes", n), err)
+		}
+
 		// Find the cipher and acess key id.
-		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers)
+		bufferSize := 2
+		cipherEntry, _, timeToCipher, keyErr := findShadowsocksAccessKey(remoteIP(clientConn), bufferSize, firstBytes, ciphers, debugTCP)
 		metrics.AddTCPCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
-			const status = "ERR_CIPHER"
-			return "", nil, onet.NewConnectionError(status, "Failed to find a valid cipher", keyErr)
+			// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
+			return "", clientConn, onet.NewConnectionError("ERR_CIPHER", "Failed to find a valid cipher", keyErr)
 		}
 		var id string
 		if cipherEntry != nil {
@@ -142,6 +108,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 		}
 
 		// Check if the connection is a replay.
+		clientSalt := firstBytes[:cipherEntry.CryptoKey.SaltSize()]
 		isServerSalt := cipherEntry.SaltGenerator.IsServerSalt(clientSalt)
 		// Only check the cache if findAccessKey succeeded and the salt is unrecognized.
 		if isServerSalt || !replayCache.Add(cipherEntry.ID, clientSalt) {
@@ -154,6 +121,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 			return id, nil, onet.NewConnectionError(status, "Replay detected", nil)
 		}
 
+		clientReader := io.MultiReader(bytes.NewReader(firstBytes), clientConn)
 		ssr := shadowsocks.NewReader(clientReader, cipherEntry.CryptoKey)
 		ssw := shadowsocks.NewWriter(clientConn, cipherEntry.CryptoKey)
 		ssw.SetSaltGenerator(cipherEntry.SaltGenerator)
