@@ -19,7 +19,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -65,15 +64,22 @@ type SSServer struct {
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	listeners   []io.Closer
+	listeners   []Listener
 }
 
-func (s *SSServer) serve(addr NetworkAddr, listener io.Closer, cipherList service.CipherList) error {
+// The implementations of listeners for different network types are not
+// interchangeable. The type of listener depends on the network type.
+// TODO(sbruens): Create a custom `Listener` type so we can share serving logic,
+// dispatching to the handlers based on connection type instead of on the
+// listener type.
+type Listener = any
+
+func (s *SSServer) serve(addr NetworkAddr, listener Listener, cipherList service.CipherList) error {
 	switch ln := listener.(type) {
 	case net.Listener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(addr.String(), authFunc, s.m, tcpReadTimeout)
+		tcpHandler := service.NewTCPHandler(addr.Key(), authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
 			c, err := ln.Accept()
 			return c.(transport.StreamConn), err
@@ -161,7 +167,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		cipherList := service.NewCipherList()
 		ciphers, ok := addrCiphers[addr]
 		if !ok {
-			return fmt.Errorf("unable to find ciphers for address: %v", addr)
+			return fmt.Errorf("unable to find ciphers for address: %v", addr.Key())
 		}
 		cipherList.Update(ciphers)
 
@@ -174,7 +180,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		s.listeners = append(s.listeners, listener)
 
 		if err = s.serve(addr, listener, cipherList); err != nil {
-			return fmt.Errorf("failed to serve on listener %v: %w", listener, err)
+			return fmt.Errorf("failed to serve on %s listener on address %s: %w", addr.Network(), addr.String(), err)
 		}
 	}
 	logger.Infof("Loaded %v access keys over %v listeners", uniqueCiphers, len(s.listeners))
@@ -185,20 +191,22 @@ func (s *SSServer) loadConfig(filename string) error {
 // Stop serving on all listeners.
 func (s *SSServer) Stop() error {
 	for _, listener := range s.listeners {
-		var addr net.Addr
 		switch ln := listener.(type) {
 		case net.Listener:
-			addr = ln.Addr()
+			err := ln.Close()
+			if err != nil {
+				//lint:ignore ST1005 Shadowsocks is capitalized.
+				return fmt.Errorf("Shadowsocks %s service on address %s failed to stop: %w", ln.Addr().Network(), ln.Addr().String(), err)
+			}
 		case net.PacketConn:
-			addr = ln.LocalAddr()
+			err := ln.Close()
+			if err != nil {
+				//lint:ignore ST1005 Shadowsocks is capitalized.
+				return fmt.Errorf("Shadowsocks %s service on address %s failed to stop: %w", ln.LocalAddr().Network(), ln.LocalAddr().String(), err)
+			}
 		default:
 			return fmt.Errorf("unknown listener type: %v", ln)
 		}
-		if err := listener.Close(); err != nil {
-			//lint:ignore ST1005 Shadowsocks is capitalized.
-			return fmt.Errorf("Shadowsocks service on address %s %s failed to stop: %w", addr.Network(), addr.String(), err)
-		}
-		logger.Infof("Shadowsocks service on address %s %s stopped", addr.Network(), addr.String())
 	}
 	return nil
 }

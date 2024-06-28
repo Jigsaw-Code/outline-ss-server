@@ -236,7 +236,7 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 			if errors.Is(err, net.ErrClosed) {
 				break
 			}
-			logger.Warningf("AcceptTCP failed: %v. Continuing to listen.", err)
+			logger.Warningf("Accept failed: %v. Continuing to listen.", err)
 			continue
 		}
 

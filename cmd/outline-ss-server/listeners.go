@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -45,8 +44,14 @@ func (na *NetworkAddr) JoinHostPort() string {
 	return net.JoinHostPort(na.Host, strconv.Itoa(int(na.Port)))
 }
 
+// Key returns a representative string useful to retrieve this entity from a
+// map. This is used to uniquely identify reusable listeners.
+func (na *NetworkAddr) Key() string {
+	return na.network + "/" + na.JoinHostPort()
+}
+
 // Listen creates a new listener for the [NetworkAddr].
-func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (io.Closer, error) {
+func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (Listener, error) {
 	address := na.JoinHostPort()
 
 	switch na.network {
