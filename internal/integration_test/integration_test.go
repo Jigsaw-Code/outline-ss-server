@@ -289,7 +289,8 @@ func TestUDPEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	testMetrics := &fakeUDPMetrics{}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics)
+	authFunc := service.NewShadowsocksPacketAuthenticator(cipherList, testMetrics)
+	proxy := service.NewPacketHandler(time.Hour, authFunc, testMetrics)
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -521,7 +522,8 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
+	authFunc := service.NewShadowsocksPacketAuthenticator(cipherList, &service.NoOpUDPMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, authFunc, &service.NoOpUDPMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -565,7 +567,8 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
+	authFunc := service.NewShadowsocksPacketAuthenticator(cipherList, &service.NoOpUDPMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, authFunc, &service.NoOpUDPMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
