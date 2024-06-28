@@ -15,7 +15,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -121,7 +120,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 	for {
 		status := "OK"
-		keyID, clientInfo, proxyMetrics, connErr := h.handleConnection(context.TODO(), clientConn)
+		keyID, clientInfo, proxyMetrics, connErr := h.handleConnection(clientConn)
 		if connErr != nil {
 			if errors.Is(connErr.Cause, net.ErrClosed) {
 				break
@@ -159,7 +158,7 @@ func (h *packetHandler) authenticate(clientConn net.PacketConn) (net.Addr, *Ciph
 	return clientAddr, cipherEntry, textData, clientProxyBytes, nil
 }
 
-func (h *packetHandler) proxyConnection(ctx context.Context, clientAddr net.Addr, tgtAddr net.Addr, clientConn net.PacketConn, cipherEntry CipherEntry, payload []byte, proxyMetrics *metrics.ProxyMetrics) (ipinfo.IPInfo, *onet.ConnectionError) {
+func (h *packetHandler) proxyConnection(clientAddr net.Addr, tgtAddr net.Addr, clientConn net.PacketConn, cipherEntry CipherEntry, payload []byte, proxyMetrics *metrics.ProxyMetrics) (ipinfo.IPInfo, *onet.ConnectionError) {
 	tgtConn := h.nm.Get(clientAddr.String())
 	if tgtConn == nil {
 		clientInfo, locErr := ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
@@ -183,7 +182,7 @@ func (h *packetHandler) proxyConnection(ctx context.Context, clientAddr net.Addr
 	return tgtConn.clientInfo, nil
 }
 
-func (h *packetHandler) handleConnection(ctx context.Context, clientConn net.PacketConn) (string, ipinfo.IPInfo, metrics.ProxyMetrics, *onet.ConnectionError) {
+func (h *packetHandler) handleConnection(clientConn net.PacketConn) (string, ipinfo.IPInfo, metrics.ProxyMetrics, *onet.ConnectionError) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf("Panic in UDP loop: %v. Continuing to listen.", r)
@@ -204,7 +203,7 @@ func (h *packetHandler) handleConnection(ctx context.Context, clientConn net.Pac
 	}
 	debugUDPAddr(clientAddr, "Proxy exit %s", tgtAddr.String())
 
-	clientInfo, err := h.proxyConnection(ctx, clientAddr, tgtAddr, clientConn, *cipherEntry, payload, &proxyMetrics)
+	clientInfo, err := h.proxyConnection(clientAddr, tgtAddr, clientConn, *cipherEntry, payload, &proxyMetrics)
 	return cipherEntry.ID, clientInfo, proxyMetrics, err
 }
 
