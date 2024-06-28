@@ -124,9 +124,7 @@ func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher ti
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
-func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator, useValidCipher bool) *natTestMetrics {
-	ciphers, _ := MakeTestCiphers([]string{"asdf"})
-	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
+func sendToDiscard(ciphers CipherList, payloads [][]byte, cipher *shadowsocks.EncryptionKey, validator onet.TargetIPValidator) *natTestMetrics {
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
 	handler := NewPacketHandler(timeout, ciphers, metrics)
@@ -141,12 +139,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator, useValid
 	targetAddr := socks.ParseAddr("127.0.0.1:9")
 	for _, payload := range payloads {
 		plaintext := append(targetAddr, payload...)
-		var ciphertext []byte
-		if useValidCipher {
-			ciphertext = make([]byte, cipher.SaltSize()+len(plaintext)+cipher.TagSize())
-		} else {
-			ciphertext = []byte("invalid cipher")
-		}
+		ciphertext := make([]byte, cipher.SaltSize()+len(plaintext)+cipher.TagSize())
 		shadowsocks.Pack(ciphertext, plaintext, cipher)
 		clientConn.recv <- packet{
 			addr: &net.UDPAddr{
@@ -163,11 +156,15 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator, useValid
 }
 
 func sendToDiscardWithValidCipher(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
-	return sendToDiscard(payloads, validator, true)
+	ciphers, _ := MakeTestCiphers([]string{"asdf"})
+	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
+	return sendToDiscard(ciphers, payloads, cipher, validator)
 }
 
 func sendToDiscardWithInValidCipher(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
-	return sendToDiscard(payloads, validator, false)
+	ciphers, _ := MakeTestCiphers([]string{"asdf"})
+	cipher, _ := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, "invalid cipher")
+	return sendToDiscard(ciphers, payloads, cipher, validator)
 }
 
 func TestIPFilter(t *testing.T) {
