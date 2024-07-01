@@ -82,7 +82,10 @@ func (s *SSServer) serve(addr NetworkAddr, listener Listener, cipherList service
 		tcpHandler := service.NewTCPHandler(addr.Key(), authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
 			c, err := ln.Accept()
-			return c.(transport.StreamConn), err
+			if err == nil {
+				return c.(transport.StreamConn), err
+			}
+			return nil, err
 		}
 		go service.StreamServe(accept, tcpHandler.Handle)
 	case net.PacketConn:
@@ -102,8 +105,8 @@ func (s *SSServer) loadConfig(filename string) error {
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("failed to validate config: %w", err)
 	}
+
 	uniqueCiphers := 0
-	// TODO: Clone existing listeners so we can close them after starting the new ones.
 	addrs := make([]NetworkAddr, 0)
 	addrCiphers := make(map[NetworkAddr]*list.List) // Values are *List of *CipherEntry.
 
@@ -163,6 +166,8 @@ func (s *SSServer) loadConfig(filename string) error {
 		}
 	}
 
+	// Create new listeners based on the configured network addresses.
+	newListeners := make([]Listener, 0)
 	for _, addr := range addrs {
 		cipherList := service.NewCipherList()
 		ciphers, ok := addrCiphers[addr]
@@ -177,18 +182,25 @@ func (s *SSServer) loadConfig(filename string) error {
 			return fmt.Errorf("Shadowsocks %s service failed to start on address %s: %w", addr.Network(), addr.String(), err)
 		}
 		logger.Infof("Shadowsocks %s service listening on %s", addr.Network(), addr.String())
-		s.listeners = append(s.listeners, listener)
+		newListeners = append(newListeners, listener)
 
 		if err = s.serve(addr, listener, cipherList); err != nil {
 			return fmt.Errorf("failed to serve on %s listener on address %s: %w", addr.Network(), addr.String(), err)
 		}
 	}
+
+	// Take down the old listeners now that the new ones are serving.
+	if err := s.Stop(); err != nil {
+		logger.Warningf("Failed to stop old listeners: %w", err)
+	}
+	s.listeners = newListeners
+
 	logger.Infof("Loaded %v access keys over %v listeners", uniqueCiphers, len(s.listeners))
 	s.m.SetNumAccessKeys(uniqueCiphers, len(s.listeners))
 	return nil
 }
 
-// Stop serving on all listeners.
+// Stop serving on all existing listeners.
 func (s *SSServer) Stop() error {
 	for _, listener := range s.listeners {
 		switch ln := listener.(type) {

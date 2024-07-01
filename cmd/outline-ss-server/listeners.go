@@ -47,7 +47,7 @@ func (sl *sharedListener) Accept() (net.Conn, error) {
 			Op:   "accept",
 			Net:  sl.Listener.Addr().Network(),
 			Addr: sl.Listener.Addr(),
-			Err:  fmt.Errorf("listener closed"),
+			Err:  net.ErrClosed,
 		}
 	}
 
@@ -76,7 +76,7 @@ func (sl *sharedListener) Accept() (net.Conn, error) {
 				Op:   "accept",
 				Net:  sl.Listener.Addr().Network(),
 				Addr: sl.Listener.Addr(),
-				Err:  fmt.Errorf("listener closed"),
+				Err:  net.ErrClosed,
 			}
 		}
 	}
