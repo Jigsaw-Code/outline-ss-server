@@ -191,7 +191,7 @@ func (s *SSServer) loadConfig(filename string) error {
 
 	// Take down the old listeners now that the new ones are serving.
 	if err := s.Stop(); err != nil {
-		logger.Warningf("Failed to stop old listeners: %w", err)
+		logger.Errorf("Failed to stop old listeners: %w", err)
 	}
 	s.listeners = newListeners
 
