@@ -52,23 +52,29 @@ func init() {
 
 func TestMethodsDontPanic(t *testing.T) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry())
-	proxyMetrics := metrics.ProxyMetrics{
+	tcpProxyMetrics := metrics.ProxyMetrics{
 		ClientProxy: 1,
 		ProxyTarget: 2,
 		TargetProxy: 3,
 		ProxyClient: 4,
+	}
+	udpProxyMetrics := metrics.ProxyMetrics{
+		ClientProxy: 10,
+		ProxyTarget: 20,
+		TargetProxy: 30,
+		ProxyClient: 40,
 	}
 	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
 	ssMetrics.AddOpenTCPConnection(ipInfo)
 	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "0")
-	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
-	ssMetrics.AddUDPPacketFromClient(ipInfo, "2", "OK", 10, 20)
+	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "1", "OK", tcpProxyMetrics, 10*time.Millisecond)
+	ssMetrics.AddUDPPacketFromClient(ipInfo, "2", "OK", udpProxyMetrics)
 	ssMetrics.AddUDPPacketFromTarget(ipInfo, "3", "OK", 10, 20)
 	ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
 	ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
-	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, proxyMetrics.ClientProxy)
+	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", 443, tcpProxyMetrics.ClientProxy)
 	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
 	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
 }
@@ -174,14 +180,19 @@ func BenchmarkProbe(b *testing.B) {
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	proxyMetrics := metrics.ProxyMetrics{
+		ClientProxy: 1000,
+		ProxyTarget: 2000,
+		TargetProxy: 3000,
+		ProxyClient: 4000,
+	}
 	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
 	accessKey := "key 1"
 	status := "OK"
-	size := 1000
 	timeToCipher := time.Microsecond
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPPacketFromClient(clientInfo, accessKey, status, size, size)
+		ssMetrics.AddUDPPacketFromClient(clientInfo, accessKey, status, proxyMetrics)
 		ssMetrics.AddUDPCipherSearch(true, timeToCipher)
 	}
 }
