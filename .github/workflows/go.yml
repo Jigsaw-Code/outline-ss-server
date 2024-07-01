@@ -32,12 +32,8 @@ jobs:
     - name: Build
       run: go build -v ./...
 
-    - name: Check SS licenses
+    - name: Check licenses
       # We allow only "notice" type of licenses.
-      run: go run github.com/google/go-licenses check --ignore=golang.org/x --allowed_licenses=Apache-2.0,Apache-3,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
-
-    - name: Check x licenses
-      env: {GO_FLAGS: -C x}
       run: go run github.com/google/go-licenses check --ignore=golang.org/x --allowed_licenses=Apache-2.0,Apache-3,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
 
     - name: Test
