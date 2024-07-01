@@ -3,6 +3,7 @@ module github.com/Jigsaw-Code/outline-ss-server
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.14
 	github.com/go-task/task/v3 v3.34.1
+	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.8.0
@@ -137,7 +138,6 @@ require (
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/go-containerregistry v0.14.0 // indirect
 	github.com/google/go-github/v50 v50.1.0 // indirect
-	github.com/google/go-licenses v1.6.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/ko v0.13.0 // indirect
 	github.com/google/licenseclassifier v0.0.0-20210722185704-3043a050f148 // indirect
