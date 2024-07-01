@@ -193,14 +193,12 @@ func (s *SSServer) Stop() error {
 	for _, listener := range s.listeners {
 		switch ln := listener.(type) {
 		case net.Listener:
-			err := ln.Close()
-			if err != nil {
+			if err := ln.Close(); err != nil {
 				//lint:ignore ST1005 Shadowsocks is capitalized.
 				return fmt.Errorf("Shadowsocks %s service on address %s failed to stop: %w", ln.Addr().Network(), ln.Addr().String(), err)
 			}
 		case net.PacketConn:
-			err := ln.Close()
-			if err != nil {
+			if err := ln.Close(); err != nil {
 				//lint:ignore ST1005 Shadowsocks is capitalized.
 				return fmt.Errorf("Shadowsocks %s service on address %s failed to stop: %w", ln.LocalAddr().Network(), ln.LocalAddr().String(), err)
 			}
