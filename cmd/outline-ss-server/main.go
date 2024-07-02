@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"

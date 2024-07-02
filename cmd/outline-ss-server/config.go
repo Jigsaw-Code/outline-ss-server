@@ -15,7 +15,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -58,10 +57,6 @@ type Config struct {
 // Validate checks that the config is valid.
 func (c *Config) Validate() error {
 	for _, serviceConfig := range c.Services {
-		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
-			return errors.New("must specify at least 1 listener and 1 key per service")
-		}
-
 		for _, listenerConfig := range serviceConfig.Listeners {
 			// TODO: Support more listener types.
 			if listenerConfig.Type != listenerTypeDirect {
