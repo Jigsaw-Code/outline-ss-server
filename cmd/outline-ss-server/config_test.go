@@ -62,6 +62,18 @@ func TestValidateConfigFails(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "WithHostnameAddress",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeDirect, Address: "tcp/example.com:9000"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 
 	"gopkg.in/yaml.v2"
@@ -63,12 +64,15 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("unsupported listener type: %s", listenerConfig.Type)
 			}
 
-			network, _, _, err := SplitNetworkAddr(listenerConfig.Address)
+			network, host, _, err := SplitNetworkAddr(listenerConfig.Address)
 			if err != nil {
 				return fmt.Errorf("invalid listener address `%s`: %v", listenerConfig.Address, err)
 			}
 			if network != "tcp" && network != "udp" {
 				return fmt.Errorf("unsupported network: %s", network)
+			}
+			if ip := net.ParseIP(host); ip == nil {
+				return fmt.Errorf("address must be IP, found: %s", host)
 			}
 		}
 	}
