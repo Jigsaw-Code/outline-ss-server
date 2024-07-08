@@ -62,6 +62,23 @@ func TestValidateConfigFails(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "WithDuplicateListeners",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
+						},
+					},
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

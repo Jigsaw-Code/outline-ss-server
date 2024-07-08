@@ -166,7 +166,7 @@ func NewListenerManager() ListenerManager {
 // reusable listener wrappers, which do not actually close the underlying socket
 // until all uses of the shared listener have been closed.
 func (m *listenerManager) Listen(ctx context.Context, network string, addr string, config net.ListenConfig) (any, error) {
-	lnKey := network + "/" + addr
+	lnKey := listenerKey(network, addr)
 
 	switch network {
 
@@ -244,4 +244,8 @@ func (m *listenerManager) Delete(key string) {
 	m.listenersMu.Lock()
 	delete(m.listeners, key)
 	m.listenersMu.Unlock()
+}
+
+func listenerKey(network string, addr string) string {
+	return network + "/" + addr
 }
