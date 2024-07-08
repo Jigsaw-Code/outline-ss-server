@@ -41,12 +41,12 @@ type Service struct {
 	ciphers     *list.List // Values are *List of *service.CipherEntry.
 }
 
-func (s *Service) Serve(addr NetworkAddr, listener Listener, cipherList service.CipherList) error {
+func (s *Service) Serve(lnKey string, listener Listener, cipherList service.CipherList) error {
 	switch ln := listener.(type) {
 	case net.Listener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(addr.Key(), authFunc, s.m, tcpReadTimeout)
+		tcpHandler := service.NewTCPHandler(lnKey, authFunc, s.m, tcpReadTimeout)
 		accept := func() (transport.StreamConn, error) {
 			c, err := ln.Accept()
 			if err == nil {
@@ -85,20 +85,21 @@ func (s *Service) Stop() error {
 }
 
 // AddListener adds a new listener to the service.
-func (s *Service) AddListener(addr NetworkAddr) error {
+func (s *Service) AddListener(network string, addr string) error {
 	// Create new listeners based on the configured network addresses.
 	cipherList := service.NewCipherList()
 	cipherList.Update(s.ciphers)
 
-	listener, err := addr.Listen(context.TODO(), net.ListenConfig{KeepAlive: 0})
+	listener, err := Listen(context.TODO(), network, addr, net.ListenConfig{KeepAlive: 0})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks %s service failed to start on address %s: %w", addr.Network(), addr.String(), err)
+		return fmt.Errorf("Shadowsocks %s service failed to start on address %s: %w", network, addr, err)
 	}
 	s.listeners = append(s.listeners, listener)
-	logger.Infof("Shadowsocks %s service listening on %s", addr.Network(), addr.String())
-	if err = s.Serve(addr, listener, cipherList); err != nil {
-		return fmt.Errorf("failed to serve on %s listener on address %s: %w", addr.Network(), addr.String(), err)
+	logger.Infof("Shadowsocks %s service listening on %s", network, addr)
+	lnKey := network + "/" + addr
+	if err = s.Serve(lnKey, listener, cipherList); err != nil {
+		return fmt.Errorf("failed to serve on %s listener on address %s: %w", network, addr, err)
 	}
 	return nil
 }
@@ -145,11 +146,8 @@ func NewService(config ServiceConfig, natTimeout time.Duration, m *outlineMetric
 	}
 
 	for _, listener := range config.Listeners {
-		addr, err := ParseNetworkAddr(listener.Address)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing listener address `%s`: %v", listener.Address, err)
-		}
-		if err := s.AddListener(addr); err != nil {
+		network := string(listener.Type)
+		if err := s.AddListener(network, listener.Address); err != nil {
 			return nil, err
 		}
 	}

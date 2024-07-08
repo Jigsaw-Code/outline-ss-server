@@ -18,9 +18,11 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -92,12 +94,8 @@ func (s *SSServer) loadConfig(filename string) error {
 				ciphers:     list.New(),
 			}
 			for _, network := range []string{"tcp", "udp"} {
-				addr := NetworkAddr{
-					network: network,
-					Host:    "::",
-					Port:    uint(legacyKeyServiceConfig.Port),
-				}
-				if err := legacyService.AddListener(addr); err != nil {
+				addr := net.JoinHostPort("::", strconv.Itoa(legacyKeyServiceConfig.Port))
+				if err := legacyService.AddListener(network, addr); err != nil {
 					return err
 				}
 			}

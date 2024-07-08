@@ -28,7 +28,8 @@ type ServiceConfig struct {
 
 type ListenerType string
 
-const listenerTypeDirect ListenerType = "direct"
+const listenerTypeTCP ListenerType = "tcp"
+const listenerTypeUDP ListenerType = "udp"
 
 type ListenerConfig struct {
 	Type    ListenerType
@@ -59,16 +60,13 @@ func (c *Config) Validate() error {
 	for _, serviceConfig := range c.Services {
 		for _, listenerConfig := range serviceConfig.Listeners {
 			// TODO: Support more listener types.
-			if listenerConfig.Type != listenerTypeDirect {
+			if listenerConfig.Type != listenerTypeTCP && listenerConfig.Type != listenerTypeUDP {
 				return fmt.Errorf("unsupported listener type: %s", listenerConfig.Type)
 			}
 
-			network, host, _, err := SplitNetworkAddr(listenerConfig.Address)
+			host, _, err := net.SplitHostPort(listenerConfig.Address)
 			if err != nil {
 				return fmt.Errorf("invalid listener address `%s`: %v", listenerConfig.Address, err)
-			}
-			if network != "tcp" && network != "udp" {
-				return fmt.Errorf("unsupported network: %s", network)
 			}
 			if ip := net.ParseIP(host); ip == nil {
 				return fmt.Errorf("address must be IP, found: %s", host)

@@ -16,11 +16,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -152,71 +149,46 @@ type globalListener struct {
 	deadlineMu sync.Mutex
 }
 
-type NetworkAddr struct {
-	network string
-	Host    string
-	Port    uint
-}
-
-// String returns a human-readable representation of the [NetworkAddr].
-func (na *NetworkAddr) Network() string {
-	return na.network
-}
-
-// String returns a human-readable representation of the [NetworkAddr].
-func (na *NetworkAddr) String() string {
-	return na.JoinHostPort()
-}
-
-// JoinHostPort is a convenience wrapper around [net.JoinHostPort].
-func (na *NetworkAddr) JoinHostPort() string {
-	return net.JoinHostPort(na.Host, strconv.Itoa(int(na.Port)))
-}
-
-// Key returns a representative string useful to retrieve this entity from a
-// map. This is used to uniquely identify reusable listeners.
-func (na *NetworkAddr) Key() string {
-	return na.network + "/" + na.JoinHostPort()
-}
-
-// Listen creates a new listener for the [NetworkAddr].
+// Listen creates a new listener for a given network and address.
 //
 // Listeners can overlap one another, because during config changes the new
 // config is started before the old config is destroyed. This is done by using
 // reusable listener wrappers, which do not actually close the underlying socket
 // until all uses of the shared listener have been closed.
-func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (any, error) {
-	switch na.network {
+func Listen(ctx context.Context, network string, addr string, config net.ListenConfig) (any, error) {
+	lnKey := network + "/" + addr
+
+	switch network {
 
 	case "tcp":
 		listenersMu.Lock()
 		defer listenersMu.Unlock()
 
-		if lnGlobal, ok := listeners[na.Key()]; ok {
+		if lnGlobal, ok := listeners[lnKey]; ok {
 			lnGlobal.usage.Add(1)
 			return &sharedListener{
 				usage:      &lnGlobal.usage,
 				deadline:   &lnGlobal.deadline,
 				deadlineMu: &lnGlobal.deadlineMu,
-				key:        na.Key(),
+				key:        lnKey,
 				listener:   lnGlobal.ln,
 			}, nil
 		}
 
-		ln, err := config.Listen(ctx, na.network, na.JoinHostPort())
+		ln, err := config.Listen(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
 
 		lnGlobal := &globalListener{ln: ln}
 		lnGlobal.usage.Store(1)
-		listeners[na.Key()] = lnGlobal
+		listeners[lnKey] = lnGlobal
 
 		return &sharedListener{
 			usage:      &lnGlobal.usage,
 			deadline:   &lnGlobal.deadline,
 			deadlineMu: &lnGlobal.deadlineMu,
-			key:        na.Key(),
+			key:        lnKey,
 			listener:   ln,
 		}, nil
 
@@ -224,71 +196,32 @@ func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (any
 		listenersMu.Lock()
 		defer listenersMu.Unlock()
 
-		if lnGlobal, ok := listeners[na.Key()]; ok {
+		if lnGlobal, ok := listeners[lnKey]; ok {
 			lnGlobal.usage.Add(1)
 			return &sharedPacketConn{
 				usage:      &lnGlobal.usage,
-				key:        na.Key(),
+				key:        lnKey,
 				PacketConn: lnGlobal.pc,
 			}, nil
 		}
 
-		pc, err := config.ListenPacket(ctx, na.network, na.JoinHostPort())
+		pc, err := config.ListenPacket(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
 
 		lnGlobal := &globalListener{pc: pc}
 		lnGlobal.usage.Store(1)
-		listeners[na.Key()] = lnGlobal
+		listeners[lnKey] = lnGlobal
 
 		return &sharedPacketConn{
 			usage:      &lnGlobal.usage,
-			key:        na.Key(),
+			key:        lnKey,
 			PacketConn: pc,
 		}, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported network: %s", na.network)
+		return nil, fmt.Errorf("unsupported network: %s", network)
 
 	}
-}
-
-// ParseNetworkAddr parses an address into a [NetworkAddr]. The input
-// string is expected to be of the form "network/host:port" where any part is
-// optional.
-//
-// Examples:
-//
-//	tcp/127.0.0.1:8000
-//	udp/127.0.0.1:9000
-func ParseNetworkAddr(addr string) (NetworkAddr, error) {
-	var host, port string
-	network, host, port, err := SplitNetworkAddr(addr)
-	if err != nil {
-		return NetworkAddr{}, err
-	}
-	if network == "" {
-		return NetworkAddr{}, errors.New("missing network")
-	}
-	p, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		return NetworkAddr{}, fmt.Errorf("invalid port: %v", err)
-	}
-	return NetworkAddr{
-		network: network,
-		Host:    host,
-		Port:    uint(p),
-	}, nil
-}
-
-// SplitNetworkAddr splits a into its network, host, and port components.
-func SplitNetworkAddr(a string) (network, host, port string, err error) {
-	beforeSlash, afterSlash, slashFound := strings.Cut(a, "/")
-	if slashFound {
-		network = strings.ToLower(strings.TrimSpace(beforeSlash))
-		a = afterSlash
-	}
-	host, port, err = net.SplitHostPort(a)
-	return
 }
