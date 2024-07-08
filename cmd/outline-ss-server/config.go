@@ -17,7 +17,6 @@ package main
 import (
 	"fmt"
 	"net"
-	"os"
 
 	"gopkg.in/yaml.v3"
 )
@@ -80,14 +79,9 @@ func (c *Config) Validate() error {
 }
 
 // readConfig attempts to read a config from a filename and parses it as a [Config].
-func readConfig(filename string) (*Config, error) {
+func readConfig(configData []byte) (*Config, error) {
 	config := Config{}
-	configData, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-	err = yaml.Unmarshal(configData, &config)
-	if err != nil {
+	if err := yaml.Unmarshal(configData, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 	return &config, nil

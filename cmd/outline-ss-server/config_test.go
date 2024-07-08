@@ -85,7 +85,7 @@ func TestValidateConfigFails(t *testing.T) {
 }
 
 func TestReadConfig(t *testing.T) {
-	config, err := readConfig("./config_example.yml")
+	config, err := readConfigFile("./config_example.yml")
 
 	require.NoError(t, err)
 	expected := Config{
@@ -115,7 +115,7 @@ func TestReadConfig(t *testing.T) {
 }
 
 func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
-	config, err := readConfig("./config_example.deprecated.yml")
+	config, err := readConfigFile("./config_example.deprecated.yml")
 
 	require.NoError(t, err)
 	expected := Config{
@@ -140,25 +140,23 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 func TestReadConfigFromEmptyFile(t *testing.T) {
 	file, _ := os.CreateTemp("", "empty.yaml")
 
-	config, err := readConfig(file.Name())
+	config, err := readConfigFile(file.Name())
 
 	require.NoError(t, err)
 	require.ElementsMatch(t, Config{}, config)
-}
-
-func TestReadConfigFromNonExistingFileFails(t *testing.T) {
-	config, err := readConfig("./foo")
-
-	require.Error(t, err)
-	require.ElementsMatch(t, nil, config)
 }
 
 func TestReadConfigFromIncorrectFormatFails(t *testing.T) {
 	file, _ := os.CreateTemp("", "empty.yaml")
 	file.WriteString("foo")
 
-	config, err := readConfig(file.Name())
+	config, err := readConfigFile(file.Name())
 
 	require.Error(t, err)
 	require.ElementsMatch(t, Config{}, config)
+}
+
+func readConfigFile(filename string) (*Config, error) {
+	configData, _ := os.ReadFile(filename)
+	return readConfig(configData)
 }

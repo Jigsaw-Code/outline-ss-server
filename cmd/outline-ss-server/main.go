@@ -98,7 +98,11 @@ func (s *SSServer) serve(addr NetworkAddr, listener Listener, cipherList service
 }
 
 func (s *SSServer) loadConfig(filename string) error {
-	config, err := readConfig(filename)
+	configData, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read config file %s: %w", filename, err)
+	}
+	config, err := readConfig(configData)
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
