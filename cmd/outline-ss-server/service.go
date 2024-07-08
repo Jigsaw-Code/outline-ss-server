@@ -34,6 +34,7 @@ import (
 type Listener = any
 
 type Service struct {
+	lnManager   ListenerManager
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache *service.ReplayCache
@@ -90,7 +91,7 @@ func (s *Service) AddListener(network string, addr string) error {
 	cipherList := service.NewCipherList()
 	cipherList.Update(s.ciphers)
 
-	listener, err := Listen(context.TODO(), network, addr, net.ListenConfig{KeepAlive: 0})
+	listener, err := s.lnManager.Listen(context.TODO(), network, addr, net.ListenConfig{KeepAlive: 0})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks %s service failed to start on address %s: %w", network, addr, err)
@@ -117,8 +118,9 @@ func (s *Service) NumCiphers() int {
 }
 
 // NewService creates a new Service based on a config
-func NewService(config ServiceConfig, natTimeout time.Duration, m *outlineMetrics, replayCache *service.ReplayCache) (*Service, error) {
+func NewService(config ServiceConfig, lnManager ListenerManager, natTimeout time.Duration, m *outlineMetrics, replayCache *service.ReplayCache) (*Service, error) {
 	s := Service{
+		lnManager:   lnManager,
 		natTimeout:  natTimeout,
 		m:           m,
 		replayCache: replayCache,

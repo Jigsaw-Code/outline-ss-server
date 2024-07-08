@@ -59,6 +59,7 @@ func init() {
 }
 
 type SSServer struct {
+	lnManager   ListenerManager
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
@@ -88,6 +89,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		legacyService, ok := legacyPortService[legacyKeyServiceConfig.Port]
 		if !ok {
 			legacyService = &Service{
+				lnManager:   s.lnManager,
 				natTimeout:  s.natTimeout,
 				m:           s.m,
 				replayCache: &s.replayCache,
@@ -111,7 +113,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	}
 
 	for _, serviceConfig := range config.Services {
-		service, err := NewService(serviceConfig, s.natTimeout, s.m, &s.replayCache)
+		service, err := NewService(serviceConfig, s.lnManager, s.natTimeout, s.m, &s.replayCache)
 		if err != nil {
 			return fmt.Errorf("Failed to create new service: %v", err)
 		}
@@ -156,6 +158,7 @@ func (s *SSServer) Stop() error {
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
 func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
+		lnManager:   NewListenerManager(),
 		natTimeout:  natTimeout,
 		m:           sm,
 		replayCache: service.NewReplayCache(replayHistory),

@@ -23,13 +23,9 @@ import (
 	"time"
 )
 
-var (
-	listeners   = make(map[string]*globalListener)
-	listenersMu sync.Mutex
-)
-
 type sharedListener struct {
 	listener   net.Listener
+	manager    ListenerManager
 	key        string
 	closed     atomic.Int32
 	usage      *atomic.Int32
@@ -99,9 +95,7 @@ func (sl *sharedListener) Close() error {
 
 		// See if we need to actually close the underlying listener.
 		if sl.usage.Add(-1) == 0 {
-			listenersMu.Lock()
-			delete(listeners, sl.key)
-			listenersMu.Unlock()
+			sl.manager.Delete(sl.key)
 			err := sl.listener.Close()
 			if err != nil {
 				return err
@@ -119,18 +113,17 @@ func (sl *sharedListener) Addr() net.Addr {
 
 type sharedPacketConn struct {
 	net.PacketConn
-	key    string
-	closed atomic.Int32
-	usage  *atomic.Int32
+	manager ListenerManager
+	key     string
+	closed  atomic.Int32
+	usage   *atomic.Int32
 }
 
 func (spc *sharedPacketConn) Close() error {
 	if spc.closed.CompareAndSwap(0, 1) {
 		// See if we need to actually close the underlying listener.
 		if spc.usage.Add(-1) == 0 {
-			listenersMu.Lock()
-			delete(listeners, spc.key)
-			listenersMu.Unlock()
+			spc.manager.Delete(spc.key)
 			err := spc.PacketConn.Close()
 			if err != nil {
 				return err
@@ -149,29 +142,47 @@ type globalListener struct {
 	deadlineMu sync.Mutex
 }
 
+// ListenerManager holds and manages the state of shared listeners.
+type ListenerManager interface {
+	Listen(ctx context.Context, network string, addr string, config net.ListenConfig) (any, error)
+	Delete(key string)
+}
+
+type listenerManager struct {
+	listeners   map[string]*globalListener
+	listenersMu sync.Mutex
+}
+
+func NewListenerManager() ListenerManager {
+	return &listenerManager{
+		listeners: make(map[string]*globalListener),
+	}
+}
+
 // Listen creates a new listener for a given network and address.
 //
 // Listeners can overlap one another, because during config changes the new
 // config is started before the old config is destroyed. This is done by using
 // reusable listener wrappers, which do not actually close the underlying socket
 // until all uses of the shared listener have been closed.
-func Listen(ctx context.Context, network string, addr string, config net.ListenConfig) (any, error) {
+func (m *listenerManager) Listen(ctx context.Context, network string, addr string, config net.ListenConfig) (any, error) {
 	lnKey := network + "/" + addr
 
 	switch network {
 
 	case "tcp":
-		listenersMu.Lock()
-		defer listenersMu.Unlock()
+		m.listenersMu.Lock()
+		defer m.listenersMu.Unlock()
 
-		if lnGlobal, ok := listeners[lnKey]; ok {
+		if lnGlobal, ok := m.listeners[lnKey]; ok {
 			lnGlobal.usage.Add(1)
 			return &sharedListener{
+				listener:   lnGlobal.ln,
+				manager:    m,
+				key:        lnKey,
 				usage:      &lnGlobal.usage,
 				deadline:   &lnGlobal.deadline,
 				deadlineMu: &lnGlobal.deadlineMu,
-				key:        lnKey,
-				listener:   lnGlobal.ln,
 			}, nil
 		}
 
@@ -182,26 +193,28 @@ func Listen(ctx context.Context, network string, addr string, config net.ListenC
 
 		lnGlobal := &globalListener{ln: ln}
 		lnGlobal.usage.Store(1)
-		listeners[lnKey] = lnGlobal
+		m.listeners[lnKey] = lnGlobal
 
 		return &sharedListener{
+			listener:   ln,
+			manager:    m,
+			key:        lnKey,
 			usage:      &lnGlobal.usage,
 			deadline:   &lnGlobal.deadline,
 			deadlineMu: &lnGlobal.deadlineMu,
-			key:        lnKey,
-			listener:   ln,
 		}, nil
 
 	case "udp":
-		listenersMu.Lock()
-		defer listenersMu.Unlock()
+		m.listenersMu.Lock()
+		defer m.listenersMu.Unlock()
 
-		if lnGlobal, ok := listeners[lnKey]; ok {
+		if lnGlobal, ok := m.listeners[lnKey]; ok {
 			lnGlobal.usage.Add(1)
 			return &sharedPacketConn{
-				usage:      &lnGlobal.usage,
-				key:        lnKey,
 				PacketConn: lnGlobal.pc,
+				manager:    m,
+				key:        lnKey,
+				usage:      &lnGlobal.usage,
 			}, nil
 		}
 
@@ -212,16 +225,23 @@ func Listen(ctx context.Context, network string, addr string, config net.ListenC
 
 		lnGlobal := &globalListener{pc: pc}
 		lnGlobal.usage.Store(1)
-		listeners[lnKey] = lnGlobal
+		m.listeners[lnKey] = lnGlobal
 
 		return &sharedPacketConn{
-			usage:      &lnGlobal.usage,
-			key:        lnKey,
 			PacketConn: pc,
+			manager:    m,
+			key:        lnKey,
+			usage:      &lnGlobal.usage,
 		}, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported network: %s", network)
 
 	}
+}
+
+func (m *listenerManager) Delete(key string) {
+	m.listenersMu.Lock()
+	delete(m.listeners, key)
+	m.listenersMu.Unlock()
 }
