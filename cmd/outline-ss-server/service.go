@@ -115,15 +115,6 @@ func (s *Service) NumCiphers() int {
 	return s.ciphers.Len()
 }
 
-// func NewService(natTimeout time.Duration, m *outlineMetrics, replayCache *service.ReplayCache) Service {
-// 	return &Service{
-// 		natTimeout:  natTimeout,
-// 		m:           m,
-// 		replayCache: replayCache,
-// 		ciphers:     list.New(),
-// 	}
-// }
-
 // NewService creates a new Service based on a config
 func NewService(config ServiceConfig, natTimeout time.Duration, m *outlineMetrics, replayCache *service.ReplayCache) (*Service, error) {
 	s := Service{
