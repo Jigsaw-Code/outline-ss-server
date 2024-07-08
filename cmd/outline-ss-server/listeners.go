@@ -32,7 +32,7 @@ var (
 )
 
 type sharedListener struct {
-	net.Listener
+	listener   net.Listener
 	key        string
 	closed     atomic.Int32
 	usage      *atomic.Int32
@@ -45,20 +45,20 @@ func (sl *sharedListener) Accept() (net.Conn, error) {
 	if sl.closed.Load() == 1 {
 		return nil, &net.OpError{
 			Op:   "accept",
-			Net:  sl.Listener.Addr().Network(),
-			Addr: sl.Listener.Addr(),
+			Net:  sl.listener.Addr().Network(),
+			Addr: sl.listener.Addr(),
 			Err:  net.ErrClosed,
 		}
 	}
 
-	conn, err := sl.Listener.Accept()
+	conn, err := sl.listener.Accept()
 	if err == nil {
 		return conn, nil
 	}
 
 	sl.deadlineMu.Lock()
 	if *sl.deadline {
-		switch ln := sl.Listener.(type) {
+		switch ln := sl.listener.(type) {
 		case *net.TCPListener:
 			ln.SetDeadline(time.Time{})
 		}
@@ -74,8 +74,8 @@ func (sl *sharedListener) Accept() (net.Conn, error) {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return nil, &net.OpError{
 				Op:   "accept",
-				Net:  sl.Listener.Addr().Network(),
-				Addr: sl.Listener.Addr(),
+				Net:  sl.listener.Addr().Network(),
+				Addr: sl.listener.Addr(),
 				Err:  net.ErrClosed,
 			}
 		}
@@ -92,7 +92,7 @@ func (sl *sharedListener) Close() error {
 		// the past, as we cannot actually close the listener.
 		sl.deadlineMu.Lock()
 		if !*sl.deadline {
-			switch ln := sl.Listener.(type) {
+			switch ln := sl.listener.(type) {
 			case *net.TCPListener:
 				ln.SetDeadline(time.Now().Add(-1 * time.Minute))
 			}
@@ -105,7 +105,7 @@ func (sl *sharedListener) Close() error {
 			listenersMu.Lock()
 			delete(listeners, sl.key)
 			listenersMu.Unlock()
-			err := sl.Listener.Close()
+			err := sl.listener.Close()
 			if err != nil {
 				return err
 			}
@@ -114,6 +114,10 @@ func (sl *sharedListener) Close() error {
 	}
 
 	return nil
+}
+
+func (sl *sharedListener) Addr() net.Addr {
+	return sl.listener.Addr()
 }
 
 type sharedPacketConn struct {
@@ -195,7 +199,7 @@ func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (any
 				deadline:   &lnGlobal.deadline,
 				deadlineMu: &lnGlobal.deadlineMu,
 				key:        na.Key(),
-				Listener:   lnGlobal.ln,
+				listener:   lnGlobal.ln,
 			}, nil
 		}
 
@@ -213,7 +217,7 @@ func (na *NetworkAddr) Listen(ctx context.Context, config net.ListenConfig) (any
 			deadline:   &lnGlobal.deadline,
 			deadlineMu: &lnGlobal.deadlineMu,
 			key:        na.Key(),
-			Listener:   ln,
+			listener:   ln,
 		}, nil
 
 	case "udp":
