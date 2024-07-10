@@ -35,6 +35,7 @@ type Listener = any
 
 type Service struct {
 	lnManager   ListenerManager
+	tcpTimeout  time.Duration
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache *service.ReplayCache
@@ -47,7 +48,7 @@ func (s *Service) Serve(lnKey string, listener Listener, cipherList service.Ciph
 	case net.Listener:
 		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, s.replayCache, s.m)
 		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(lnKey, authFunc, s.m, tcpReadTimeout)
+		tcpHandler := service.NewTCPHandler(lnKey, authFunc, s.m, s.tcpTimeout)
 		accept := func() (transport.StreamConn, error) {
 			c, err := ln.Accept()
 			if err == nil {
@@ -118,9 +119,10 @@ func (s *Service) NumCiphers() int {
 }
 
 // NewService creates a new Service based on a config
-func NewService(config ServiceConfig, lnManager ListenerManager, natTimeout time.Duration, m *outlineMetrics, replayCache *service.ReplayCache) (*Service, error) {
+func NewService(config ServiceConfig, lnManager ListenerManager, tcpTimeout time.Duration, natTimeout time.Duration, m *outlineMetrics, replayCache *service.ReplayCache) (*Service, error) {
 	s := Service{
 		lnManager:   lnManager,
+		tcpTimeout:  tcpTimeout,
 		natTimeout:  natTimeout,
 		m:           m,
 		replayCache: replayCache,

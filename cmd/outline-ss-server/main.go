@@ -90,6 +90,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		if !ok {
 			legacyService = &Service{
 				lnManager:   s.lnManager,
+				tcpTimeout:  tcpReadTimeout,
 				natTimeout:  s.natTimeout,
 				m:           s.m,
 				replayCache: &s.replayCache,
@@ -113,7 +114,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	}
 
 	for _, serviceConfig := range config.Services {
-		service, err := NewService(serviceConfig, s.lnManager, s.natTimeout, s.m, &s.replayCache)
+		service, err := NewService(serviceConfig, s.lnManager, tcpReadTimeout, s.natTimeout, s.m, &s.replayCache)
 		if err != nil {
 			return fmt.Errorf("Failed to create new service: %v", err)
 		}
