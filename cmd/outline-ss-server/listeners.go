@@ -20,78 +20,44 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
+type acceptResponse struct {
+	conn net.Conn
+	err  error
+}
+
 type sharedListener struct {
-	listener   net.Listener
-	manager    ListenerManager
-	key        string
-	closed     atomic.Int32
-	usage      *atomic.Int32
-	deadline   *bool
-	deadlineMu *sync.Mutex
+	listener net.Listener
+	manager  ListenerManager
+	key      string
+	closed   atomic.Int32
+	usage    *atomic.Int32
+	acceptCh chan acceptResponse
+	closeCh  chan struct{}
 }
 
 // Accept accepts connections until Close() is called.
 func (sl *sharedListener) Accept() (net.Conn, error) {
 	if sl.closed.Load() == 1 {
-		return nil, &net.OpError{
-			Op:   "accept",
-			Net:  sl.listener.Addr().Network(),
-			Addr: sl.listener.Addr(),
-			Err:  net.ErrClosed,
+		return nil, net.ErrClosed
+	}
+	select {
+	case acceptResponse := <-sl.acceptCh:
+		if acceptResponse.err != nil {
+			return nil, acceptResponse.err
 		}
+		return acceptResponse.conn, nil
+	case <-sl.closeCh:
+		return nil, net.ErrClosed
 	}
-
-	conn, err := sl.listener.Accept()
-	if err == nil {
-		return conn, nil
-	}
-
-	sl.deadlineMu.Lock()
-	if *sl.deadline {
-		switch ln := sl.listener.(type) {
-		case *net.TCPListener:
-			ln.SetDeadline(time.Time{})
-		}
-		*sl.deadline = false
-	}
-	sl.deadlineMu.Unlock()
-
-	if sl.closed.Load() == 1 {
-		// In `Close()` we set a deadline in the past to force currently-blocked
-		// listeners to close without having to close the underlying socket. To
-		// avoid callers from retrying, we avoid returning timeout errors and
-		// instead make sure we return a fake "closed" error.
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return nil, &net.OpError{
-				Op:   "accept",
-				Net:  sl.listener.Addr().Network(),
-				Addr: sl.listener.Addr(),
-				Err:  net.ErrClosed,
-			}
-		}
-	}
-
-	return nil, err
 }
 
 // Close stops accepting new connections without closing the underlying socket.
 // Only when the last user closes it, we actually close it.
 func (sl *sharedListener) Close() error {
 	if sl.closed.CompareAndSwap(0, 1) {
-		// NOTE: In order to cancel current calls to Accept(), we set a deadline in
-		// the past, as we cannot actually close the listener.
-		sl.deadlineMu.Lock()
-		if !*sl.deadline {
-			switch ln := sl.listener.(type) {
-			case *net.TCPListener:
-				ln.SetDeadline(time.Now().Add(-1 * time.Minute))
-			}
-			*sl.deadline = true
-		}
-		sl.deadlineMu.Unlock()
+		close(sl.closeCh)
 
 		// See if we need to actually close the underlying listener.
 		if sl.usage.Add(-1) == 0 {
@@ -135,11 +101,10 @@ func (spc *sharedPacketConn) Close() error {
 }
 
 type globalListener struct {
-	ln         net.Listener
-	pc         net.PacketConn
-	usage      atomic.Int32
-	deadline   bool
-	deadlineMu sync.Mutex
+	ln       net.Listener
+	pc       net.PacketConn
+	usage    atomic.Int32
+	acceptCh chan acceptResponse
 }
 
 // ListenerManager holds and manages the state of shared listeners.
@@ -177,12 +142,12 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 		if lnGlobal, ok := m.listeners[lnKey]; ok {
 			lnGlobal.usage.Add(1)
 			return &sharedListener{
-				listener:   lnGlobal.ln,
-				manager:    m,
-				key:        lnKey,
-				usage:      &lnGlobal.usage,
-				deadline:   &lnGlobal.deadline,
-				deadlineMu: &lnGlobal.deadlineMu,
+				listener: lnGlobal.ln,
+				manager:  m,
+				key:      lnKey,
+				usage:    &lnGlobal.usage,
+				acceptCh: lnGlobal.acceptCh,
+				closeCh:  make(chan struct{}),
 			}, nil
 		}
 
@@ -191,17 +156,24 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 			return nil, err
 		}
 
-		lnGlobal := &globalListener{ln: ln}
+		lnGlobal := &globalListener{ln: ln, acceptCh: make(chan acceptResponse)}
 		lnGlobal.usage.Store(1)
 		m.listeners[lnKey] = lnGlobal
 
+		go func() {
+			for {
+				conn, err := lnGlobal.ln.Accept()
+				lnGlobal.acceptCh <- acceptResponse{conn, err}
+			}
+		}()
+
 		return &sharedListener{
-			listener:   ln,
-			manager:    m,
-			key:        lnKey,
-			usage:      &lnGlobal.usage,
-			deadline:   &lnGlobal.deadline,
-			deadlineMu: &lnGlobal.deadlineMu,
+			listener: ln,
+			manager:  m,
+			key:      lnKey,
+			usage:    &lnGlobal.usage,
+			acceptCh: lnGlobal.acceptCh,
+			closeCh:  make(chan struct{}),
 		}, nil
 
 	case "udp":
