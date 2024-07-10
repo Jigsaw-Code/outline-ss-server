@@ -67,7 +67,6 @@ func (sl *sharedListener) Close() error {
 				return err
 			}
 		}
-
 	}
 
 	return nil
@@ -157,15 +156,14 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 		}
 
 		lnGlobal := &globalListener{ln: ln, acceptCh: make(chan acceptResponse)}
-		lnGlobal.usage.Store(1)
-		m.listeners[lnKey] = lnGlobal
-
 		go func() {
 			for {
 				conn, err := lnGlobal.ln.Accept()
 				lnGlobal.acceptCh <- acceptResponse{conn, err}
 			}
 		}()
+		lnGlobal.usage.Store(1)
+		m.listeners[lnKey] = lnGlobal
 
 		return &sharedListener{
 			listener: ln,
