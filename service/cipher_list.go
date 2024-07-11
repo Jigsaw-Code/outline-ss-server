@@ -62,6 +62,8 @@ type CipherList interface {
 	// which is a List of *CipherEntry.  Update takes ownership of `contents`,
 	// which must not be read or written after this call.
 	Update(contents *list.List)
+	// PushBack inserts a new cipher at the back of the list.
+	PushBack(entry *CipherEntry) *list.Element
 }
 
 type cipherList struct {
@@ -115,4 +117,8 @@ func (cl *cipherList) Update(src *list.List) {
 	cl.mu.Lock()
 	cl.list = src
 	cl.mu.Unlock()
+}
+
+func (cl *cipherList) PushBack(entry *CipherEntry) *list.Element {
+	return cl.list.PushBack(entry)
 }
