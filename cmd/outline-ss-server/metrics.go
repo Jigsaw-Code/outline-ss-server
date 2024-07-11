@@ -38,7 +38,7 @@ type outlineMetrics struct {
 
 	buildInfo            *prometheus.GaugeVec
 	accessKeys           prometheus.Gauge
-	ports                prometheus.Gauge
+	listeners            prometheus.Gauge
 	dataBytes            *prometheus.CounterVec
 	dataBytesPerLocation *prometheus.CounterVec
 	timeToCipherMs       *prometheus.HistogramVec
@@ -183,10 +183,10 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 			Name:      "keys",
 			Help:      "Count of access keys",
 		}),
-		ports: prometheus.NewGauge(prometheus.GaugeOpts{
+		listeners: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Name:      "ports",
-			Help:      "Count of open Shadowsocks ports",
+			Name:      "listeners",
+			Help:      "Count of open Shadowsocks listeners",
 		}),
 		tcpProbes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -265,7 +265,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 	m.tunnelTimeCollector = newTunnelTimeCollector(ip2info, registerer)
 
 	// TODO: Is it possible to pass where to register the collectors?
-	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
+	registerer.MustRegister(m.buildInfo, m.accessKeys, m.listeners, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
 		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries,
 		m.tunnelTimeCollector)
 	return m
@@ -275,9 +275,9 @@ func (m *outlineMetrics) SetBuildInfo(version string) {
 	m.buildInfo.WithLabelValues(version).Set(1)
 }
 
-func (m *outlineMetrics) SetNumAccessKeys(numKeys int, ports int) {
+func (m *outlineMetrics) SetNumAccessKeys(numKeys int, listeners int) {
 	m.accessKeys.Set(float64(numKeys))
-	m.ports.Set(float64(ports))
+	m.listeners.Set(float64(listeners))
 }
 
 func (m *outlineMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {

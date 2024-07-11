@@ -16,6 +16,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net"
 	"net/netip"
@@ -132,7 +133,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
-		handler.Handle(clientConn)
+		handler.Handle(context.Background(), clientConn)
 		done <- struct{}{}
 	}()
 
@@ -488,7 +489,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	require.Nil(t, clientConn.Close())
 	// This should return quickly without timing out.
-	s.Handle(clientConn)
+	s.Handle(context.Background(), clientConn)
 }
 
 // Makes sure the UDP listener returns [io.ErrClosed] on reads and writes after Close().

@@ -293,7 +293,7 @@ func TestUDPEcho(t *testing.T) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(proxyConn)
+		proxy.Handle(context.Background(), proxyConn)
 		done <- struct{}{}
 	}()
 
@@ -525,7 +525,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(server)
+		proxy.Handle(context.Background(), server)
 		done <- struct{}{}
 	}()
 
@@ -569,7 +569,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(proxyConn)
+		proxy.Handle(context.Background(), proxyConn)
 		done <- struct{}{}
 	}()
 
