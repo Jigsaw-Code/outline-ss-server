@@ -111,9 +111,9 @@ func (s *SSServer) loadConfig(filename string) error {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 
-	// We hot swap the services by having them both live at the same time. This
-	// means we create services for the new config first, and then take down the
-	// services from the old config.
+	// We hot swap the config by having the old and new listeners both live at
+	// the same time. This means we create listeners for the new config first,
+	// and then close the old ones after.
 	oldListenerSet := s.lnSet
 	s.lnSet = s.lnManager.NewListenerSet()
 	var totalCipherCount int
@@ -152,7 +152,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	logger.Infof("Loaded %d access keys over %d listeners", totalCipherCount, s.lnSet.Len())
 	s.m.SetNumAccessKeys(totalCipherCount, s.lnSet.Len())
 
-	// Take down the old services now that the new ones are created and serving.
+	// Take down the old listeners now that the new ones are created and serving.
 	if oldListenerSet != nil {
 		if err := oldListenerSet.Close(); err != nil {
 			logger.Errorf("Failed to stop old listeners: %w", err)
@@ -163,7 +163,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	return nil
 }
 
-// Stop serving on all existing services.
+// Stop serving on all existing listeners.
 func (s *SSServer) Stop() error {
 	if s.lnSet == nil {
 		return nil
