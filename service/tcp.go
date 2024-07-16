@@ -170,9 +170,8 @@ type tcpHandler struct {
 }
 
 // NewTCPService creates a TCPService
-func NewTCPHandler(listenerId string, authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
+func NewTCPHandler(authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
-		listenerId:   listenerId,
 		m:            m,
 		readTimeout:  timeout,
 		authenticate: authenticate,
@@ -370,12 +369,12 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *tcpHandler) absorbProbe(clientConn transport.StreamConn, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	h.m.AddTCPProbe(status, drainResult, h.listenerId, proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, clientConn.LocalAddr().String(), proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {

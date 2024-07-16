@@ -87,7 +87,7 @@ func (h *connHandler) Handle(ctx context.Context, conn any) {
 	case transport.StreamConn:
 		authFunc := service.NewShadowsocksStreamAuthenticator(h.ciphers, h.replayCache, h.m)
 		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(c.LocalAddr().String(), authFunc, h.m, h.tcpTimeout)
+		tcpHandler := service.NewTCPHandler(authFunc, h.m, h.tcpTimeout)
 		tcpHandler.Handle(ctx, c)
 	case net.PacketConn:
 		packetHandler := service.NewPacketHandler(h.natTimeout, h.ciphers, h.m)
