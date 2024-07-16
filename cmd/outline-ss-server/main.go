@@ -60,12 +60,6 @@ func init() {
 	logger = logging.MustGetLogger("")
 }
 
-type Handler interface {
-	NumCiphers() int
-	AddCipher(entry *service.CipherEntry)
-	Handle(ctx context.Context, conn any)
-}
-
 type connHandler struct {
 	tcpTimeout  time.Duration
 	natTimeout  time.Duration
@@ -98,8 +92,8 @@ func (h *connHandler) Handle(ctx context.Context, conn any) {
 }
 
 type SSServer struct {
-	lnManager   ListenerManager
-	lnSet       ListenerSet
+	lnManager   service.ListenerManager
+	lnSet       service.ListenerSet
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
@@ -118,7 +112,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	s.lnSet = s.lnManager.NewListenerSet()
 	var totalCipherCount int
 
-	portHandlers := make(map[int]Handler)
+	portHandlers := make(map[int]service.Handler)
 	for _, legacyKeyServiceConfig := range config.Keys {
 		handler, ok := portHandlers[legacyKeyServiceConfig.Port]
 		if !ok {
@@ -178,7 +172,7 @@ func (s *SSServer) Stop() error {
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
 func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
-		lnManager:   NewListenerManager(),
+		lnManager:   service.NewListenerManager(),
 		natTimeout:  natTimeout,
 		m:           sm,
 		replayCache: service.NewReplayCache(replayHistory),

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package service
 
 import (
 	"context"
@@ -22,8 +22,13 @@ import (
 	"sync/atomic"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
-	"github.com/Jigsaw-Code/outline-ss-server/service"
 )
+
+type Handler interface {
+	NumCiphers() int
+	AddCipher(entry *CipherEntry)
+	Handle(ctx context.Context, conn any)
+}
 
 type acceptResponse struct {
 	conn net.Conn
@@ -55,7 +60,7 @@ func (sl *sharedListener) SetHandler(handler Handler) {
 	handle := func(ctx context.Context, conn transport.StreamConn) {
 		handler.Handle(ctx, conn)
 	}
-	go service.StreamServe(accept, handle)
+	go StreamServe(accept, handle)
 }
 
 // Accept accepts connections until Close() is called.
