@@ -71,7 +71,7 @@ type SSServer struct {
 	ports       map[int]*ssPort
 }
 
-func (s *SSServer) startPort(portNum int) error {
+func (s *SSServer) startService(listenerSet, serviceConfig ServiceConfigJSON) error {
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: portNum})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
@@ -89,9 +89,20 @@ func (s *SSServer) startPort(portNum int) error {
 	// TODO: Register initial data metrics at zero.
 	tcpHandler := service.NewTCPHandler(listener.Addr().String(), authFunc, s.m, tcpReadTimeout)
 	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m)
-	s.ports[portNum] = port
-	go service.StreamServe(service.WrapStreamListener(listener.AcceptTCP), tcpHandler.Handle)
-	go packetHandler.Handle(port.packetConn)
+
+	for _, listenerConfig := range serviceConfig.Listeners {
+		listener, err := listenerSet.NewListenerFromConfig(listenerConfig)
+		switch listener.Type {
+		case net.PacketConn:
+			// Create packetConn from listenenerConfig
+			packetConn := listenerMgr.ListenUDP(listenerConfig.Address)
+			go packetHandler.Handle(packetConn)
+		case transport.StreamListener:
+			// Create listener from listenenerConfig
+			listener := listenerMgr.ListenTCP(listenerConfig.Address)
+			go service.StreamServe(service.WrapStreamListener(listener.AcceptTCP), tcpHandler.Handle)
+		}
+	}
 	return nil
 }
 
@@ -117,47 +128,97 @@ func (s *SSServer) removePort(portNum int) error {
 }
 
 func (s *SSServer) loadConfig(filename string) error {
+	stopConfig, err := runConfig(filename)
+	if err != nil {
+		return err
+	}
+	s.stopConfig()
+	s.stopConfig = stopConfig
+}
+
+func (s *SSServer) runConfig(filename string) (func(), error) {
 	config, err := readConfig(filename)
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 
-	portChanges := make(map[int]int)
-	portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
-	for _, keyConfig := range config.Keys {
-		portChanges[keyConfig.Port] = 1
-		cipherList, ok := portCiphers[keyConfig.Port]
-		if !ok {
-			cipherList = list.New()
-			portCiphers[keyConfig.Port] = cipherList
-		}
-		cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
-		if err != nil {
-			return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
-		}
-		entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
-		cipherList.PushBack(&entry)
-	}
-	for port := range s.ports {
-		portChanges[port] = portChanges[port] - 1
-	}
-	for portNum, count := range portChanges {
-		if count == -1 {
-			if err := s.removePort(portNum); err != nil {
-				return fmt.Errorf("failed to remove port %v: %w", portNum, err)
+	startErrCh := make(chan error)
+	stopCh := make(chan struct{})
+	go func() {
+		startErrCh <- func() error {
+			listenerSet := s.NewListenerSet()
+			defer listenerSet.Close()
+
+			portChanges := make(map[int]int)
+			portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
+			for _, keyConfig := range config.Keys {
+				portChanges[keyConfig.Port] = 1
+				cipherList, ok := portCiphers[keyConfig.Port]
+				if !ok {
+					cipherList = list.New()
+					portCiphers[keyConfig.Port] = cipherList
+				}
+				cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
+				if err != nil {
+					return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+				}
+				entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
+				cipherList.PushBack(&entry)
 			}
-		} else if count == +1 {
-			if err := s.startPort(portNum); err != nil {
-				return err
+			for portNum, cipherList := range portCiphers {
+				sh := NewShadowsocksStreamHandler(cipherList)
+				l, err := listenerSet.ListenTCP(port)
+				defer l.Close()
+				go service.StreamServe(service.WrapStreamListener(listener.AcceptTCP), tcpHandler.Handle)
+
+				pc, err := listenerSet.ListenUDP(port)
+				if err != nil {
+					return err
+				}
+				defer pc.Close()
+				ph := NewShadowsocksPacketHandler(cipherList)
+				go ph.Handle(pc)
 			}
-		}
+
+			// Process new config
+			for _, sc := range config.Services {
+				var sh service.StreamHandler
+				var ph packetHandler
+
+				for _, lc := range sc.Listeners {
+					l, err := NewListenerFromConfig(listenerSet, lc)
+					defer l.Close()
+					switch l.(type) {
+					case transport.StreamListener:
+						if sh == nil {
+							sh, err = s.NewServiceStreamHandler(sc)
+						}
+						go service.StreamServe(service.WrapStreamListener(listener.Accept), sh)
+
+					case net.PacketConn:
+						if ph == nil {
+							ph = s.NewServicePacketHandler(sc)
+						}
+						go ph.Handle(pc)
+					}
+				}
+			}
+
+			logger.Infof("Loaded %v access keys over %v ports", len(config.Keys), len(s.ports))
+			s.m.SetNumAccessKeys(len(config.Keys), len(portCiphers))
+			return nil
+		}()
+
+		<-stopCh
+	}()
+
+	err := <-startErrCh
+	if err != nil {
+		return nil, err
 	}
-	for portNum, cipherList := range portCiphers {
-		s.ports[portNum].cipherList.Update(cipherList)
-	}
-	logger.Infof("Loaded %v access keys over %v ports", len(config.Keys), len(s.ports))
-	s.m.SetNumAccessKeys(len(config.Keys), len(portCiphers))
-	return nil
+	return func() {
+		stopCh = <-struct{}{}
+	}, nil
 }
 
 // Stop serving on all ports.

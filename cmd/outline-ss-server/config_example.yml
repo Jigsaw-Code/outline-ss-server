@@ -13,3 +13,19 @@ keys:
     port: 9001
     cipher: chacha20-ietf-poly1305
     secret: Secret2
+
+
+services:
+  - listeners:
+    - type: tcp
+      address: 0.0.0.0:8080
+    - type: udp
+      address: 0.0.0.0:8080
+    - type: proxyproto
+      listener:
+        type: tcp
+        address: 0.0.0.0:8081
+    - type: proxyproto
+      listener:
+        type: udp
+        address: 0.0.0.0:8081
