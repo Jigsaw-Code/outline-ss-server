@@ -15,7 +15,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -102,7 +101,7 @@ type PacketHandler interface {
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// Handle returns after clientConn closes and all the sub goroutines return.
-	Handle(ctx context.Context, clientConn net.PacketConn)
+	Handle(clientConn net.PacketConn)
 }
 
 func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
@@ -111,7 +110,7 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 
 // Listen on addr for encrypted packets and basically do UDP NAT.
 // We take the ciphers as a pointer because it gets replaced on config updates.
-func (h *packetHandler) Handle(ctx context.Context, clientConn net.PacketConn) {
+func (h *packetHandler) Handle(clientConn net.PacketConn) {
 	var running sync.WaitGroup
 
 	nm := newNATmap(h.natTimeout, h.m, &running)
