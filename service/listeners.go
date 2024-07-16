@@ -40,13 +40,12 @@ type SharedListener interface {
 }
 
 type sharedListener struct {
-	listener net.Listener
-	manager  ListenerManager
-	key      string
-	closed   atomic.Int32
-	usage    *atomic.Int32
-	acceptCh chan acceptResponse
-	closeCh  chan struct{}
+	listener  net.Listener
+	closed    atomic.Int32
+	usage     *atomic.Int32
+	acceptCh  chan acceptResponse
+	closeCh   chan struct{}
+	closeFunc func()
 }
 
 func (sl *sharedListener) SetHandler(handler Handler) {
@@ -87,7 +86,7 @@ func (sl *sharedListener) Close() error {
 
 		// See if we need to actually close the underlying listener.
 		if sl.usage.Add(-1) == 0 {
-			sl.manager.Delete(sl.key)
+			sl.closeFunc()
 			err := sl.listener.Close()
 			if err != nil {
 				return err
@@ -104,17 +103,16 @@ func (sl *sharedListener) Addr() net.Addr {
 
 type sharedPacketConn struct {
 	net.PacketConn
-	manager ListenerManager
-	key     string
-	closed  atomic.Int32
-	usage   *atomic.Int32
+	closed    atomic.Int32
+	usage     *atomic.Int32
+	closeFunc func()
 }
 
 func (spc *sharedPacketConn) Close() error {
 	if spc.closed.CompareAndSwap(0, 1) {
 		// See if we need to actually close the underlying listener.
 		if spc.usage.Add(-1) == 0 {
-			spc.manager.Delete(spc.key)
+			spc.closeFunc()
 			err := spc.PacketConn.Close()
 			if err != nil {
 				return err
@@ -186,7 +184,6 @@ func (ls *listenerSet) Len() int {
 type ListenerManager interface {
 	NewListenerSet() ListenerSet
 	Listen(ctx context.Context, network string, addr string, config net.ListenConfig) (SharedListener, error)
-	Delete(key string)
 }
 
 type listenerManager struct {
@@ -226,11 +223,12 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 			lnGlobal.usage.Add(1)
 			return &sharedListener{
 				listener: lnGlobal.ln,
-				manager:  m,
-				key:      lnKey,
 				usage:    &lnGlobal.usage,
 				acceptCh: lnGlobal.acceptCh,
 				closeCh:  make(chan struct{}),
+				closeFunc: func() {
+					m.delete(lnKey)
+				},
 			}, nil
 		}
 
@@ -251,11 +249,12 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 
 		return &sharedListener{
 			listener: ln,
-			manager:  m,
-			key:      lnKey,
 			usage:    &lnGlobal.usage,
 			acceptCh: lnGlobal.acceptCh,
 			closeCh:  make(chan struct{}),
+			closeFunc: func() {
+				m.delete(lnKey)
+			},
 		}, nil
 
 	case "udp":
@@ -266,9 +265,10 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 			lnGlobal.usage.Add(1)
 			return &sharedPacketConn{
 				PacketConn: lnGlobal.pc,
-				manager:    m,
-				key:        lnKey,
 				usage:      &lnGlobal.usage,
+				closeFunc: func() {
+					m.delete(lnKey)
+				},
 			}, nil
 		}
 
@@ -283,9 +283,10 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 
 		return &sharedPacketConn{
 			PacketConn: pc,
-			manager:    m,
-			key:        lnKey,
 			usage:      &lnGlobal.usage,
+			closeFunc: func() {
+				m.delete(lnKey)
+			},
 		}, nil
 
 	default:
@@ -294,7 +295,7 @@ func (m *listenerManager) Listen(ctx context.Context, network string, addr strin
 	}
 }
 
-func (m *listenerManager) Delete(key string) {
+func (m *listenerManager) delete(key string) {
 	m.listenersMu.Lock()
 	delete(m.listeners, key)
 	m.listenersMu.Unlock()
