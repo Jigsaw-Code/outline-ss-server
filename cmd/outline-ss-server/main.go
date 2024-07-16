@@ -87,7 +87,7 @@ func (s *SSServer) startPort(portNum int) error {
 	port := &ssPort{tcpListener: listener, packetConn: packetConn, cipherList: service.NewCipherList()}
 	authFunc := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m)
 	// TODO: Register initial data metrics at zero.
-	tcpHandler := service.NewTCPHandler(listener.Addr().String(), authFunc, s.m, tcpReadTimeout)
+	tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
 	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m)
 	s.ports[portNum] = port
 	go service.StreamServe(service.WrapStreamListener(listener.AcceptTCP), tcpHandler.Handle)
