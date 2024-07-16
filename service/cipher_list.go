@@ -79,6 +79,8 @@ func NewCipherList() CipherList {
 }
 
 func (cl *cipherList) Len() int {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
 	return cl.list.Len()
 }
 
@@ -125,5 +127,7 @@ func (cl *cipherList) Update(src *list.List) {
 }
 
 func (cl *cipherList) PushBack(entry *CipherEntry) *list.Element {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
 	return cl.list.PushBack(entry)
 }
