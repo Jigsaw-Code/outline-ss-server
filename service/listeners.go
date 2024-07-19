@@ -15,6 +15,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -46,19 +47,16 @@ type acceptResponse struct {
 }
 
 type sharedListener struct {
-	listener    net.TCPListener
-	closed      atomic.Int32
-	usage       *atomic.Int32
+	listener net.TCPListener
+	once     sync.Once
+
 	acceptCh    chan acceptResponse
 	closeCh     chan struct{}
-	onCloseFunc func()
+	onCloseFunc func() error
 }
 
 // Accept accepts connections until Close() is called.
 func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
-	if sl.closed.Load() == 1 {
-		return nil, net.ErrClosed
-	}
 	select {
 	case acceptResponse := <-sl.acceptCh:
 		if acceptResponse.err != nil {
@@ -73,20 +71,13 @@ func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 // Close stops accepting new connections without closing the underlying socket.
 // Only when the last user closes it, we actually close it.
 func (sl *sharedListener) Close() error {
-	if sl.closed.CompareAndSwap(0, 1) {
+	var err error
+	sl.once.Do(func() {
+
 		close(sl.closeCh)
-
-		// See if we need to actually close the underlying listener.
-		if sl.usage.Add(-1) == 0 {
-			sl.onCloseFunc()
-			err := sl.listener.Close()
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+		err = sl.onCloseFunc()
+	})
+	return err
 }
 
 func (sl *sharedListener) Addr() net.Addr {
@@ -95,31 +86,41 @@ func (sl *sharedListener) Addr() net.Addr {
 
 type sharedPacketConn struct {
 	net.PacketConn
-	closed      atomic.Int32
-	usage       *atomic.Int32
-	onCloseFunc func()
+	once        sync.Once
+	onCloseFunc func() error
 }
 
 func (spc *sharedPacketConn) Close() error {
-	if spc.closed.CompareAndSwap(0, 1) {
-		// See if we need to actually close the underlying listener.
-		if spc.usage.Add(-1) == 0 {
-			spc.onCloseFunc()
-			err := spc.PacketConn.Close()
+	var err error
+	spc.once.Do(func() {
+		err = spc.onCloseFunc()
+	})
+	return err
+}
+
+type concreteListener struct {
+	ln       *net.TCPListener
+	pc       net.PacketConn
+	usage    atomic.Int32
+	acceptCh chan acceptResponse
+}
+
+func (cl *concreteListener) Close() error {
+	if cl.usage.Add(-1) == 0 {
+		if cl.ln != nil {
+			err := cl.ln.Close()
+			if err != nil {
+				return err
+			}
+		}
+		if cl.pc != nil {
+			err := cl.pc.Close()
 			if err != nil {
 				return err
 			}
 		}
 	}
-
 	return nil
-}
-
-type concreteListener struct {
-	ln       net.TCPListener
-	pc       net.PacketConn
-	usage    atomic.Int32
-	acceptCh chan acceptResponse
 }
 
 // ListenerSet represents a set of listeners listening on unique addresses. Trying
@@ -236,12 +237,12 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	if lnConcrete, ok := m.listeners[lnKey]; ok {
 		lnConcrete.usage.Add(1)
 		return &sharedListener{
-			listener: lnConcrete.ln,
-			usage:    &lnConcrete.usage,
+			listener: *lnConcrete.ln,
 			acceptCh: lnConcrete.acceptCh,
 			closeCh:  make(chan struct{}),
-			onCloseFunc: func() {
+			onCloseFunc: func() error {
 				m.delete(lnKey)
+				return lnConcrete.Close()
 			},
 		}, nil
 	}
@@ -255,10 +256,13 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		return nil, err
 	}
 
-	lnConcrete := &concreteListener{ln: *ln, acceptCh: make(chan acceptResponse)}
+	lnConcrete := &concreteListener{ln: ln, acceptCh: make(chan acceptResponse)}
 	go func() {
 		for {
 			conn, err := lnConcrete.ln.AcceptTCP()
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			lnConcrete.acceptCh <- acceptResponse{conn, err}
 		}
 	}()
@@ -266,12 +270,12 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	m.listeners[lnKey] = lnConcrete
 
 	return &sharedListener{
-		listener: lnConcrete.ln,
-		usage:    &lnConcrete.usage,
+		listener: *lnConcrete.ln,
 		acceptCh: lnConcrete.acceptCh,
 		closeCh:  make(chan struct{}),
-		onCloseFunc: func() {
+		onCloseFunc: func() error {
 			m.delete(lnKey)
+			return lnConcrete.Close()
 		},
 	}, nil
 }
@@ -288,9 +292,9 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		lnConcrete.usage.Add(1)
 		return &sharedPacketConn{
 			PacketConn: lnConcrete.pc,
-			usage:      &lnConcrete.usage,
-			onCloseFunc: func() {
+			onCloseFunc: func() error {
 				m.delete(lnKey)
+				return lnConcrete.Close()
 			},
 		}, nil
 	}
@@ -306,9 +310,9 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 
 	return &sharedPacketConn{
 		PacketConn: pc,
-		usage:      &lnConcrete.usage,
-		onCloseFunc: func() {
+		onCloseFunc: func() error {
 			m.delete(lnKey)
+			return lnConcrete.Close()
 		},
 	}, nil
 }
