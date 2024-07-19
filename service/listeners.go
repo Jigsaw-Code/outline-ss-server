@@ -73,7 +73,6 @@ func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 func (sl *sharedListener) Close() error {
 	var err error
 	sl.once.Do(func() {
-
 		close(sl.closeCh)
 		err = sl.onCloseFunc()
 	})
@@ -176,17 +175,12 @@ func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
 // Close closes all the listeners in the set.
 func (ls *listenerSet) Close() error {
 	for _, listener := range ls.listeners {
-		switch ln := listener.(type) {
-		case net.Listener:
-			if err := ln.Close(); err != nil {
-				return fmt.Errorf("%s listener on address %s failed to stop: %w", ln.Addr().Network(), ln.Addr().String(), err)
-			}
-		case net.PacketConn:
-			if err := ln.Close(); err != nil {
-				return fmt.Errorf("%s listener on address %s failed to stop: %w", ln.LocalAddr().Network(), ln.LocalAddr().String(), err)
-			}
-		default:
-			return fmt.Errorf("unknown listener type: %v", ln)
+		addr, err := getAddr(listener)
+		if err != nil {
+			return err
+		}
+		if err := listener.Close(); err != nil {
+			return fmt.Errorf("%s listener on address %s failed to stop: %w", addr.Network(), addr.String(), err)
 		}
 	}
 	return nil
@@ -325,4 +319,15 @@ func (m *listenerManager) delete(key string) {
 
 func listenerKey(network string, addr string) string {
 	return network + "/" + addr
+}
+
+func getAddr(listener Listener) (net.Addr, error) {
+	switch ln := listener.(type) {
+	case net.Listener:
+		return ln.Addr(), nil
+	case net.PacketConn:
+		return ln.LocalAddr(), nil
+	default:
+		return nil, fmt.Errorf("unknown listener type: %v", ln)
+	}
 }
