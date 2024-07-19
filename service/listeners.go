@@ -46,12 +46,12 @@ type acceptResponse struct {
 }
 
 type sharedListener struct {
-	listener  net.TCPListener
-	closed    atomic.Int32
-	usage     *atomic.Int32
-	acceptCh  chan acceptResponse
-	closeCh   chan struct{}
-	closeFunc func()
+	listener    net.TCPListener
+	closed      atomic.Int32
+	usage       *atomic.Int32
+	acceptCh    chan acceptResponse
+	closeCh     chan struct{}
+	onCloseFunc func()
 }
 
 // Accept accepts connections until Close() is called.
@@ -78,7 +78,7 @@ func (sl *sharedListener) Close() error {
 
 		// See if we need to actually close the underlying listener.
 		if sl.usage.Add(-1) == 0 {
-			sl.closeFunc()
+			sl.onCloseFunc()
 			err := sl.listener.Close()
 			if err != nil {
 				return err
@@ -95,16 +95,16 @@ func (sl *sharedListener) Addr() net.Addr {
 
 type sharedPacketConn struct {
 	net.PacketConn
-	closed    atomic.Int32
-	usage     *atomic.Int32
-	closeFunc func()
+	closed      atomic.Int32
+	usage       *atomic.Int32
+	onCloseFunc func()
 }
 
 func (spc *sharedPacketConn) Close() error {
 	if spc.closed.CompareAndSwap(0, 1) {
 		// See if we need to actually close the underlying listener.
 		if spc.usage.Add(-1) == 0 {
-			spc.closeFunc()
+			spc.onCloseFunc()
 			err := spc.PacketConn.Close()
 			if err != nil {
 				return err
@@ -240,7 +240,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 			usage:    &lnGlobal.usage,
 			acceptCh: lnGlobal.acceptCh,
 			closeCh:  make(chan struct{}),
-			closeFunc: func() {
+			onCloseFunc: func() {
 				m.delete(lnKey)
 			},
 		}, nil
@@ -270,7 +270,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		usage:    &lnGlobal.usage,
 		acceptCh: lnGlobal.acceptCh,
 		closeCh:  make(chan struct{}),
-		closeFunc: func() {
+		onCloseFunc: func() {
 			m.delete(lnKey)
 		},
 	}, nil
@@ -289,7 +289,7 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return &sharedPacketConn{
 			PacketConn: lnGlobal.pc,
 			usage:      &lnGlobal.usage,
-			closeFunc: func() {
+			onCloseFunc: func() {
 				m.delete(lnKey)
 			},
 		}, nil
@@ -307,7 +307,7 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 	return &sharedPacketConn{
 		PacketConn: pc,
 		usage:      &lnGlobal.usage,
-		closeFunc: func() {
+		onCloseFunc: func() {
 			m.delete(lnKey)
 		},
 	}, nil
