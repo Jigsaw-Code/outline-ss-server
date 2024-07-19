@@ -115,7 +115,7 @@ func (spc *sharedPacketConn) Close() error {
 	return nil
 }
 
-type globalListener struct {
+type concreteListener struct {
 	ln       net.TCPListener
 	pc       net.PacketConn
 	usage    atomic.Int32
@@ -204,14 +204,14 @@ type ListenerManager interface {
 }
 
 type listenerManager struct {
-	listeners   map[string]*globalListener
+	listeners   map[string]*concreteListener
 	listenersMu sync.Mutex
 }
 
 // NewListenerManager creates a new [ListenerManger].
 func NewListenerManager() ListenerManager {
 	return &listenerManager{
-		listeners: make(map[string]*globalListener),
+		listeners: make(map[string]*concreteListener),
 	}
 }
 
@@ -233,12 +233,12 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	defer m.listenersMu.Unlock()
 
 	lnKey := listenerKey(network, addr)
-	if lnGlobal, ok := m.listeners[lnKey]; ok {
-		lnGlobal.usage.Add(1)
+	if lnConcrete, ok := m.listeners[lnKey]; ok {
+		lnConcrete.usage.Add(1)
 		return &sharedListener{
-			listener: lnGlobal.ln,
-			usage:    &lnGlobal.usage,
-			acceptCh: lnGlobal.acceptCh,
+			listener: lnConcrete.ln,
+			usage:    &lnConcrete.usage,
+			acceptCh: lnConcrete.acceptCh,
 			closeCh:  make(chan struct{}),
 			onCloseFunc: func() {
 				m.delete(lnKey)
@@ -255,20 +255,20 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		return nil, err
 	}
 
-	lnGlobal := &globalListener{ln: *ln, acceptCh: make(chan acceptResponse)}
+	lnConcrete := &concreteListener{ln: *ln, acceptCh: make(chan acceptResponse)}
 	go func() {
 		for {
-			conn, err := lnGlobal.ln.AcceptTCP()
-			lnGlobal.acceptCh <- acceptResponse{conn, err}
+			conn, err := lnConcrete.ln.AcceptTCP()
+			lnConcrete.acceptCh <- acceptResponse{conn, err}
 		}
 	}()
-	lnGlobal.usage.Store(1)
-	m.listeners[lnKey] = lnGlobal
+	lnConcrete.usage.Store(1)
+	m.listeners[lnKey] = lnConcrete
 
 	return &sharedListener{
-		listener: lnGlobal.ln,
-		usage:    &lnGlobal.usage,
-		acceptCh: lnGlobal.acceptCh,
+		listener: lnConcrete.ln,
+		usage:    &lnConcrete.usage,
+		acceptCh: lnConcrete.acceptCh,
 		closeCh:  make(chan struct{}),
 		onCloseFunc: func() {
 			m.delete(lnKey)
@@ -284,11 +284,11 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 	defer m.listenersMu.Unlock()
 
 	lnKey := listenerKey(network, addr)
-	if lnGlobal, ok := m.listeners[lnKey]; ok {
-		lnGlobal.usage.Add(1)
+	if lnConcrete, ok := m.listeners[lnKey]; ok {
+		lnConcrete.usage.Add(1)
 		return &sharedPacketConn{
-			PacketConn: lnGlobal.pc,
-			usage:      &lnGlobal.usage,
+			PacketConn: lnConcrete.pc,
+			usage:      &lnConcrete.usage,
 			onCloseFunc: func() {
 				m.delete(lnKey)
 			},
@@ -300,13 +300,13 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return nil, err
 	}
 
-	lnGlobal := &globalListener{pc: pc}
-	lnGlobal.usage.Store(1)
-	m.listeners[lnKey] = lnGlobal
+	lnConcrete := &concreteListener{pc: pc}
+	lnConcrete.usage.Store(1)
+	m.listeners[lnKey] = lnConcrete
 
 	return &sharedPacketConn{
 		PacketConn: pc,
-		usage:      &lnGlobal.usage,
+		usage:      &lnConcrete.usage,
 		onCloseFunc: func() {
 			m.delete(lnKey)
 		},
