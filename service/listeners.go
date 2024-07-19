@@ -16,22 +16,37 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 )
 
 // The implementations of listeners for different network types are not
 // interchangeable. The type of listener depends on the network type.
-type Listener = any
+type Listener = io.Closer
+
+type StreamListener interface {
+	// Accept waits for and returns the next connection to the listener.
+	AcceptStream() (transport.StreamConn, error)
+
+	// Close closes the listener.
+	// Any blocked Accept operations will be unblocked and return errors.
+	Close() error
+
+	// Addr returns the listener's network address.
+	Addr() net.Addr
+}
 
 type acceptResponse struct {
-	conn net.Conn
+	conn transport.StreamConn
 	err  error
 }
 
 type sharedListener struct {
-	listener  net.Listener
+	listener  net.TCPListener
 	closed    atomic.Int32
 	usage     *atomic.Int32
 	acceptCh  chan acceptResponse
@@ -40,7 +55,7 @@ type sharedListener struct {
 }
 
 // Accept accepts connections until Close() is called.
-func (sl *sharedListener) Accept() (net.Conn, error) {
+func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 	if sl.closed.Load() == 1 {
 		return nil, net.ErrClosed
 	}
@@ -101,16 +116,24 @@ func (spc *sharedPacketConn) Close() error {
 }
 
 type globalListener struct {
-	ln       net.Listener
+	ln       net.TCPListener
 	pc       net.PacketConn
 	usage    atomic.Int32
 	acceptCh chan acceptResponse
 }
 
+// ListenerSet represents a set of listeners listening on unique addresses. Trying
+// to listen on the same address twice will result in an error. The set can be
+// closed as a unit, which is useful if you want to bring down a group of
+// listeners, such as when reloading a new config.
 type ListenerSet interface {
-	Listen(network string, addr string) (net.Listener, error)
-	ListenPacket(network string, addr string) (net.PacketConn, error)
+	// ListenStream announces on a given TCP network address.
+	ListenStream(addr string) (StreamListener, error)
+	// ListenStream announces on a given UDP network address.
+	ListenPacket(addr string) (net.PacketConn, error)
+	// Close closes all the listeners in the set.
 	Close() error
+	// Len returns the number of listeners in the set.
 	Len() int
 }
 
@@ -119,12 +142,14 @@ type listenerSet struct {
 	listeners map[string]Listener
 }
 
-func (ls *listenerSet) Listen(network string, addr string) (net.Listener, error) {
+// ListenStream announces on a given TCP network address.
+func (ls *listenerSet) ListenStream(addr string) (StreamListener, error) {
+	network := "tcp"
 	lnKey := listenerKey(network, addr)
 	if _, exists := ls.listeners[lnKey]; exists {
 		return nil, fmt.Errorf("listener %s already exists", lnKey)
 	}
-	ln, err := ls.manager.Listen(network, addr)
+	ln, err := ls.manager.ListenStream(network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +157,9 @@ func (ls *listenerSet) Listen(network string, addr string) (net.Listener, error)
 	return ln, nil
 }
 
-func (ls *listenerSet) ListenPacket(network string, addr string) (net.PacketConn, error) {
+// ListenPacket announces on a given UDP network address.
+func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
+	network := "udp"
 	lnKey := listenerKey(network, addr)
 	if _, exists := ls.listeners[lnKey]; exists {
 		return nil, fmt.Errorf("listener %s already exists", lnKey)
@@ -145,6 +172,7 @@ func (ls *listenerSet) ListenPacket(network string, addr string) (net.PacketConn
 	return ln, nil
 }
 
+// Close closes all the listeners in the set.
 func (ls *listenerSet) Close() error {
 	for _, listener := range ls.listeners {
 		switch ln := listener.(type) {
@@ -163,6 +191,7 @@ func (ls *listenerSet) Close() error {
 	return nil
 }
 
+// Len returns the number of listeners in the set.
 func (ls *listenerSet) Len() int {
 	return len(ls.listeners)
 }
@@ -170,7 +199,7 @@ func (ls *listenerSet) Len() int {
 // ListenerManager holds and manages the state of shared listeners.
 type ListenerManager interface {
 	NewListenerSet() ListenerSet
-	Listen(network string, addr string) (net.Listener, error)
+	ListenStream(network string, addr string) (StreamListener, error)
 	ListenPacket(network string, addr string) (net.PacketConn, error)
 }
 
@@ -179,6 +208,7 @@ type listenerManager struct {
 	listenersMu sync.Mutex
 }
 
+// NewListenerManager creates a new [ListenerManger].
 func NewListenerManager() ListenerManager {
 	return &listenerManager{
 		listeners: make(map[string]*globalListener),
@@ -198,7 +228,7 @@ func (m *listenerManager) NewListenerSet() ListenerSet {
 // config is started before the old config is destroyed. This is done by using
 // reusable listener wrappers, which do not actually close the underlying socket
 // until all uses of the shared listener have been closed.
-func (m *listenerManager) Listen(network string, addr string) (net.Listener, error) {
+func (m *listenerManager) ListenStream(network string, addr string) (StreamListener, error) {
 	m.listenersMu.Lock()
 	defer m.listenersMu.Unlock()
 
@@ -216,15 +246,19 @@ func (m *listenerManager) Listen(network string, addr string) (net.Listener, err
 		}, nil
 	}
 
-	ln, err := net.Listen(network, addr)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	ln, err := net.ListenTCP(network, tcpAddr)
 	if err != nil {
 		return nil, err
 	}
 
-	lnGlobal := &globalListener{ln: ln, acceptCh: make(chan acceptResponse)}
+	lnGlobal := &globalListener{ln: *ln, acceptCh: make(chan acceptResponse)}
 	go func() {
 		for {
-			conn, err := lnGlobal.ln.Accept()
+			conn, err := lnGlobal.ln.AcceptTCP()
 			lnGlobal.acceptCh <- acceptResponse{conn, err}
 		}
 	}()
@@ -232,7 +266,7 @@ func (m *listenerManager) Listen(network string, addr string) (net.Listener, err
 	m.listeners[lnKey] = lnGlobal
 
 	return &sharedListener{
-		listener: ln,
+		listener: lnGlobal.ln,
 		usage:    &lnGlobal.usage,
 		acceptCh: lnGlobal.acceptCh,
 		closeCh:  make(chan struct{}),

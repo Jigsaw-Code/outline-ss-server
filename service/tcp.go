@@ -211,9 +211,9 @@ func ensureConnectionError(err error, fallbackStatus string, fallbackMsg string)
 	}
 }
 
-type StreamListener func() (transport.StreamConn, error)
+type StreamAcceptFunc func() (transport.StreamConn, error)
 
-func WrapStreamListener[T transport.StreamConn](f func() (T, error)) StreamListener {
+func WrapStreamAcceptFunc[T transport.StreamConn](f func() (T, error)) StreamAcceptFunc {
 	return func() (transport.StreamConn, error) {
 		return f()
 	}
@@ -224,7 +224,7 @@ type StreamHandleFunc func(ctx context.Context, conn transport.StreamConn)
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
 // via their [context.Context]. StreamServe will return after all pending handlers return.
-func StreamServe(accept StreamListener, handle StreamHandleFunc) {
+func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 	var running sync.WaitGroup
 	defer running.Wait()
 	ctx, contextCancel := context.WithCancel(context.Background())
@@ -341,7 +341,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
-		h.absorbProbe(outerConn, authErr.Status, proxyMetrics)
+		h.absorbProbe(outerConn, outerConn.LocalAddr().String(), authErr.Status, proxyMetrics)
 		return id, authErr
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
@@ -369,12 +369,12 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (h *streamHandler) absorbProbe(clientConn transport.StreamConn, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *streamHandler) absorbProbe(clientConn io.ReadCloser, addr, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	h.m.AddTCPProbe(status, drainResult, clientConn.LocalAddr().String(), proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, addr, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {

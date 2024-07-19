@@ -26,7 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
@@ -123,21 +122,14 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 				addr := net.JoinHostPort("::", strconv.Itoa(portNum))
 
 				sh := s.NewShadowsocksStreamHandler(ciphers)
-				ln, err := lnSet.Listen("tcp", addr)
+				ln, err := lnSet.ListenStream(addr)
 				if err != nil {
 					return err
 				}
 				logger.Infof("Shadowsocks TCP service listening on %v", ln.Addr().String())
-				accept := func() (transport.StreamConn, error) {
-					c, err := ln.Accept()
-					if err == nil {
-						return c.(transport.StreamConn), err
-					}
-					return nil, err
-				}
-				go service.StreamServe(accept, sh.Handle)
+				go service.StreamServe(ln.AcceptStream, sh.Handle)
 
-				pc, err := lnSet.ListenPacket("udp", addr)
+				pc, err := lnSet.ListenPacket(addr)
 				if err != nil {
 					return err
 				}
