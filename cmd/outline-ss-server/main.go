@@ -15,6 +15,7 @@
 package main
 
 import (
+	"container/list"
 	"flag"
 	"fmt"
 	"net"
@@ -102,24 +103,25 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 		defer lnSet.Close()
 
 		startErrCh <- func() error {
-			var totalCipherCount int
-
-			portCiphers := make(map[int]service.CipherList)
+			portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
 			for _, keyConfig := range config.Keys {
-				ciphers, ok := portCiphers[keyConfig.Port]
+				cipherList, ok := portCiphers[keyConfig.Port]
 				if !ok {
-					ciphers = service.NewCipherList()
-					portCiphers[keyConfig.Port] = ciphers
+					cipherList = list.New()
+					portCiphers[keyConfig.Port] = cipherList
 				}
 				cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
 				if err != nil {
 					return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
 				}
 				entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
-				ciphers.PushBack(&entry)
+				cipherList.PushBack(&entry)
 			}
-			for portNum, ciphers := range portCiphers {
+			for portNum, cipherList := range portCiphers {
 				addr := net.JoinHostPort("::", strconv.Itoa(portNum))
+
+				ciphers := service.NewCipherList()
+				ciphers.Update(cipherList)
 
 				sh := s.NewShadowsocksStreamHandler(ciphers)
 				ln, err := lnSet.ListenStream(addr)
@@ -136,11 +138,9 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 				logger.Infof("Shadowsocks UDP service listening on %v", pc.LocalAddr().String())
 				ph := s.NewShadowsocksPacketHandler(ciphers)
 				go ph.Handle(pc)
-
-				totalCipherCount += ciphers.Len()
 			}
-			logger.Infof("Loaded %d access keys over %d listeners", totalCipherCount, lnSet.Len())
-			s.m.SetNumAccessKeys(totalCipherCount, lnSet.Len())
+			logger.Infof("Loaded %d access keys over %d listeners", len(config.Keys), lnSet.Len())
+			s.m.SetNumAccessKeys(len(config.Keys), lnSet.Len())
 			return nil
 		}()
 
