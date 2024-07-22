@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -94,12 +95,72 @@ func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList) servi
 	return service.NewPacketHandler(s.natTimeout, ciphers, s.m)
 }
 
+type listenerSet struct {
+	manager     service.ListenerManager
+	listeners   map[string]service.Listener
+	listenersMu sync.Mutex
+}
+
+// ListenStream announces on a given TCP network address. Trying to listen on
+// the same address twice will result in an error.
+func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error) {
+	ls.listenersMu.Lock()
+	defer ls.listenersMu.Unlock()
+
+	lnKey := "tcp/" + addr
+	if _, exists := ls.listeners[lnKey]; exists {
+		return nil, fmt.Errorf("listener %s already exists", lnKey)
+	}
+	ln, err := ls.manager.ListenStream("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	ls.listeners[lnKey] = ln
+	return ln, nil
+}
+
+// ListenPacket announces on a given UDP network address. Trying to listen on
+// the same address twice will result in an error.
+func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
+	ls.listenersMu.Lock()
+	defer ls.listenersMu.Unlock()
+
+	lnKey := "udp/" + addr
+	if _, exists := ls.listeners[lnKey]; exists {
+		return nil, fmt.Errorf("listener %s already exists", lnKey)
+	}
+	ln, err := ls.manager.ListenPacket("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	ls.listeners[lnKey] = ln
+	return ln, nil
+}
+
+// Close closes all the listeners in the set.
+func (ls *listenerSet) Close() error {
+	for addr, listener := range ls.listeners {
+		if err := listener.Close(); err != nil {
+			return fmt.Errorf("listener on address %s failed to stop: %w", addr, err)
+		}
+	}
+	return nil
+}
+
+// Len returns the number of listeners in the set.
+func (ls *listenerSet) Len() int {
+	return len(ls.listeners)
+}
+
 func (s *SSServer) runConfig(config Config) (func(), error) {
 	startErrCh := make(chan error)
 	stopCh := make(chan struct{})
 
 	go func() {
-		lnSet := s.lnManager.NewListenerSet()
+		lnSet := &listenerSet{
+			manager:   s.lnManager,
+			listeners: make(map[string]service.Listener),
+		}
 		defer lnSet.Close()
 
 		startErrCh <- func() error {

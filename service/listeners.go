@@ -16,7 +16,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -122,78 +121,8 @@ func (cl *concreteListener) Close() error {
 	return nil
 }
 
-// ListenerSet represents a set of listeners listening on unique addresses. Trying
-// to listen on the same address twice will result in an error. The set can be
-// closed as a unit, which is useful if you want to bring down a group of
-// listeners, such as when reloading a new config.
-type ListenerSet interface {
-	// ListenStream announces on a given TCP network address.
-	ListenStream(addr string) (StreamListener, error)
-	// ListenStream announces on a given UDP network address.
-	ListenPacket(addr string) (net.PacketConn, error)
-	// Close closes all the listeners in the set.
-	Close() error
-	// Len returns the number of listeners in the set.
-	Len() int
-}
-
-type listenerSet struct {
-	manager   ListenerManager
-	listeners map[string]Listener
-}
-
-// ListenStream announces on a given TCP network address.
-func (ls *listenerSet) ListenStream(addr string) (StreamListener, error) {
-	network := "tcp"
-	lnKey := listenerKey(network, addr)
-	if _, exists := ls.listeners[lnKey]; exists {
-		return nil, fmt.Errorf("listener %s already exists", lnKey)
-	}
-	ln, err := ls.manager.ListenStream(network, addr)
-	if err != nil {
-		return nil, err
-	}
-	ls.listeners[lnKey] = ln
-	return ln, nil
-}
-
-// ListenPacket announces on a given UDP network address.
-func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
-	network := "udp"
-	lnKey := listenerKey(network, addr)
-	if _, exists := ls.listeners[lnKey]; exists {
-		return nil, fmt.Errorf("listener %s already exists", lnKey)
-	}
-	ln, err := ls.manager.ListenPacket(network, addr)
-	if err != nil {
-		return nil, err
-	}
-	ls.listeners[lnKey] = ln
-	return ln, nil
-}
-
-// Close closes all the listeners in the set.
-func (ls *listenerSet) Close() error {
-	for _, listener := range ls.listeners {
-		addr, err := getAddr(listener)
-		if err != nil {
-			return err
-		}
-		if err := listener.Close(); err != nil {
-			return fmt.Errorf("%s listener on address %s failed to stop: %w", addr.Network(), addr.String(), err)
-		}
-	}
-	return nil
-}
-
-// Len returns the number of listeners in the set.
-func (ls *listenerSet) Len() int {
-	return len(ls.listeners)
-}
-
 // ListenerManager holds and manages the state of shared listeners.
 type ListenerManager interface {
-	NewListenerSet() ListenerSet
 	ListenStream(network string, addr string) (StreamListener, error)
 	ListenPacket(network string, addr string) (net.PacketConn, error)
 }
@@ -207,13 +136,6 @@ type listenerManager struct {
 func NewListenerManager() ListenerManager {
 	return &listenerManager{
 		listeners: make(map[string]*concreteListener),
-	}
-}
-
-func (m *listenerManager) NewListenerSet() ListenerSet {
-	return &listenerSet{
-		manager:   m,
-		listeners: make(map[string]Listener),
 	}
 }
 
@@ -319,15 +241,4 @@ func (m *listenerManager) delete(key string) {
 
 func listenerKey(network string, addr string) string {
 	return network + "/" + addr
-}
-
-func getAddr(listener Listener) (net.Addr, error) {
-	switch ln := listener.(type) {
-	case net.Listener:
-		return ln.Addr(), nil
-	case net.PacketConn:
-		return ln.LocalAddr(), nil
-	default:
-		return nil, fmt.Errorf("unknown listener type: %v", ln)
-	}
 }
