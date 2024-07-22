@@ -88,7 +88,7 @@ func (spc *sharedPacketConn) Close() error {
 	return spc.onCloseFunc()
 }
 
-type concreteListener struct {
+type listenAddr struct {
 	ln          *net.TCPListener
 	pc          net.PacketConn
 	usage       atomic.Int32
@@ -96,23 +96,42 @@ type concreteListener struct {
 	onCloseFunc func() // Called when the listener's last user closes it.
 }
 
-func (cl *concreteListener) Close() error {
-	if cl.usage.Add(-1) == 0 {
-		if cl.ln != nil {
-			err := cl.ln.Close()
-			if err != nil {
-				return err
+func (cl *listenAddr) NewStreamListener() StreamListener {
+	cl.usage.Add(1)
+	sl := &sharedListener{
+		listener: *cl.ln,
+		closeCh:  make(chan struct{}),
+		onCloseFunc: func() error {
+			if cl.usage.Add(-1) == 0 {
+				err := cl.ln.Close()
+				if err != nil {
+					return err
+				}
+				cl.onCloseFunc()
 			}
-		}
-		if cl.pc != nil {
-			err := cl.pc.Close()
-			if err != nil {
-				return err
-			}
-		}
-		cl.onCloseFunc()
+			return nil
+		},
 	}
-	return nil
+	sl.acceptCh = &atomic.Value{}
+	sl.acceptCh.Store(cl.acceptCh)
+	return sl
+}
+
+func (cl *listenAddr) NewPacketListener() net.PacketConn {
+	cl.usage.Add(1)
+	return &sharedPacketConn{
+		PacketConn: cl.pc,
+		onCloseFunc: func() error {
+			if cl.usage.Add(-1) == 0 {
+				err := cl.pc.Close()
+				if err != nil {
+					return err
+				}
+				cl.onCloseFunc()
+			}
+			return nil
+		},
+	}
 }
 
 // ListenerManager holds and manages the state of shared listeners.
@@ -122,14 +141,14 @@ type ListenerManager interface {
 }
 
 type listenerManager struct {
-	listeners   map[string]*concreteListener
+	listeners   map[string]*listenAddr
 	listenersMu sync.Mutex
 }
 
 // NewListenerManager creates a new [ListenerManger].
 func NewListenerManager() ListenerManager {
 	return &listenerManager{
-		listeners: make(map[string]*concreteListener),
+		listeners: make(map[string]*listenAddr),
 	}
 }
 
@@ -144,18 +163,8 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	defer m.listenersMu.Unlock()
 
 	lnKey := listenerKey(network, addr)
-	if lnConcrete, ok := m.listeners[lnKey]; ok {
-		lnConcrete.usage.Add(1)
-		sl := &sharedListener{
-			listener: *lnConcrete.ln,
-			closeCh:  make(chan struct{}),
-			onCloseFunc: func() error {
-				return lnConcrete.Close()
-			},
-		}
-		sl.acceptCh = &atomic.Value{}
-		sl.acceptCh.Store(lnConcrete.acceptCh)
-		return sl, nil
+	if listenAddress, ok := m.listeners[lnKey]; ok {
+		return listenAddress.NewStreamListener(), nil
 	}
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
@@ -167,7 +176,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		return nil, err
 	}
 
-	lnConcrete := &concreteListener{
+	listenAddress := &listenAddr{
 		ln:       ln,
 		acceptCh: make(chan acceptResponse),
 		onCloseFunc: func() {
@@ -176,26 +185,15 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	}
 	go func() {
 		for {
-			conn, err := lnConcrete.ln.AcceptTCP()
+			conn, err := listenAddress.ln.AcceptTCP()
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			lnConcrete.acceptCh <- acceptResponse{conn, err}
+			listenAddress.acceptCh <- acceptResponse{conn, err}
 		}
 	}()
-	lnConcrete.usage.Store(1)
-	m.listeners[lnKey] = lnConcrete
-
-	sl := &sharedListener{
-		listener: *lnConcrete.ln,
-		closeCh:  make(chan struct{}),
-		onCloseFunc: func() error {
-			return lnConcrete.Close()
-		},
-	}
-	sl.acceptCh = &atomic.Value{}
-	sl.acceptCh.Store(lnConcrete.acceptCh)
-	return sl, nil
+	m.listeners[lnKey] = listenAddress
+	return listenAddress.NewStreamListener(), nil
 }
 
 // ListenPacket creates a new packet listener for a given network and address.
@@ -206,14 +204,8 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 	defer m.listenersMu.Unlock()
 
 	lnKey := listenerKey(network, addr)
-	if lnConcrete, ok := m.listeners[lnKey]; ok {
-		lnConcrete.usage.Add(1)
-		return &sharedPacketConn{
-			PacketConn: lnConcrete.pc,
-			onCloseFunc: func() error {
-				return lnConcrete.Close()
-			},
-		}, nil
+	if listenAddress, ok := m.listeners[lnKey]; ok {
+		return listenAddress.NewPacketListener(), nil
 	}
 
 	pc, err := net.ListenPacket(network, addr)
@@ -221,21 +213,14 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return nil, err
 	}
 
-	lnConcrete := &concreteListener{
+	listenAddress := &listenAddr{
 		pc: pc,
 		onCloseFunc: func() {
 			m.delete(lnKey)
 		},
 	}
-	lnConcrete.usage.Store(1)
-	m.listeners[lnKey] = lnConcrete
-
-	return &sharedPacketConn{
-		PacketConn: pc,
-		onCloseFunc: func() error {
-			return lnConcrete.Close()
-		},
-	}, nil
+	m.listeners[lnKey] = listenAddress
+	return listenAddress.NewPacketListener(), nil
 }
 
 func (m *listenerManager) delete(key string) {
