@@ -46,9 +46,7 @@ type acceptResponse struct {
 }
 
 type sharedListener struct {
-	listener net.TCPListener
-	once     sync.Once
-
+	listener    net.TCPListener
 	acceptCh    *atomic.Value // closed by first Close() call
 	closeCh     chan struct{}
 	onCloseFunc func() error
@@ -71,12 +69,8 @@ func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 // Only when the last user closes it, we actually close it.
 func (sl *sharedListener) Close() error {
 	sl.acceptCh = nil
-	var err error
-	sl.once.Do(func() {
-		close(sl.closeCh)
-		err = sl.onCloseFunc()
-	})
-	return err
+	close(sl.closeCh)
+	return sl.onCloseFunc()
 }
 
 func (sl *sharedListener) Addr() net.Addr {
@@ -85,16 +79,11 @@ func (sl *sharedListener) Addr() net.Addr {
 
 type sharedPacketConn struct {
 	net.PacketConn
-	once        sync.Once
 	onCloseFunc func() error
 }
 
 func (spc *sharedPacketConn) Close() error {
-	var err error
-	spc.once.Do(func() {
-		err = spc.onCloseFunc()
-	})
-	return err
+	return spc.onCloseFunc()
 }
 
 type concreteListener struct {

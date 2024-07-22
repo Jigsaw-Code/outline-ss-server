@@ -161,7 +161,7 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 			manager:   s.lnManager,
 			listeners: make(map[string]service.Listener),
 		}
-		defer lnSet.Close()
+		defer lnSet.Close() // This closes all the listeners in the set.
 
 		startErrCh <- func() error {
 			portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
