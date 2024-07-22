@@ -98,10 +98,10 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 	stopCh := make(chan struct{})
 
 	go func() {
-		startErrCh <- func() error {
-			lnSet := s.lnManager.NewListenerSet()
-			defer lnSet.Close()
+		lnSet := s.lnManager.NewListenerSet()
+		defer lnSet.Close()
 
+		startErrCh <- func() error {
 			var totalCipherCount int
 
 			portCiphers := make(map[int]service.CipherList)
