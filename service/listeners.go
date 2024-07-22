@@ -49,7 +49,7 @@ type acceptResponse struct {
 
 type sharedListener struct {
 	listener    net.TCPListener
-	acceptCh    *atomic.Value // closed by first Close() call
+	acceptCh    chan acceptResponse
 	closeCh     chan struct{}
 	onCloseFunc func() error
 }
@@ -57,7 +57,7 @@ type sharedListener struct {
 // Accept accepts connections until Close() is called.
 func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 	select {
-	case acceptResponse := <-sl.acceptCh.Load().(chan acceptResponse):
+	case acceptResponse := <-sl.acceptCh:
 		if acceptResponse.err != nil {
 			return nil, acceptResponse.err
 		}
@@ -70,7 +70,6 @@ func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 // Close stops accepting new connections without closing the underlying socket.
 // Only when the last user closes it, we actually close it.
 func (sl *sharedListener) Close() error {
-	sl.acceptCh = nil
 	close(sl.closeCh)
 	return sl.onCloseFunc()
 }
@@ -100,6 +99,7 @@ func (cl *listenAddr) NewStreamListener() StreamListener {
 	cl.usage.Add(1)
 	sl := &sharedListener{
 		listener: *cl.ln,
+		acceptCh: cl.acceptCh,
 		closeCh:  make(chan struct{}),
 		onCloseFunc: func() error {
 			if cl.usage.Add(-1) == 0 {
@@ -112,8 +112,6 @@ func (cl *listenAddr) NewStreamListener() StreamListener {
 			return nil
 		},
 	}
-	sl.acceptCh = &atomic.Value{}
-	sl.acceptCh.Store(cl.acceptCh)
 	return sl
 }
 
