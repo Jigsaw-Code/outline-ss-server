@@ -74,6 +74,7 @@ func (sl *sharedListener) Close() error {
 	return sl.onCloseFunc()
 }
 
+// Addr returns the listener's network address.
 func (sl *sharedListener) Addr() net.Addr {
 	return sl.listener.Addr()
 }
@@ -95,6 +96,7 @@ type listenAddr struct {
 	onCloseFunc func() // Called when the listener's last user closes it.
 }
 
+// NewStreamListener creates a new [StreamListener].
 func (cl *listenAddr) NewStreamListener() StreamListener {
 	cl.usage.Add(1)
 	sl := &sharedListener{
@@ -115,6 +117,7 @@ func (cl *listenAddr) NewStreamListener() StreamListener {
 	return sl
 }
 
+// NewStreamListener creates a new [net.PacketConn].
 func (cl *listenAddr) NewPacketListener() net.PacketConn {
 	cl.usage.Add(1)
 	return &sharedPacketConn{
