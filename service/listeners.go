@@ -28,6 +28,8 @@ import (
 // interchangeable. The type of listener depends on the network type.
 type Listener = io.Closer
 
+// StreamListener is a network listener for stream-oriented protocols that
+// accepts [transport.StreamConn] connections.
 type StreamListener interface {
 	// Accept waits for and returns the next connection to the listener.
 	AcceptStream() (transport.StreamConn, error)
