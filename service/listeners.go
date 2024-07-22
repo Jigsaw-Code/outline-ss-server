@@ -89,10 +89,11 @@ func (spc *sharedPacketConn) Close() error {
 }
 
 type concreteListener struct {
-	ln       *net.TCPListener
-	pc       net.PacketConn
-	usage    atomic.Int32
-	acceptCh chan acceptResponse
+	ln          *net.TCPListener
+	pc          net.PacketConn
+	usage       atomic.Int32
+	acceptCh    chan acceptResponse
+	onCloseFunc func() // Called when the listener's last user closes it.
 }
 
 func (cl *concreteListener) Close() error {
@@ -109,6 +110,7 @@ func (cl *concreteListener) Close() error {
 				return err
 			}
 		}
+		cl.onCloseFunc()
 	}
 	return nil
 }
@@ -148,11 +150,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 			listener: *lnConcrete.ln,
 			closeCh:  make(chan struct{}),
 			onCloseFunc: func() error {
-				if err := lnConcrete.Close(); err != nil {
-					return err
-				}
-				m.delete(lnKey)
-				return nil
+				return lnConcrete.Close()
 			},
 		}
 		sl.acceptCh = &atomic.Value{}
@@ -169,7 +167,13 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		return nil, err
 	}
 
-	lnConcrete := &concreteListener{ln: ln, acceptCh: make(chan acceptResponse)}
+	lnConcrete := &concreteListener{
+		ln:       ln,
+		acceptCh: make(chan acceptResponse),
+		onCloseFunc: func() {
+			m.delete(lnKey)
+		},
+	}
 	go func() {
 		for {
 			conn, err := lnConcrete.ln.AcceptTCP()
@@ -186,11 +190,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		listener: *lnConcrete.ln,
 		closeCh:  make(chan struct{}),
 		onCloseFunc: func() error {
-			if err := lnConcrete.Close(); err != nil {
-				return err
-			}
-			m.delete(lnKey)
-			return nil
+			return lnConcrete.Close()
 		},
 	}
 	sl.acceptCh = &atomic.Value{}
@@ -211,11 +211,7 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return &sharedPacketConn{
 			PacketConn: lnConcrete.pc,
 			onCloseFunc: func() error {
-				if err := lnConcrete.Close(); err != nil {
-					return err
-				}
-				m.delete(lnKey)
-				return nil
+				return lnConcrete.Close()
 			},
 		}, nil
 	}
@@ -225,18 +221,19 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return nil, err
 	}
 
-	lnConcrete := &concreteListener{pc: pc}
+	lnConcrete := &concreteListener{
+		pc: pc,
+		onCloseFunc: func() {
+			m.delete(lnKey)
+		},
+	}
 	lnConcrete.usage.Store(1)
 	m.listeners[lnKey] = lnConcrete
 
 	return &sharedPacketConn{
 		PacketConn: pc,
 		onCloseFunc: func() error {
-			if err := lnConcrete.Close(); err != nil {
-				return err
-			}
-			m.delete(lnKey)
-			return nil
+			return lnConcrete.Close()
 		},
 	}, nil
 }
