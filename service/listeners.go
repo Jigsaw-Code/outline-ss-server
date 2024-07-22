@@ -49,7 +49,7 @@ type sharedListener struct {
 	listener net.TCPListener
 	once     sync.Once
 
-	acceptCh    chan acceptResponse
+	acceptCh    *atomic.Value // closed by first Close() call
 	closeCh     chan struct{}
 	onCloseFunc func() error
 }
@@ -57,7 +57,7 @@ type sharedListener struct {
 // Accept accepts connections until Close() is called.
 func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 	select {
-	case acceptResponse := <-sl.acceptCh:
+	case acceptResponse := <-sl.acceptCh.Load().(chan acceptResponse):
 		if acceptResponse.err != nil {
 			return nil, acceptResponse.err
 		}
@@ -70,6 +70,7 @@ func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 // Close stops accepting new connections without closing the underlying socket.
 // Only when the last user closes it, we actually close it.
 func (sl *sharedListener) Close() error {
+	sl.acceptCh = nil
 	var err error
 	sl.once.Do(func() {
 		close(sl.closeCh)
@@ -152,15 +153,17 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	lnKey := listenerKey(network, addr)
 	if lnConcrete, ok := m.listeners[lnKey]; ok {
 		lnConcrete.usage.Add(1)
-		return &sharedListener{
+		sl := &sharedListener{
 			listener: *lnConcrete.ln,
-			acceptCh: lnConcrete.acceptCh,
 			closeCh:  make(chan struct{}),
 			onCloseFunc: func() error {
 				m.delete(lnKey)
 				return lnConcrete.Close()
 			},
-		}, nil
+		}
+		sl.acceptCh = &atomic.Value{}
+		sl.acceptCh.Store(lnConcrete.acceptCh)
+		return sl, nil
 	}
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
@@ -185,15 +188,17 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	lnConcrete.usage.Store(1)
 	m.listeners[lnKey] = lnConcrete
 
-	return &sharedListener{
+	sl := &sharedListener{
 		listener: *lnConcrete.ln,
-		acceptCh: lnConcrete.acceptCh,
 		closeCh:  make(chan struct{}),
 		onCloseFunc: func() error {
 			m.delete(lnKey)
 			return lnConcrete.Close()
 		},
-	}, nil
+	}
+	sl.acceptCh = &atomic.Value{}
+	sl.acceptCh.Store(lnConcrete.acceptCh)
+	return sl, nil
 }
 
 // ListenPacket creates a new packet listener for a given network and address.
