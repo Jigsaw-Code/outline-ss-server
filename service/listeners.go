@@ -146,8 +146,11 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 			listener: *lnConcrete.ln,
 			closeCh:  make(chan struct{}),
 			onCloseFunc: func() error {
+				if err := lnConcrete.Close(); err != nil {
+					return err
+				}
 				m.delete(lnKey)
-				return lnConcrete.Close()
+				return nil
 			},
 		}
 		sl.acceptCh = &atomic.Value{}
@@ -181,8 +184,11 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		listener: *lnConcrete.ln,
 		closeCh:  make(chan struct{}),
 		onCloseFunc: func() error {
+			if err := lnConcrete.Close(); err != nil {
+				return err
+			}
 			m.delete(lnKey)
-			return lnConcrete.Close()
+			return nil
 		},
 	}
 	sl.acceptCh = &atomic.Value{}
@@ -203,8 +209,11 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return &sharedPacketConn{
 			PacketConn: lnConcrete.pc,
 			onCloseFunc: func() error {
+				if err := lnConcrete.Close(); err != nil {
+					return err
+				}
 				m.delete(lnKey)
-				return lnConcrete.Close()
+				return nil
 			},
 		}, nil
 	}
@@ -221,8 +230,11 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 	return &sharedPacketConn{
 		PacketConn: pc,
 		onCloseFunc: func() error {
+			if err := lnConcrete.Close(); err != nil {
+				return err
+			}
 			m.delete(lnKey)
-			return lnConcrete.Close()
+			return nil
 		},
 	}, nil
 }
