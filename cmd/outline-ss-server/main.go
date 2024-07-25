@@ -80,7 +80,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	if err != nil {
 		return err
 	}
-	s.stopConfig()
+	go s.stopConfig()
 	s.stopConfig = stopConfig
 	return nil
 }
