@@ -35,7 +35,10 @@ type StreamListener interface {
 	AcceptStream() (transport.StreamConn, error)
 
 	// Close closes the listener.
-	// Any blocked Accept operations will be unblocked and return errors.
+	// Any blocked Accept operations will be unblocked and return errors. This
+	// stops the current listener from accepting new connections without closing
+	// the underlying socket. Only when the last user of the underlying socket
+	// closes it, do we actually close it.
 	Close() error
 
 	// Addr returns the listener's network address.
@@ -57,18 +60,17 @@ type sharedListener struct {
 // Accept accepts connections until Close() is called.
 func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 	select {
-	case acceptResponse := <-sl.acceptCh:
-		if acceptResponse.err != nil {
-			return nil, acceptResponse.err
+	case acceptResponse, ok := <-sl.acceptCh:
+		if !ok {
+			return nil, net.ErrClosed
 		}
-		return acceptResponse.conn, nil
+		return acceptResponse.conn, acceptResponse.err
 	case <-sl.closeCh:
 		return nil, net.ErrClosed
 	}
 }
 
-// Close stops accepting new connections without closing the underlying socket.
-// Only when the last user closes it, we actually close it.
+// Close implements [StreamListener.Close].
 func (sl *sharedListener) Close() error {
 	close(sl.closeCh)
 	return sl.onCloseFunc()
@@ -188,6 +190,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		for {
 			conn, err := listenAddress.ln.AcceptTCP()
 			if errors.Is(err, net.ErrClosed) {
+				close(listenAddress.acceptCh)
 				return
 			}
 			listenAddress.acceptCh <- acceptResponse{conn, err}
