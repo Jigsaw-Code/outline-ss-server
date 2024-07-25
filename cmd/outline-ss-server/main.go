@@ -225,7 +225,7 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 
 // Stop stops serving the current config.
 func (s *SSServer) Stop() {
-	s.stopConfig()
+	go s.stopConfig()
 	logger.Info("Stopped all listeners for running config")
 }
 
