@@ -45,13 +45,31 @@ type StreamListener interface {
 	Addr() net.Addr
 }
 
+type TCPListener struct {
+	ln *net.TCPListener
+}
+
+var _ StreamListener = (*TCPListener)(nil)
+
+func (t *TCPListener) AcceptStream() (transport.StreamConn, error) {
+	return t.ln.AcceptTCP()
+}
+
+func (t *TCPListener) Close() error {
+	return t.ln.Close()
+}
+
+func (t *TCPListener) Addr() net.Addr {
+	return t.ln.Addr()
+}
+
 type acceptResponse struct {
 	conn transport.StreamConn
 	err  error
 }
 
 type sharedListener struct {
-	listener    net.TCPListener
+	listener    StreamListener
 	acceptCh    chan acceptResponse
 	closeCh     chan struct{}
 	onCloseFunc func() error
@@ -93,7 +111,7 @@ func (spc *sharedPacketConn) Close() error {
 }
 
 type listenAddr struct {
-	ln          *net.TCPListener
+	ln          StreamListener
 	pc          net.PacketConn
 	usage       atomic.Int32
 	acceptCh    chan acceptResponse
@@ -104,7 +122,7 @@ type listenAddr struct {
 func (cl *listenAddr) NewStreamListener() StreamListener {
 	cl.usage.Add(1)
 	sl := &sharedListener{
-		listener: *cl.ln,
+		listener: cl.ln,
 		acceptCh: cl.acceptCh,
 		closeCh:  make(chan struct{}),
 		onCloseFunc: func() error {
@@ -181,8 +199,9 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 		return nil, err
 	}
 
+	streamLn := &TCPListener{ln}
 	listenAddress := &listenAddr{
-		ln:       ln,
+		ln:       streamLn,
 		acceptCh: make(chan acceptResponse),
 		onCloseFunc: func() {
 			m.delete(lnKey)
@@ -190,7 +209,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	}
 	go func() {
 		for {
-			conn, err := listenAddress.ln.AcceptTCP()
+			conn, err := streamLn.AcceptStream()
 			if errors.Is(err, net.ErrClosed) {
 				close(listenAddress.acceptCh)
 				return
