@@ -57,6 +57,8 @@ type sharedListener struct {
 	onCloseFunc func() error
 }
 
+var _ StreamListener = (*sharedListener)(nil)
+
 // Accept accepts connections until Close() is called.
 func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 	select {
