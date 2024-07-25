@@ -96,9 +96,9 @@ func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList) servi
 }
 
 type listenerSet struct {
-	manager     service.ListenerManager
-	listeners   map[string]service.Listener
-	listenersMu sync.Mutex
+	manager            service.ListenerManager
+	listenerCloseFuncs map[string]func() error
+	listenersMu        sync.Mutex
 }
 
 // ListenStream announces on a given TCP network address. Trying to listen on
@@ -108,14 +108,14 @@ func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error)
 	defer ls.listenersMu.Unlock()
 
 	lnKey := "tcp/" + addr
-	if _, exists := ls.listeners[lnKey]; exists {
+	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
 		return nil, fmt.Errorf("listener %s already exists", lnKey)
 	}
 	ln, err := ls.manager.ListenStream("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	ls.listeners[lnKey] = ln
+	ls.listenerCloseFuncs[lnKey] = ln.Close
 	return ln, nil
 }
 
@@ -126,33 +126,33 @@ func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
 	defer ls.listenersMu.Unlock()
 
 	lnKey := "udp/" + addr
-	if _, exists := ls.listeners[lnKey]; exists {
+	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
 		return nil, fmt.Errorf("listener %s already exists", lnKey)
 	}
 	ln, err := ls.manager.ListenPacket("udp", addr)
 	if err != nil {
 		return nil, err
 	}
-	ls.listeners[lnKey] = ln
+	ls.listenerCloseFuncs[lnKey] = ln.Close
 	return ln, nil
 }
 
 // Close closes all the listeners in the set, after which the set can't be used again.
 func (ls *listenerSet) Close() error {
-	for addr, listener := range ls.listeners {
-		if err := listener.Close(); err != nil {
+	for addr, listenerCloseFunc := range ls.listenerCloseFuncs {
+		if err := listenerCloseFunc(); err != nil {
 			return fmt.Errorf("listener on address %s failed to stop: %w", addr, err)
 		}
 	}
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
-	ls.listeners = nil
+	ls.listenerCloseFuncs = nil
 	return nil
 }
 
 // Len returns the number of listeners in the set.
 func (ls *listenerSet) Len() int {
-	return len(ls.listeners)
+	return len(ls.listenerCloseFuncs)
 }
 
 func (s *SSServer) runConfig(config Config) (func(), error) {
@@ -161,8 +161,8 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 
 	go func() {
 		lnSet := &listenerSet{
-			manager:   s.lnManager,
-			listeners: make(map[string]service.Listener),
+			manager:            s.lnManager,
+			listenerCloseFuncs: make(map[string]func() error),
 		}
 		defer lnSet.Close() // This closes all the listeners in the set.
 
