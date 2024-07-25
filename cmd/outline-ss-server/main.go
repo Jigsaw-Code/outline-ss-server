@@ -217,6 +217,8 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 	}
 	return func() {
 		logger.Infof("Stopping running config.")
+		// TODO(sbruens): Actually wait for all handlers to be stopped, e.g. by
+		// using a https://pkg.go.dev/sync#WaitGroup.
 		stopCh <- struct{}{}
 	}, nil
 }
