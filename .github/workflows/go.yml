@@ -5,6 +5,8 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  schedule:
+    - cron: "0 13 * * *"  # Run daily at 1PM UTC.
 
 permissions:  # added using https://github.com/step-security/secure-workflows
   contents: read
