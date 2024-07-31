@@ -16,6 +16,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -68,16 +69,17 @@ type acceptResponse struct {
 	err  error
 }
 
+type OnCloseFunc func() error
+
 type virtualStreamListener struct {
 	listener    StreamListener
 	acceptCh    chan acceptResponse
 	closeCh     chan struct{}
-	onCloseFunc func() error
+	onCloseFunc OnCloseFunc
 }
 
 var _ StreamListener = (*virtualStreamListener)(nil)
 
-// Accept accepts connections until Close() is called.
 func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 	select {
 	case acceptResponse, ok := <-sl.acceptCh:
@@ -90,20 +92,18 @@ func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 	}
 }
 
-// Close implements [StreamListener.Close].
 func (sl *virtualStreamListener) Close() error {
 	close(sl.closeCh)
 	return sl.onCloseFunc()
 }
 
-// Addr returns the listener's network address.
 func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.listener.Addr()
 }
 
 type virtualPacketConn struct {
 	net.PacketConn
-	onCloseFunc func() error
+	onCloseFunc OnCloseFunc
 }
 
 func (spc *virtualPacketConn) Close() error {
@@ -113,38 +113,50 @@ func (spc *virtualPacketConn) Close() error {
 type listenAddr struct {
 	ln          Listener
 	acceptCh    chan acceptResponse
-	onCloseFunc func() error
+	onCloseFunc OnCloseFunc
 }
 
+type canCreateStreamListener interface {
+	NewStreamListener(onCloseFunc OnCloseFunc) StreamListener
+}
+
+var _ canCreateStreamListener = (*listenAddr)(nil)
+
 // NewStreamListener creates a new [StreamListener].
-func (cl *listenAddr) NewStreamListener() StreamListener {
-	if ln, ok := cl.ln.(StreamListener); ok {
+func (la *listenAddr) NewStreamListener(onCloseFunc OnCloseFunc) StreamListener {
+	if ln, ok := la.ln.(StreamListener); ok {
 		return &virtualStreamListener{
 			listener:    ln,
-			acceptCh:    cl.acceptCh,
+			acceptCh:    la.acceptCh,
 			closeCh:     make(chan struct{}),
-			onCloseFunc: cl.Close,
+			onCloseFunc: onCloseFunc,
 		}
 	}
 	return nil
 }
 
+type canCreatePacketListener interface {
+	NewPacketListener(onCloseFunc OnCloseFunc) net.PacketConn
+}
+
+var _ canCreatePacketListener = (*listenAddr)(nil)
+
 // NewPacketListener creates a new [net.PacketConn].
-func (cl *listenAddr) NewPacketListener() net.PacketConn {
+func (cl *listenAddr) NewPacketListener(onCloseFunc OnCloseFunc) net.PacketConn {
 	if ln, ok := cl.ln.(net.PacketConn); ok {
 		return &virtualPacketConn{
 			PacketConn:  ln,
-			onCloseFunc: cl.Close,
+			onCloseFunc: onCloseFunc,
 		}
 	}
 	return nil
 }
 
-func (cl *listenAddr) Close() error {
-	if err := cl.ln.Close(); err != nil {
+func (la *listenAddr) Close() error {
+	if err := la.ln.Close(); err != nil {
 		return err
 	}
-	return cl.onCloseFunc()
+	return la.onCloseFunc()
 }
 
 // ListenerManager holds and manages the state of shared listeners.
@@ -154,15 +166,32 @@ type ListenerManager interface {
 }
 
 type listenerManager struct {
-	listeners   map[string]RefCount[*listenAddr]
+	listeners   map[string]RefCount[Listener]
 	listenersMu sync.Mutex
 }
 
 // NewListenerManager creates a new [ListenerManger].
 func NewListenerManager() ListenerManager {
 	return &listenerManager{
-		listeners: make(map[string]RefCount[*listenAddr]),
+		listeners: make(map[string]RefCount[Listener]),
 	}
+}
+
+func (m *listenerManager) getOrCreate(key string, createFunc func() (Listener, error)) (RefCount[Listener], error) {
+	m.listenersMu.Lock()
+	defer m.listenersMu.Unlock()
+
+	if lnRefCount, exists := m.listeners[key]; exists {
+		return lnRefCount.Acquire(), nil
+	}
+
+	ln, err := createFunc()
+	if err != nil {
+		return nil, err
+	}
+	lnRefCount := NewRefCount(ln)
+	m.listeners[key] = lnRefCount
+	return lnRefCount, nil
 }
 
 // ListenStream creates a new stream listener for a given network and address.
@@ -172,74 +201,71 @@ func NewListenerManager() ListenerManager {
 // reusable listener wrappers, which do not actually close the underlying socket
 // until all uses of the shared listener have been closed.
 func (m *listenerManager) ListenStream(network string, addr string) (StreamListener, error) {
-	m.listenersMu.Lock()
-	defer m.listenersMu.Unlock()
-
 	lnKey := network + "/" + addr
-	if lnRefCount, ok := m.listeners[lnKey]; ok {
-		lnAddr := lnRefCount.Acquire()
-		return lnAddr.NewStreamListener(), nil
-	}
-
-	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-	ln, err := net.ListenTCP(network, tcpAddr)
-	if err != nil {
-		return nil, err
-	}
-
-	streamLn := &TCPListener{ln}
-	lnAddr := &listenAddr{
-		ln:       streamLn,
-		acceptCh: make(chan acceptResponse),
-		onCloseFunc: func() error {
-			m.delete(lnKey)
-			return nil
-		},
-	}
-	go func() {
-		for {
-			conn, err := streamLn.AcceptStream()
-			if errors.Is(err, net.ErrClosed) {
-				close(lnAddr.acceptCh)
-				return
-			}
-			lnAddr.acceptCh <- acceptResponse{conn, err}
+	lnRefCount, err := m.getOrCreate(lnKey, func() (Listener, error) {
+		tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			return nil, err
 		}
-	}()
-	m.listeners[lnKey] = NewRefCount(lnAddr)
-	return lnAddr.NewStreamListener(), nil
+		ln, err := net.ListenTCP(network, tcpAddr)
+		if err != nil {
+			return nil, err
+		}
+		streamLn := &TCPListener{ln}
+		lnAddr := &listenAddr{
+			ln:       streamLn,
+			acceptCh: make(chan acceptResponse),
+			onCloseFunc: func() error {
+				m.delete(lnKey)
+				return nil
+			},
+		}
+		go func() {
+			for {
+				conn, err := streamLn.AcceptStream()
+				if errors.Is(err, net.ErrClosed) {
+					close(lnAddr.acceptCh)
+					return
+				}
+				lnAddr.acceptCh <- acceptResponse{conn, err}
+			}
+		}()
+		return lnAddr, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if lnAddr, ok := lnRefCount.Get().(canCreateStreamListener); ok {
+		return lnAddr.NewStreamListener(lnRefCount.Close), nil
+	}
+	return nil, fmt.Errorf("unable to create stream listener for %s", lnKey)
 }
 
 // ListenPacket creates a new packet listener for a given network and address.
 //
 // See notes on [ListenStream].
 func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketConn, error) {
-	m.listenersMu.Lock()
-	defer m.listenersMu.Unlock()
-
 	lnKey := network + "/" + addr
-	if lnRefCount, ok := m.listeners[lnKey]; ok {
-		lnAddr := lnRefCount.Acquire()
-		return lnAddr.NewPacketListener(), nil
-	}
-
-	pc, err := net.ListenPacket(network, addr)
+	lnRefCount, err := m.getOrCreate(lnKey, func() (Listener, error) {
+		pc, err := net.ListenPacket(network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &listenAddr{
+			ln: pc,
+			onCloseFunc: func() error {
+				m.delete(lnKey)
+				return nil
+			},
+		}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	lnAddr := &listenAddr{
-		ln: pc,
-		onCloseFunc: func() error {
-			m.delete(lnKey)
-			return nil
-		},
+	if lnAddr, ok := lnRefCount.Get().(canCreatePacketListener); ok {
+		return lnAddr.NewPacketListener(lnRefCount.Close), nil
 	}
-	m.listeners[lnKey] = NewRefCount(lnAddr)
-	return lnAddr.NewPacketListener(), nil
+	return nil, fmt.Errorf("unable to create packet listener for %s", lnKey)
 }
 
 func (m *listenerManager) delete(key string) {
@@ -254,7 +280,9 @@ type RefCount[T io.Closer] interface {
 	io.Closer
 
 	// Acquire increases the ref count and returns the wrapped object.
-	Acquire() T
+	Acquire() RefCount[T]
+
+	Get() T
 }
 
 type refCount[T io.Closer] struct {
@@ -279,7 +307,11 @@ func (r refCount[T]) Close() error {
 	return nil
 }
 
-func (r refCount[T]) Acquire() T {
+func (r refCount[T]) Acquire() RefCount[T] {
 	r.count.Add(1)
+	return r
+}
+
+func (r refCount[T]) Get() T {
 	return r.value
 }
