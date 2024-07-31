@@ -15,6 +15,7 @@
 package service
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
@@ -30,6 +31,60 @@ func TestListenerManagerStreamListenerEarlyClose(t *testing.T) {
 	_, err = ln.AcceptStream()
 
 	require.ErrorIs(t, err, net.ErrClosed)
+}
+
+func writeTestPayload(ln StreamListener) error {
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		return fmt.Errorf("Failed to dial %v: %v", ln.Addr().String(), err)
+	}
+	if _, err = conn.Write(makeTestPayload(50)); err != nil {
+		return fmt.Errorf("Failed to write to connection: %v", err)
+	}
+	conn.Close()
+	return nil
+}
+
+func TestListenerManagerStreamListenerNotClosedIfStillInUse(t *testing.T) {
+	m := NewListenerManager()
+	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ln2, err := m.ListenStream("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	// Close only the first listener.
+	ln.Close()
+	done := make(chan struct{})
+	go func() {
+		ln2.AcceptStream()
+		done <- struct{}{}
+	}()
+
+	err = writeTestPayload(ln2)
+	require.NoError(t, err)
+
+	<-done
+}
+
+func TestListenerManagerStreamListenerCreatesListenerOnDemand(t *testing.T) {
+	m := NewListenerManager()
+	// Create a listener and immediately close it.
+	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ln.Close()
+	// Now create another listener on the same address.
+	ln2, err := m.ListenStream("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		ln2.AcceptStream()
+		done <- struct{}{}
+	}()
+	err = writeTestPayload(ln2)
+	require.NoError(t, err)
+
+	<-done
 }
 
 type testRefCount struct {
