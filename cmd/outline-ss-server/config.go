@@ -71,7 +71,7 @@ func (c *Config) Validate() error {
 			if ip := net.ParseIP(host); ip == nil {
 				return fmt.Errorf("address must be IP, found: %s", host)
 			}
-			key := listenerKey(string(lnConfig.Type), lnConfig.Address)
+			key := string(lnConfig.Type) + "/" + lnConfig.Address
 			if _, exists := existingListeners[key]; exists {
 				return fmt.Errorf("listener of type %s with address %s already exists.", lnConfig.Type, lnConfig.Address)
 			}

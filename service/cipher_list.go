@@ -55,7 +55,6 @@ func MakeCipherEntry(id string, cryptoKey *shadowsocks.EncryptionKey, secret str
 // CipherList is a thread-safe collection of CipherEntry elements that allows for
 // snapshotting and moving to front.
 type CipherList interface {
-	Len() int
 	// Returns a snapshot of the cipher list optimized for this client IP
 	SnapshotForClientIP(clientIP netip.Addr) []*list.Element
 	MarkUsedByClientIP(e *list.Element, clientIP netip.Addr)
@@ -63,8 +62,6 @@ type CipherList interface {
 	// which is a List of *CipherEntry.  Update takes ownership of `contents`,
 	// which must not be read or written after this call.
 	Update(contents *list.List)
-	// PushBack inserts a new cipher at the back of the list.
-	PushBack(entry *CipherEntry) *list.Element
 }
 
 type cipherList struct {
@@ -76,10 +73,6 @@ type cipherList struct {
 // NewCipherList creates an empty CipherList
 func NewCipherList() CipherList {
 	return &cipherList{list: list.New()}
-}
-
-func (cl *cipherList) Len() int {
-	return cl.list.Len()
 }
 
 func matchesIP(e *list.Element, clientIP netip.Addr) bool {
@@ -122,8 +115,4 @@ func (cl *cipherList) Update(src *list.List) {
 	cl.mu.Lock()
 	cl.list = src
 	cl.mu.Unlock()
-}
-
-func (cl *cipherList) PushBack(entry *CipherEntry) *list.Element {
-	return cl.list.PushBack(entry)
 }

@@ -161,7 +161,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 	}
 }
 
-type tcpHandler struct {
+type streamHandler struct {
 	listenerId   string
 	m            TCPMetrics
 	readTimeout  time.Duration
@@ -169,10 +169,9 @@ type tcpHandler struct {
 	dialer       transport.StreamDialer
 }
 
-// NewTCPService creates a TCPService
-func NewTCPHandler(listenerId string, authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
-	return &tcpHandler{
-		listenerId:   listenerId,
+// NewStreamHandler creates a StreamHandler
+func NewStreamHandler(authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) StreamHandler {
+	return &streamHandler{
 		m:            m,
 		readTimeout:  timeout,
 		authenticate: authenticate,
@@ -189,14 +188,14 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 	}}}
 }
 
-// TCPService is a Shadowsocks TCP service that can be started and stopped.
-type TCPHandler interface {
+// StreamHandler is a handler that handles stream connections.
+type StreamHandler interface {
 	Handle(ctx context.Context, conn transport.StreamConn)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
 }
 
-func (s *tcpHandler) SetTargetDialer(dialer transport.StreamDialer) {
+func (s *streamHandler) SetTargetDialer(dialer transport.StreamDialer) {
 	s.dialer = dialer
 }
 
@@ -212,20 +211,20 @@ func ensureConnectionError(err error, fallbackStatus string, fallbackMsg string)
 	}
 }
 
-type StreamListener func() (transport.StreamConn, error)
+type StreamAcceptFunc func() (transport.StreamConn, error)
 
-func WrapStreamListener[T transport.StreamConn](f func() (T, error)) StreamListener {
+func WrapStreamAcceptFunc[T transport.StreamConn](f func() (T, error)) StreamAcceptFunc {
 	return func() (transport.StreamConn, error) {
 		return f()
 	}
 }
 
-type StreamHandler func(ctx context.Context, conn transport.StreamConn)
+type StreamHandleFunc func(ctx context.Context, conn transport.StreamConn)
 
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
 // via their [context.Context]. StreamServe will return after all pending handlers return.
-func StreamServe(accept StreamListener, handle StreamHandler) {
+func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 	var running sync.WaitGroup
 	defer running.Wait()
 	ctx, contextCancel := context.WithCancel(context.Background())
@@ -254,7 +253,7 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 	}
 }
 
-func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
+func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
 	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
@@ -328,7 +327,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 	return nil
 }
 
-func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (h *streamHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
 	readDeadline := time.Now().Add(h.readTimeout)
 	if deadline, ok := ctx.Deadline(); ok {
@@ -342,7 +341,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
-		h.absorbProbe(outerConn, authErr.Status, proxyMetrics)
+		h.absorbProbe(outerConn, outerConn.LocalAddr().String(), authErr.Status, proxyMetrics)
 		return id, authErr
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
@@ -370,12 +369,12 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *streamHandler) absorbProbe(clientConn io.ReadCloser, addr, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	h.m.AddTCPProbe(status, drainResult, h.listenerId, proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, addr, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {

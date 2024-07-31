@@ -133,7 +133,7 @@ func TestTCPEcho(t *testing.T) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().String(), authFunc, testMetrics, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
@@ -202,10 +202,10 @@ func TestRestrictedAddresses(t *testing.T) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().String(), authFunc, testMetrics, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testMetrics, testTimeout)
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		service.StreamServe(service.WrapStreamAcceptFunc(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -293,7 +293,7 @@ func TestUDPEcho(t *testing.T) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(context.Background(), proxyConn)
+		proxy.Handle(proxyConn)
 		done <- struct{}{}
 	}()
 
@@ -384,11 +384,11 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().String(), authFunc, testMetrics, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		service.StreamServe(service.WrapStreamAcceptFunc(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -448,11 +448,11 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
-	handler := service.NewTCPHandler(proxyListener.Addr().String(), authFunc, testMetrics, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
-		service.StreamServe(service.WrapStreamListener(proxyListener.AcceptTCP), handler.Handle)
+		service.StreamServe(service.WrapStreamAcceptFunc(proxyListener.AcceptTCP), handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -525,7 +525,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(context.Background(), server)
+		proxy.Handle(server)
 		done <- struct{}{}
 	}()
 
@@ -569,7 +569,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(context.Background(), proxyConn)
+		proxy.Handle(proxyConn)
 		done <- struct{}{}
 	}()
 
