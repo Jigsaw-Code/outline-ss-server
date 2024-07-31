@@ -161,7 +161,17 @@ func (la *listenAddr) Close() error {
 
 // ListenerManager holds and manages the state of shared listeners.
 type ListenerManager interface {
+	// ListenStream creates a new stream listener for a given network and address.
+	//
+	// Listeners can overlap one another, because during config changes the new
+	// config is started before the old config is destroyed. This is done by using
+	// reusable listener wrappers, which do not actually close the underlying socket
+	// until all uses of the shared listener have been closed.
 	ListenStream(network string, addr string) (StreamListener, error)
+
+	// ListenPacket creates a new packet listener for a given network and address.
+	//
+	// See notes on [ListenStream].
 	ListenPacket(network string, addr string) (net.PacketConn, error)
 }
 
@@ -194,12 +204,6 @@ func (m *listenerManager) getOrCreate(key string, createFunc func() (Listener, e
 	return lnRefCount, nil
 }
 
-// ListenStream creates a new stream listener for a given network and address.
-//
-// Listeners can overlap one another, because during config changes the new
-// config is started before the old config is destroyed. This is done by using
-// reusable listener wrappers, which do not actually close the underlying socket
-// until all uses of the shared listener have been closed.
 func (m *listenerManager) ListenStream(network string, addr string) (StreamListener, error) {
 	lnKey := network + "/" + addr
 	lnRefCount, err := m.getOrCreate(lnKey, func() (Listener, error) {
@@ -241,9 +245,6 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	return nil, fmt.Errorf("unable to create stream listener for %s", lnKey)
 }
 
-// ListenPacket creates a new packet listener for a given network and address.
-//
-// See notes on [ListenStream].
 func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketConn, error) {
 	lnKey := network + "/" + addr
 	lnRefCount, err := m.getOrCreate(lnKey, func() (Listener, error) {

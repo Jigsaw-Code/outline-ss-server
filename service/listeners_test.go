@@ -15,10 +15,22 @@
 package service
 
 import (
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestListenerManagerStreamListenerEarlyClose(t *testing.T) {
+	m := NewListenerManager()
+	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	ln.Close()
+	_, err = ln.AcceptStream()
+
+	require.ErrorIs(t, err, net.ErrClosed)
+}
 
 type testRefCount struct {
 	onCloseFunc func()
