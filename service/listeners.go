@@ -68,17 +68,17 @@ type acceptResponse struct {
 	err  error
 }
 
-type sharedListener struct {
+type virtualStreamListener struct {
 	listener    StreamListener
 	acceptCh    chan acceptResponse
 	closeCh     chan struct{}
 	onCloseFunc func() error
 }
 
-var _ StreamListener = (*sharedListener)(nil)
+var _ StreamListener = (*virtualStreamListener)(nil)
 
 // Accept accepts connections until Close() is called.
-func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
+func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 	select {
 	case acceptResponse, ok := <-sl.acceptCh:
 		if !ok {
@@ -91,22 +91,22 @@ func (sl *sharedListener) AcceptStream() (transport.StreamConn, error) {
 }
 
 // Close implements [StreamListener.Close].
-func (sl *sharedListener) Close() error {
+func (sl *virtualStreamListener) Close() error {
 	close(sl.closeCh)
 	return sl.onCloseFunc()
 }
 
 // Addr returns the listener's network address.
-func (sl *sharedListener) Addr() net.Addr {
+func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.listener.Addr()
 }
 
-type sharedPacketConn struct {
+type virtualPacketConn struct {
 	net.PacketConn
 	onCloseFunc func() error
 }
 
-func (spc *sharedPacketConn) Close() error {
+func (spc *virtualPacketConn) Close() error {
 	return spc.onCloseFunc()
 }
 
@@ -119,7 +119,7 @@ type listenAddr struct {
 
 // NewStreamListener creates a new [StreamListener].
 func (cl *listenAddr) NewStreamListener() StreamListener {
-	return &sharedListener{
+	return &virtualStreamListener{
 		listener:    cl.ln,
 		acceptCh:    cl.acceptCh,
 		closeCh:     make(chan struct{}),
@@ -129,7 +129,7 @@ func (cl *listenAddr) NewStreamListener() StreamListener {
 
 // NewPacketListener creates a new [net.PacketConn].
 func (cl *listenAddr) NewPacketListener() net.PacketConn {
-	return &sharedPacketConn{
+	return &virtualPacketConn{
 		PacketConn:  cl.pc,
 		onCloseFunc: cl.Close,
 	}
