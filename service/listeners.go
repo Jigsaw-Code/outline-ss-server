@@ -119,13 +119,12 @@ type listenAddr struct {
 
 // NewStreamListener creates a new [StreamListener].
 func (cl *listenAddr) NewStreamListener() StreamListener {
-	sl := &sharedListener{
+	return &sharedListener{
 		listener:    cl.ln,
 		acceptCh:    cl.acceptCh,
 		closeCh:     make(chan struct{}),
 		onCloseFunc: cl.Close,
 	}
-	return sl
 }
 
 // NewPacketListener creates a new [net.PacketConn].
