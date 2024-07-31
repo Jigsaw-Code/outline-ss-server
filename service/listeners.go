@@ -182,7 +182,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 
 	lnKey := network + "/" + addr
 	if lnRefCount, ok := m.listeners[lnKey]; ok {
-		lnAddr := lnRefCount.Acquire().Get()
+		lnAddr := lnRefCount.Acquire()
 		return lnAddr.NewStreamListener(), nil
 	}
 
@@ -196,15 +196,14 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	}
 
 	streamLn := &TCPListener{ln}
-	lnRefCount := NewRefCount(&listenAddr{
+	lnAddr := &listenAddr{
 		ln:       streamLn,
 		acceptCh: make(chan acceptResponse),
 		onCloseFunc: func() error {
 			m.delete(lnKey)
 			return nil
 		},
-	})
-	lnAddr := lnRefCount.Get()
+	}
 	go func() {
 		for {
 			conn, err := streamLn.AcceptStream()
@@ -215,7 +214,7 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 			lnAddr.acceptCh <- acceptResponse{conn, err}
 		}
 	}()
-	m.listeners[lnKey] = lnRefCount
+	m.listeners[lnKey] = NewRefCount(lnAddr)
 	return lnAddr.NewStreamListener(), nil
 }
 
@@ -228,7 +227,7 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 
 	lnKey := network + "/" + addr
 	if lnRefCount, ok := m.listeners[lnKey]; ok {
-		lnAddr := lnRefCount.Acquire().Get()
+		lnAddr := lnRefCount.Acquire()
 		return lnAddr.NewPacketListener(), nil
 	}
 
@@ -237,15 +236,15 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 		return nil, err
 	}
 
-	lnRefCount := NewRefCount(&listenAddr{
+	lnAddr := &listenAddr{
 		pc: pc,
 		onCloseFunc: func() error {
 			m.delete(lnKey)
 			return nil
 		},
-	})
-	m.listeners[lnKey] = lnRefCount
-	return lnRefCount.Get().NewPacketListener(), nil
+	}
+	m.listeners[lnKey] = NewRefCount(lnAddr)
+	return lnAddr.NewPacketListener(), nil
 }
 
 func (m *listenerManager) delete(key string) {
@@ -254,11 +253,18 @@ func (m *listenerManager) delete(key string) {
 	m.listenersMu.Unlock()
 }
 
+// RefCount is an atomic reference counter that can be used to track a shared
+// [io.Closer] resource.
 type RefCount[T io.Closer] interface {
 	io.Closer
 
-	Acquire() RefCount[T]
-	Get() T
+	// Acquire increases the ref count and returns the wrapped object.
+	Acquire() T
+}
+
+type refCount[T io.Closer] struct {
+	count *atomic.Int32
+	value T
 }
 
 func NewRefCount[T io.Closer](value T) RefCount[T] {
@@ -270,11 +276,6 @@ func NewRefCount[T io.Closer](value T) RefCount[T] {
 	return res
 }
 
-type refCount[T io.Closer] struct {
-	count *atomic.Int32
-	value T
-}
-
 func (r refCount[T]) Close() error {
 	if count := r.count.Add(-1); count == 0 {
 		return r.value.Close()
@@ -283,14 +284,7 @@ func (r refCount[T]) Close() error {
 	return nil
 }
 
-func (r refCount[T]) Acquire() RefCount[T] {
+func (r refCount[T]) Acquire() T {
 	r.count.Add(1)
-	return &refCount[T]{
-		count: r.count,
-		value: r.value,
-	}
-}
-
-func (r refCount[T]) Get() T {
 	return r.value
 }
