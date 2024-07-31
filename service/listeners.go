@@ -111,42 +111,38 @@ func (spc *virtualPacketConn) Close() error {
 }
 
 type listenAddr struct {
-	ln          StreamListener
-	pc          net.PacketConn
+	ln          Listener
 	acceptCh    chan acceptResponse
 	onCloseFunc func() error
 }
 
 // NewStreamListener creates a new [StreamListener].
 func (cl *listenAddr) NewStreamListener() StreamListener {
-	return &virtualStreamListener{
-		listener:    cl.ln,
-		acceptCh:    cl.acceptCh,
-		closeCh:     make(chan struct{}),
-		onCloseFunc: cl.Close,
+	if ln, ok := cl.ln.(StreamListener); ok {
+		return &virtualStreamListener{
+			listener:    ln,
+			acceptCh:    cl.acceptCh,
+			closeCh:     make(chan struct{}),
+			onCloseFunc: cl.Close,
+		}
 	}
+	return nil
 }
 
 // NewPacketListener creates a new [net.PacketConn].
 func (cl *listenAddr) NewPacketListener() net.PacketConn {
-	return &virtualPacketConn{
-		PacketConn:  cl.pc,
-		onCloseFunc: cl.Close,
+	if ln, ok := cl.ln.(net.PacketConn); ok {
+		return &virtualPacketConn{
+			PacketConn:  ln,
+			onCloseFunc: cl.Close,
+		}
 	}
+	return nil
 }
 
 func (cl *listenAddr) Close() error {
-	if cl.ln != nil {
-		err := cl.ln.Close()
-		if err != nil {
-			return err
-		}
-	}
-	if cl.pc != nil {
-		err := cl.pc.Close()
-		if err != nil {
-			return err
-		}
+	if err := cl.ln.Close(); err != nil {
+		return err
 	}
 	return cl.onCloseFunc()
 }
@@ -236,7 +232,7 @@ func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketC
 	}
 
 	lnAddr := &listenAddr{
-		pc: pc,
+		ln: pc,
 		onCloseFunc: func() error {
 			m.delete(lnKey)
 			return nil
