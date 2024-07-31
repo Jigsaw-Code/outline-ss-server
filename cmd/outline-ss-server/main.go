@@ -256,16 +256,10 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 			}
 
 			for _, serviceConfig := range config.Services {
-				// TODO: Create the handlers on demand.
-				sh, err := s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
-				if err != nil {
-					return err
-				}
-				ph, err := s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
-				if err != nil {
-					return err
-				}
-
+				var (
+					sh service.StreamHandler
+					ph service.PacketHandler
+				)
 				for _, lnConfig := range serviceConfig.Listeners {
 					switch lnConfig.Type {
 					case listenerTypeTCP:
@@ -274,6 +268,12 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 							return err
 						}
 						logger.Infof("TCP service listening on %s", ln.Addr().String())
+						if sh == nil {
+							sh, err = s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
+							if err != nil {
+								return err
+							}
+						}
 						go service.StreamServe(ln.AcceptStream, sh.Handle)
 					case listenerTypeUDP:
 						pc, err := lnSet.ListenPacket(lnConfig.Address)
@@ -281,6 +281,12 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 							return err
 						}
 						logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
+						if ph == nil {
+							ph, err = s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
+							if err != nil {
+								return err
+							}
+						}
 						go ph.Handle(pc)
 					}
 				}
