@@ -15,7 +15,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"container/list"
 	"context"
@@ -34,7 +33,6 @@ import (
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
-	proxyproto "github.com/pires/go-proxyproto"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -46,7 +44,7 @@ type TCPMetrics interface {
 	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
 	AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string)
 	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
-	AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64)
+	AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64)
 }
 
 func remoteIP(conn net.Conn) netip.Addr {
@@ -163,17 +161,16 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 	}
 }
 
-type tcpHandler struct {
-	port         int
+type streamHandler struct {
 	m            TCPMetrics
 	readTimeout  time.Duration
 	authenticate StreamAuthenticateFunc
 	dialer       transport.StreamDialer
 }
 
-// NewTCPService creates a TCPService
-func NewTCPHandler(authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
-	return &tcpHandler{
+// NewStreamHandler creates a StreamHandler
+func NewStreamHandler(authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) StreamHandler {
+	return &streamHandler{
 		m:            m,
 		readTimeout:  timeout,
 		authenticate: authenticate,
@@ -190,14 +187,14 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 	}}}
 }
 
-// TCPHandler is a Shadowsocks TCP service that can be started and stopped.
-type TCPHandler interface {
+// StreamHandler is a handler that handles stream connections.
+type StreamHandler interface {
 	Handle(ctx context.Context, conn ClientStreamConn)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
 }
 
-func (s *tcpHandler) SetTargetDialer(dialer transport.StreamDialer) {
+func (s *streamHandler) SetTargetDialer(dialer transport.StreamDialer) {
 	s.dialer = dialer
 }
 
@@ -213,81 +210,21 @@ func ensureConnectionError(err error, fallbackStatus string, fallbackMsg string)
 	}
 }
 
-// ClientStreamConn wraps a [transport.StreamConn] and sets the client source of the connection.
-// This is useful for handling the PROXY protocol where the RemoteAddr() points to the
-// server/load balancer address and we need the perceived source of the connection.
-type ClientStreamConn interface {
-	transport.StreamConn
-	ClientAddr() net.Addr
-}
+type StreamAcceptFunc func() (ClientStreamConn, error)
 
-type clientStreamConn struct {
-	transport.StreamConn
-	clientAddr net.Addr
-}
-
-func (c *clientStreamConn) ClientAddr() net.Addr {
-	if c.clientAddr != nil {
-		return c.clientAddr
-	}
-	return c.StreamConn.RemoteAddr()
-}
-
-// StreamListener wraps a [net.Listener].
-type StreamListener struct {
-	net.Listener
-}
-
-// Accept waits for and returns the next incoming connection.
-func (l *StreamListener) Accept() (ClientStreamConn, error) {
-	c, err := l.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	c.(*net.TCPConn).SetKeepAlive(true)
-	return &clientStreamConn{StreamConn: c.(transport.StreamConn)}, nil
-}
-
-// ProxyListener wraps a [StreamListener] and fetches the source of the connection from the PROXY
-// protocol header string. See https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt.
-type ProxyListener struct {
-	StreamListener
-}
-
-// Accept waits for the next incoming connection, parses the client IP from the PROXY protocol
-// header, and adds it to the connection.
-func (l *ProxyListener) Accept() (ClientStreamConn, error) {
-	conn, err := l.StreamListener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	r := bufio.NewReader(conn)
-	h, err := proxyproto.Read(r)
-	if err == proxyproto.ErrNoProxyProtocol {
-		logger.Warningf("Received connection from %v without proxy header.", conn.RemoteAddr())
-		return conn, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("error parsing proxy header: %v", err)
-	}
-	return &clientStreamConn{StreamConn: conn, clientAddr: h.SourceAddr}, nil
-}
-
-type StreamAccepter func() (ClientStreamConn, error)
-
-func WrapStreamListener[T transport.StreamConn](f func() (T, error)) StreamAccepter {
+func WrapStreamAcceptFunc[T transport.StreamConn](f func() (T, error)) StreamAcceptFunc {
 	return func() (ClientStreamConn, error) {
 		c, err := f()
 		return &clientStreamConn{StreamConn: c}, err
 	}
 }
 
-type StreamHandler func(ctx context.Context, conn ClientStreamConn)
+type StreamHandleFunc func(ctx context.Context, conn ClientStreamConn)
 
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
 // via their [context.Context]. StreamServe will return after all pending handlers return.
-func StreamServe(accept StreamAccepter, handle StreamHandler) {
+func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 	var running sync.WaitGroup
 	defer running.Wait()
 	ctx, contextCancel := context.WithCancel(context.Background())
@@ -298,7 +235,7 @@ func StreamServe(accept StreamAccepter, handle StreamHandler) {
 			if errors.Is(err, net.ErrClosed) {
 				break
 			}
-			logger.Warningf("AcceptTCP failed: %v. Continuing to listen.", err)
+			logger.Warningf("Accept failed: %v. Continuing to listen.", err)
 			continue
 		}
 
@@ -316,7 +253,7 @@ func StreamServe(accept StreamAccepter, handle StreamHandler) {
 	}
 }
 
-func (h *tcpHandler) Handle(ctx context.Context, clientConn ClientStreamConn) {
+func (h *streamHandler) Handle(ctx context.Context, clientConn ClientStreamConn) {
 	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.ClientAddr())
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
@@ -390,7 +327,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 	return nil
 }
 
-func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (h *streamHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
 	// Set a deadline to receive the address to the target.
 	readDeadline := time.Now().Add(h.readTimeout)
 	if deadline, ok := ctx.Deadline(); ok {
@@ -404,8 +341,7 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
-		port := outerConn.LocalAddr().(*net.TCPAddr).Port
-		h.absorbProbe(outerConn, port, authErr.Status, proxyMetrics)
+		h.absorbProbe(outerConn, outerConn.LocalAddr().String(), authErr.Status, proxyMetrics)
 		return id, authErr
 	}
 	h.m.AddAuthenticatedTCPConnection(outerConn.RemoteAddr(), id)
@@ -433,12 +369,12 @@ func (h *tcpHandler) handleConnection(ctx context.Context, outerConn transport.S
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
 // `proxyMetrics` is a pointer because its value is being mutated by `clientConn`.
-func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, port int, status string, proxyMetrics *metrics.ProxyMetrics) {
+func (h *streamHandler) absorbProbe(clientConn io.ReadCloser, addr, status string, proxyMetrics *metrics.ProxyMetrics) {
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
-	h.m.AddTCPProbe(status, drainResult, h.port, proxyMetrics.ClientProxy)
+	h.m.AddTCPProbe(status, drainResult, addr, proxyMetrics.ClientProxy)
 }
 
 func drainErrToString(drainErr error) string {
@@ -467,6 +403,6 @@ func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
 func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
 func (m *NoOpTCPMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
-func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, port int, clientProxyBytes int64) {
+func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
 }
 func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

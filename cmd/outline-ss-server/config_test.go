@@ -21,31 +21,99 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateConfigFails(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{
+			name: "WithUnknownListenerType",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: "foo", Address: "[::]:9000"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "WithInvalidListenerAddress",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "tcp/[::]:9000"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "WithHostnameAddress",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "example.com:9000"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "WithDuplicateListeners",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
+						},
+					},
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cfg.Validate()
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestReadConfig(t *testing.T) {
-	config, err := readConfig("./config_example.yml")
+	config, err := readConfigFile("./config_example.yml")
 
 	require.NoError(t, err)
 	expected := Config{
-		Services: []Service{
-			Service{
-				Listeners: []Listener{
-					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9000"},
-					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9000"},
+		Services: []ServiceConfig{
+			ServiceConfig{
+				Listeners: []ListenerConfig{
+					ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
+					ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9000"},
 					Listener{Type: listenerTypeProxy, Address: "tcp://[::]:9010"},
 					Listener{Type: listenerTypeProxy, Address: "udp://[::]:9010"},
 				},
-				Keys: []Key{
-					Key{"user-0", "chacha20-ietf-poly1305", "Secret0"},
-					Key{"user-1", "chacha20-ietf-poly1305", "Secret1"},
+				Keys: []KeyConfig{
+					KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
+					KeyConfig{"user-1", "chacha20-ietf-poly1305", "Secret1"},
 				},
 			},
-			Service{
-				Listeners: []Listener{
-					Listener{Type: listenerTypeDirect, Address: "tcp://[::]:9001"},
-					Listener{Type: listenerTypeDirect, Address: "udp://[::]:9001"},
+			ServiceConfig{
+				Listeners: []ListenerConfig{
+					ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9001"},
+					ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9001"},
 				},
-				Keys: []Key{
-					Key{"user-2", "chacha20-ietf-poly1305", "Secret2"},
+				Keys: []KeyConfig{
+					KeyConfig{"user-2", "chacha20-ietf-poly1305", "Secret2"},
 				},
 			},
 		},
@@ -54,22 +122,22 @@ func TestReadConfig(t *testing.T) {
 }
 
 func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
-	config, err := readConfig("./config_example.deprecated.yml")
+	config, err := readConfigFile("./config_example.deprecated.yml")
 
 	require.NoError(t, err)
 	expected := Config{
-		Keys: []LegacyKeyService{
-			LegacyKeyService{
-				Key:  Key{ID: "user-0", Cipher: "chacha20-ietf-poly1305", Secret: "Secret0"},
-				Port: 9000,
+		Keys: []LegacyKeyServiceConfig{
+			LegacyKeyServiceConfig{
+				KeyConfig: KeyConfig{ID: "user-0", Cipher: "chacha20-ietf-poly1305", Secret: "Secret0"},
+				Port:      9000,
 			},
-			LegacyKeyService{
-				Key:  Key{ID: "user-1", Cipher: "chacha20-ietf-poly1305", Secret: "Secret1"},
-				Port: 9000,
+			LegacyKeyServiceConfig{
+				KeyConfig: KeyConfig{ID: "user-1", Cipher: "chacha20-ietf-poly1305", Secret: "Secret1"},
+				Port:      9000,
 			},
-			LegacyKeyService{
-				Key:  Key{ID: "user-2", Cipher: "chacha20-ietf-poly1305", Secret: "Secret2"},
-				Port: 9001,
+			LegacyKeyServiceConfig{
+				KeyConfig: KeyConfig{ID: "user-2", Cipher: "chacha20-ietf-poly1305", Secret: "Secret2"},
+				Port:      9001,
 			},
 		},
 	}
@@ -79,25 +147,23 @@ func TestReadConfigParsesDeprecatedFormat(t *testing.T) {
 func TestReadConfigFromEmptyFile(t *testing.T) {
 	file, _ := os.CreateTemp("", "empty.yaml")
 
-	config, err := readConfig(file.Name())
+	config, err := readConfigFile(file.Name())
 
 	require.NoError(t, err)
 	require.ElementsMatch(t, Config{}, config)
-}
-
-func TestReadConfigFromNonExistingFileFails(t *testing.T) {
-	config, err := readConfig("./foo")
-
-	require.Error(t, err)
-	require.ElementsMatch(t, nil, config)
 }
 
 func TestReadConfigFromIncorrectFormatFails(t *testing.T) {
 	file, _ := os.CreateTemp("", "empty.yaml")
 	file.WriteString("foo")
 
-	config, err := readConfig(file.Name())
+	config, err := readConfigFile(file.Name())
 
 	require.Error(t, err)
 	require.ElementsMatch(t, Config{}, config)
+}
+
+func readConfigFile(filename string) (*Config, error) {
+	configData, _ := os.ReadFile(filename)
+	return readConfig(configData)
 }

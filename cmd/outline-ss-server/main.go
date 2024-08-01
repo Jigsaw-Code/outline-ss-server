@@ -18,17 +18,17 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/op/go-logging"
@@ -59,183 +59,278 @@ func init() {
 	logger = logging.MustGetLogger("")
 }
 
-type ListenerConfig = Listener
-
-type ClientStreamListener interface {
-	Accept() (service.ClientStreamConn, error)
-	Close() error
-}
-
-type ssListener struct {
-	io.Closer
-	cipherList service.CipherList
-}
-
 type SSServer struct {
+	stopConfig  func()
+	lnManager   service.ListenerManager
 	natTimeout  time.Duration
 	m           *outlineMetrics
 	replayCache service.ReplayCache
-	listeners   map[ListenerConfig]*ssListener
-}
-
-func (s *SSServer) serve(listener io.Closer, cipherList service.CipherList) error {
-	switch ln := listener.(type) {
-	case ClientStreamListener:
-		authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &s.replayCache, s.m)
-		// TODO: Register initial data metrics at zero.
-		tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
-		go service.StreamServe(ln.Accept, tcpHandler.Handle)
-	case net.PacketConn:
-		packetHandler := service.NewPacketHandler(s.natTimeout, cipherList, s.m)
-		go packetHandler.Handle(ln)
-	default:
-		return fmt.Errorf("unknown listener type: %v", ln)
-	}
-	return nil
-}
-
-func (s *SSServer) start(lnConfig ListenerConfig, cipherList service.CipherList) (io.Closer, error) {
-	listener, err := Listen(lnConfig)
-	if err != nil {
-		return nil, fmt.Errorf("%s service failed to start on address %v: %w", lnConfig.Type, lnConfig.Address, err)
-	}
-	logger.Infof("%s service listening on %v", lnConfig.Type, lnConfig.Address)
-
-	err = s.serve(listener, cipherList)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serve %s on listener %v: %w", lnConfig.Type, listener, err)
-	}
-
-	return listener, nil
-}
-
-func (s *SSServer) remove(lnConfig ListenerConfig) error {
-	listener, ok := s.listeners[lnConfig]
-	if !ok {
-		return fmt.Errorf("address %v doesn't exist", lnConfig.Address)
-	}
-	err := listener.Close()
-	delete(s.listeners, lnConfig)
-	if err != nil {
-		//lint:ignore ST1005 Shadowsocks is capitalized.
-		return fmt.Errorf("Shadowsocks service on address %v failed to stop: %w", lnConfig.Address, err)
-	}
-	logger.Infof("Shadowsocks service on address %v stopped", lnConfig.Address)
-	return nil
 }
 
 func (s *SSServer) loadConfig(filename string) error {
-	config, err := readConfig(filename)
+	configData, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read config file %s: %w", filename, err)
+	}
+	config, err := readConfig(configData)
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
-
-	uniqueCiphers := 0
-	listenerChanges := make(map[ListenerConfig]int)
-	listenerCiphers := make(map[ListenerConfig]*list.List) // Values are *List of *CipherEntry.
-
-	for _, legacyKeyConfig := range config.Keys {
-		cryptoKey, err := shadowsocks.NewEncryptionKey(legacyKeyConfig.Cipher, legacyKeyConfig.Secret)
-		if err != nil {
-			return fmt.Errorf("failed to create encyption key for key %v: %w", legacyKeyConfig.ID, err)
-		}
-		entry := service.MakeCipherEntry(legacyKeyConfig.ID, cryptoKey, legacyKeyConfig.Secret)
-		for _, ln := range []string{"tcp", "udp"} {
-			lnConfig := ListenerConfig{Type: listenerTypeDirect, Address: fmt.Sprintf("%s://[::]:%d", ln, legacyKeyConfig.Port)}
-			listenerChanges[lnConfig] = 1
-			ciphers, ok := listenerCiphers[lnConfig]
-			if !ok {
-				ciphers = list.New()
-				listenerCiphers[lnConfig] = ciphers
-			}
-			ciphers.PushBack(&entry)
-		}
-		uniqueCiphers += 1
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("failed to validate config: %w", err)
 	}
 
-	for _, serviceConfig := range config.Services {
-		if serviceConfig.Listeners == nil || serviceConfig.Keys == nil {
-			return fmt.Errorf("must specify at least 1 listener and 1 key per service")
-		}
-
-		ciphers := list.New()
-		type cipherKey struct {
-			cipher string
-			secret string
-		}
-		existingCiphers := make(map[cipherKey]bool)
-		for _, keyConfig := range serviceConfig.Keys {
-			key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
-			_, ok := existingCiphers[key]
-			if ok {
-				logger.Debugf("encryption key already exists for ID=`%v`. Skipping.", keyConfig.ID)
-				continue
-			}
-			cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
-			if err != nil {
-				return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
-			}
-			entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
-			ciphers.PushBack(&entry)
-			existingCiphers[key] = true
-		}
-		uniqueCiphers += ciphers.Len()
-
-		for _, lnConfig := range serviceConfig.Listeners {
-			listenerChanges[lnConfig] = 1
-			listenerCiphers[lnConfig] = ciphers
-		}
+	// We hot swap the config by having the old and new listeners both live at
+	// the same time. This means we create listeners for the new config first,
+	// and then close the old ones after.
+	stopConfig, err := s.runConfig(*config)
+	if err != nil {
+		return err
 	}
-	for lnConfig := range s.listeners {
-		listenerChanges[lnConfig] = listenerChanges[lnConfig] - 1
-	}
-	for lnConfig, count := range listenerChanges {
-		if count == -1 {
-			if err := s.remove(lnConfig); err != nil {
-				return fmt.Errorf("failed to remove %s listener on address %v: %w", lnConfig.Type, lnConfig.Address, err)
-			}
-		} else if count == +1 {
-			cipherList := service.NewCipherList()
-			listener, err := s.start(lnConfig, cipherList)
-			if err != nil {
-				return err
-			}
-			s.listeners[lnConfig] = &ssListener{Closer: listener, cipherList: cipherList}
-		}
-	}
-	for lnConfig, ciphers := range listenerCiphers {
-		listener, ok := s.listeners[lnConfig]
-		if !ok {
-			return fmt.Errorf("unable to find listener for address: %v", lnConfig.Address)
-		}
-		listener.cipherList.Update(ciphers)
-	}
-	logger.Infof("Loaded %v access keys over %v listeners", uniqueCiphers, len(s.listeners))
-	s.m.SetNumAccessKeys(uniqueCiphers, len(s.listeners))
+	go s.stopConfig()
+	s.stopConfig = stopConfig
 	return nil
 }
 
-// Stop serving on all ports.
-func (s *SSServer) Stop() error {
-	for lnConfig := range s.listeners {
-		if err := s.remove(lnConfig); err != nil {
-			return err
+func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
+	type cipherKey struct {
+		cipher string
+		secret string
+	}
+	cipherList := list.New()
+	existingCiphers := make(map[cipherKey]bool)
+	for _, keyConfig := range config.Keys {
+		key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
+		if _, exists := existingCiphers[key]; exists {
+			logger.Debugf("encryption key already exists for ID=`%v`. Skipping.", keyConfig.ID)
+			continue
+		}
+		cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+		}
+		entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
+		cipherList.PushBack(&entry)
+		existingCiphers[key] = true
+	}
+	ciphers := service.NewCipherList()
+	ciphers.Update(cipherList)
+
+	return ciphers, nil
+}
+
+func (s *SSServer) NewShadowsocksStreamHandler(ciphers service.CipherList) service.StreamHandler {
+	authFunc := service.NewShadowsocksStreamAuthenticator(ciphers, &s.replayCache, s.m)
+	// TODO: Register initial data metrics at zero.
+	return service.NewStreamHandler(authFunc, s.m, tcpReadTimeout)
+}
+
+func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList) service.PacketHandler {
+	return service.NewPacketHandler(s.natTimeout, ciphers, s.m)
+}
+
+func (s *SSServer) NewShadowsocksStreamHandlerFromConfig(config ServiceConfig) (service.StreamHandler, error) {
+	ciphers, err := newCipherListFromConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return s.NewShadowsocksStreamHandler(ciphers), nil
+}
+
+func (s *SSServer) NewShadowsocksPacketHandlerFromConfig(config ServiceConfig) (service.PacketHandler, error) {
+	ciphers, err := newCipherListFromConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return s.NewShadowsocksPacketHandler(ciphers), nil
+}
+
+type listenerSet struct {
+	manager            service.ListenerManager
+	listenerCloseFuncs map[string]func() error
+	listenersMu        sync.Mutex
+}
+
+// ListenStream announces on a given TCP network address. Trying to listen on
+// the same address twice will result in an error.
+func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error) {
+	ls.listenersMu.Lock()
+	defer ls.listenersMu.Unlock()
+
+	lnKey := "tcp/" + addr
+	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
+		return nil, fmt.Errorf("listener %s already exists", lnKey)
+	}
+	ln, err := ls.manager.ListenStream("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	ls.listenerCloseFuncs[lnKey] = ln.Close
+	return ln, nil
+}
+
+// ListenPacket announces on a given UDP network address. Trying to listen on
+// the same address twice will result in an error.
+func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
+	ls.listenersMu.Lock()
+	defer ls.listenersMu.Unlock()
+
+	lnKey := "udp/" + addr
+	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
+		return nil, fmt.Errorf("listener %s already exists", lnKey)
+	}
+	ln, err := ls.manager.ListenPacket("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	ls.listenerCloseFuncs[lnKey] = ln.Close
+	return ln, nil
+}
+
+// Close closes all the listeners in the set, after which the set can't be used again.
+func (ls *listenerSet) Close() error {
+	for addr, listenerCloseFunc := range ls.listenerCloseFuncs {
+		if err := listenerCloseFunc(); err != nil {
+			return fmt.Errorf("listener on address %s failed to stop: %w", addr, err)
 		}
 	}
+	ls.listenersMu.Lock()
+	defer ls.listenersMu.Unlock()
+	ls.listenerCloseFuncs = nil
 	return nil
+}
+
+// Len returns the number of listeners in the set.
+func (ls *listenerSet) Len() int {
+	return len(ls.listenerCloseFuncs)
+}
+
+func (s *SSServer) runConfig(config Config) (func(), error) {
+	startErrCh := make(chan error)
+	stopCh := make(chan struct{})
+
+	go func() {
+		lnSet := &listenerSet{
+			manager:            s.lnManager,
+			listenerCloseFuncs: make(map[string]func() error),
+		}
+		defer lnSet.Close() // This closes all the listeners in the set.
+
+		startErrCh <- func() error {
+			totalCipherCount := len(config.Keys)
+			portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
+			for _, keyConfig := range config.Keys {
+				cipherList, ok := portCiphers[keyConfig.Port]
+				if !ok {
+					cipherList = list.New()
+					portCiphers[keyConfig.Port] = cipherList
+				}
+				cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
+				if err != nil {
+					return fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+				}
+				entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
+				cipherList.PushBack(&entry)
+			}
+			for portNum, cipherList := range portCiphers {
+				addr := net.JoinHostPort("::", strconv.Itoa(portNum))
+
+				ciphers := service.NewCipherList()
+				ciphers.Update(cipherList)
+
+				sh := s.NewShadowsocksStreamHandler(ciphers)
+				ln, err := lnSet.ListenStream(addr)
+				if err != nil {
+					return err
+				}
+				logger.Infof("TCP service listening on %v", ln.Addr().String())
+				go service.StreamServe(ln.AcceptStream, sh.Handle)
+
+				pc, err := lnSet.ListenPacket(addr)
+				if err != nil {
+					return err
+				}
+				logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
+				ph := s.NewShadowsocksPacketHandler(ciphers)
+				go ph.Handle(pc)
+			}
+
+			for _, serviceConfig := range config.Services {
+				var (
+					sh service.StreamHandler
+					ph service.PacketHandler
+				)
+				for _, lnConfig := range serviceConfig.Listeners {
+					switch lnConfig.Type {
+					case listenerTypeTCP:
+						ln, err := lnSet.ListenStream(lnConfig.Address)
+						if err != nil {
+							return err
+						}
+						logger.Infof("TCP service listening on %s", ln.Addr().String())
+						if sh == nil {
+							sh, err = s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
+							if err != nil {
+								return err
+							}
+						}
+						go service.StreamServe(ln.AcceptStream, sh.Handle)
+					case listenerTypeUDP:
+						pc, err := lnSet.ListenPacket(lnConfig.Address)
+						if err != nil {
+							return err
+						}
+						logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
+						if ph == nil {
+							ph, err = s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
+							if err != nil {
+								return err
+							}
+						}
+						go ph.Handle(pc)
+					}
+				}
+				totalCipherCount += len(serviceConfig.Keys)
+			}
+
+			logger.Infof("Loaded %d access keys over %d listeners", totalCipherCount, lnSet.Len())
+			s.m.SetNumAccessKeys(totalCipherCount, lnSet.Len())
+			return nil
+		}()
+
+		<-stopCh
+	}()
+
+	err := <-startErrCh
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		logger.Infof("Stopping running config.")
+		// TODO(sbruens): Actually wait for all handlers to be stopped, e.g. by
+		// using a https://pkg.go.dev/sync#WaitGroup.
+		stopCh <- struct{}{}
+	}, nil
+}
+
+// Stop stops serving the current config.
+func (s *SSServer) Stop() {
+	go s.stopConfig()
+	logger.Info("Stopped all listeners for running config")
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
 func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
+		stopConfig:  func() {},
+		lnManager:   service.NewListenerManager(),
 		natTimeout:  natTimeout,
 		m:           sm,
 		replayCache: service.NewReplayCache(replayHistory),
-		listeners:   make(map[ListenerConfig]*ssListener),
 	}
 	err := server.loadConfig(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed configure server: %w", err)
+		return nil, fmt.Errorf("failed to configure server: %w", err)
 	}
 	sigHup := make(chan os.Signal, 1)
 	signal.Notify(sigHup, syscall.SIGHUP)

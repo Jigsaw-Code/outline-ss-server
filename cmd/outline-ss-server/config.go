@@ -17,127 +17,100 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/url"
-	"os"
 
-	"github.com/Jigsaw-Code/outline-ss-server/service"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
-type Service struct {
-	Listeners []Listener
-	Keys      []Key
+type ServiceConfig struct {
+	Listeners []ListenerConfig
+	Keys      []KeyConfig
 }
 
 type ListenerType string
 
 const (
-	listenerTypeDirect ListenerType = "direct"
-	listenerTypeProxy  ListenerType = "proxy_protocol"
+	listenerTypeTCP   ListenerType = "tcp"
+	listenerTypeUDP   ListenerType = "udp"
+	listenerTypeProxy ListenerType = "proxy_protocol"
 )
 
-type Listener struct {
-	Type    ListenerType
-	Address string
+type ListenerConfig struct {
+	Type      ListenerType
+	Address   string
+	Listeners []*ListenerConfig
 }
 
-type Key struct {
+// Validate checks that the config is valid.
+func (lc *ListenerConfig) Validate() error {
+	if lc.Type != listenerTypeTCP && lc.Type != listenerTypeUDP && lc.Type != listenerTypeProxy {
+		return fmt.Errorf("unsupported listener type: %s", lc.Type)
+	}
+	if lc.Address != "" && len(lc.Listeners) > 0 {
+		return errors.New("cannot specify both `listeners` and `address` on a listener type")
+	}
+	if len(lc.Listeners) > 0 {
+		for _, childLnConfig := range lc.Listeners {
+			if err := childLnConfig.Validate(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	host, _, err := net.SplitHostPort(lc.Address)
+	if err != nil {
+		return fmt.Errorf("invalid listener address `%s`: %v", lc.Address, err)
+	}
+	if ip := net.ParseIP(host); ip == nil {
+		return fmt.Errorf("address must be IP, found: %s", host)
+	}
+	return nil
+}
+
+type KeyConfig struct {
 	ID     string
 	Cipher string
 	Secret string
 }
 
-type LegacyKeyService struct {
-	Key  `yaml:",inline"`
-	Port int
+type LegacyKeyServiceConfig struct {
+	KeyConfig `yaml:",inline"`
+	Port      int
 }
 
 type Config struct {
-	Services []Service
+	Services []ServiceConfig
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
 	// using the newer `services` format.
-	Keys []LegacyKeyService
+	Keys []LegacyKeyServiceConfig
 }
 
-// readConfig attempts to read a config from a filename and parses it as a [Config].
-func readConfig(filename string) (*Config, error) {
-	config := Config{}
-	configData, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-	err = yaml.Unmarshal(configData, &config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
-	}
-	return &config, nil
-}
+// Validate checks that the config is valid.
+func (c *Config) Validate() error {
+	existingListeners := make(map[string]bool)
+	for _, serviceConfig := range c.Services {
+		for _, lnConfig := range serviceConfig.Listeners {
+			key := string(lnConfig.Type) + "/" + lnConfig.Address
+			if _, exists := existingListeners[key]; exists {
+				return fmt.Errorf("listener of type %s with address %s already exists.", lnConfig.Type, lnConfig.Address)
+			}
+			existingListeners[key] = true
 
-// validateListener asserts that a listener URI conforms to the expected format.
-func validateListener(u *url.URL) error {
-	if u.Opaque != "" {
-		return errors.New("URI cannot have an opaque part")
-	}
-	if u.User != nil {
-		return errors.New("URI cannot have an userdata part")
-	}
-	if u.RawQuery != "" || u.ForceQuery {
-		return errors.New("URI cannot have a query part")
-	}
-	if u.Fragment != "" {
-		return errors.New("URI cannot have a fragement")
-	}
-	if u.Path != "" && u.Path != "/" {
-		return errors.New("URI path not allowed")
+			if err := lnConfig.Validate(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-// newListener creates a new listener from a URL-style address specification.
-//
-// Example addresses:
-//
-//	tcp4://127.0.0.1:8000
-//	udp://127.0.0.1:9000
-func newListener(addr string) (io.Closer, error) {
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, err
+// readConfig attempts to read a config from a filename and parses it as a [Config].
+func readConfig(configData []byte) (*Config, error) {
+	config := Config{}
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-
-	switch u.Scheme {
-	case "tcp", "tcp4", "tcp6":
-		if err := validateListener(u); err != nil {
-			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
-		}
-		return net.Listen(u.Scheme, u.Host)
-	case "udp", "udp4", "udp6":
-		if err := validateListener(u); err != nil {
-			return nil, fmt.Errorf("invalid listener `%s`: %v", u, err)
-		}
-		return net.ListenPacket(u.Scheme, u.Host)
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", u.Scheme)
-	}
-}
-
-// Listen creates a new listener based on a given [Listener] config.
-func Listen(config Listener) (io.Closer, error) {
-	listener, err := newListener(config.Address)
-	if err != nil {
-		return nil, err
-	}
-	switch ln := listener.(type) {
-	case net.Listener:
-		streamListener := &service.StreamListener{Listener: ln}
-		if config.Type == listenerTypeProxy {
-			return &service.ProxyListener{StreamListener: *streamListener}, err
-		}
-		return streamListener, err
-	default:
-		return listener, err
-	}
+	return &config, nil
 }

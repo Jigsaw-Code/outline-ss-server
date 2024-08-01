@@ -27,7 +27,5 @@ func TestRunSSServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunSSServer() error = %v", err)
 	}
-	if err := server.Stop(); err != nil {
-		t.Errorf("Error while stopping server: %v", err)
-	}
+	server.Stop()
 }

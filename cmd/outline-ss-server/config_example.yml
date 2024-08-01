@@ -1,13 +1,17 @@
 services:
   - listeners:
-      - type: direct
-        address: "tcp://[::]:9000"
-      - type: direct
-        address: "udp://[::]:9000"
+      # TODO(sbruens): Allow a string-based listener config, as a convenient short-form
+      # to create a direct listener, e.g. `- tcp/[::]:9000`.
+      - type: tcp
+        address: "[::]:9000"
+      - type: udp
+        address: "[::]:9000"
       - type: proxy_protocol
-        address: "tcp://[::]:9010"
-      - type: proxy_protocol
-        address: "udp://[::]:9010"
+        listeners:
+        - type: tcp
+          address: "[::]:9010"
+        - type: udp
+          address: "[::]:9010"
     keys:
         - id: user-0
           cipher: chacha20-ietf-poly1305
@@ -17,10 +21,10 @@ services:
           secret: Secret1
 
   - listeners:
-      - type: direct
-        address: "tcp://[::]:9001"
-      - type: direct
-        address: "udp://[::]:9001"
+      - type: tcp
+        address: "[::]:9001"
+      - type: udp
+        address: "[::]:9001"
     keys:
         - id: user-2
           cipher: chacha20-ietf-poly1305
