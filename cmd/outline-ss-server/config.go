@@ -38,7 +38,7 @@ const (
 type ListenerConfig struct {
 	Type      ListenerType
 	Address   string
-	Listeners []*ListenerConfig
+	Listeners []ListenerConfig
 }
 
 // Validate checks that the config is valid.

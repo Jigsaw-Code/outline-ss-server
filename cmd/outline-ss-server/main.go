@@ -153,7 +153,7 @@ type listenerSet struct {
 
 // ListenStream announces on a given TCP network address. Trying to listen on
 // the same address twice will result in an error.
-func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error) {
+func (ls *listenerSet) ListenStream(addr string, proxy bool) (service.StreamListener, error) {
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
 
@@ -161,7 +161,7 @@ func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error)
 	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
 		return nil, fmt.Errorf("listener %s already exists", lnKey)
 	}
-	ln, err := ls.manager.ListenStream("tcp", addr)
+	ln, err := ls.manager.ListenStream("tcp", addr, proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error)
 
 // ListenPacket announces on a given UDP network address. Trying to listen on
 // the same address twice will result in an error.
-func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
+func (ls *listenerSet) ListenPacket(addr string, proxy bool) (net.PacketConn, error) {
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
 
@@ -179,7 +179,7 @@ func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
 	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
 		return nil, fmt.Errorf("listener %s already exists", lnKey)
 	}
-	ln, err := ls.manager.ListenPacket("udp", addr)
+	ln, err := ls.manager.ListenPacket("udp", addr, proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -239,18 +239,18 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 				ciphers.Update(cipherList)
 
 				sh := s.NewShadowsocksStreamHandler(ciphers)
-				ln, err := lnSet.ListenStream(addr)
+				ln, err := lnSet.ListenStream(addr, false)
 				if err != nil {
 					return err
 				}
-				logger.Infof("TCP service listening on %v", ln.Addr().String())
+				logger.Infof("Shadowsocks service listening on tcp/%s", ln.Addr().String())
 				go service.StreamServe(ln.AcceptStream, sh.Handle)
 
-				pc, err := lnSet.ListenPacket(addr)
+				pc, err := lnSet.ListenPacket(addr, false)
 				if err != nil {
 					return err
 				}
-				logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
+				logger.Infof("Shadowsocks service listening on udp/%s", pc.LocalAddr().String())
 				ph := s.NewShadowsocksPacketHandler(ciphers)
 				go ph.Handle(pc)
 			}
@@ -261,33 +261,9 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 					ph service.PacketHandler
 				)
 				for _, lnConfig := range serviceConfig.Listeners {
-					switch lnConfig.Type {
-					case listenerTypeTCP:
-						ln, err := lnSet.ListenStream(lnConfig.Address)
-						if err != nil {
-							return err
-						}
-						logger.Infof("TCP service listening on %s", ln.Addr().String())
-						if sh == nil {
-							sh, err = s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
-							if err != nil {
-								return err
-							}
-						}
-						go service.StreamServe(ln.AcceptStream, sh.Handle)
-					case listenerTypeUDP:
-						pc, err := lnSet.ListenPacket(lnConfig.Address)
-						if err != nil {
-							return err
-						}
-						logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
-						if ph == nil {
-							ph, err = s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
-							if err != nil {
-								return err
-							}
-						}
-						go ph.Handle(pc)
+					err := s.startListenerFromConfig(lnSet, serviceConfig, lnConfig, false, sh, ph)
+					if err != nil {
+						return err
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)
@@ -311,6 +287,57 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 		// using a https://pkg.go.dev/sync#WaitGroup.
 		stopCh <- struct{}{}
 	}, nil
+}
+
+func (s *SSServer) startListenerFromConfig(lnSet *listenerSet, serviceConfig ServiceConfig, lnConfig ListenerConfig, proxy bool, sh service.StreamHandler, ph service.PacketHandler) error {
+	lnLogFunc := func(key string) {
+		var serviceToLog string
+		if proxy {
+			serviceToLog = "Proxy"
+		} else {
+			serviceToLog = "Shadowsocks"
+		}
+		logger.Infof("%s service listening on %s", serviceToLog, key)
+	}
+	switch lnConfig.Type {
+	case listenerTypeTCP:
+		ln, err := lnSet.ListenStream(lnConfig.Address, proxy)
+		if err != nil {
+			return err
+		}
+		lnLogFunc("tcp/" + ln.Addr().String())
+		if sh == nil {
+			sh, err = s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
+			if err != nil {
+				return err
+			}
+		}
+		go service.StreamServe(ln.AcceptStream, sh.Handle)
+
+	case listenerTypeUDP:
+		pc, err := lnSet.ListenPacket(lnConfig.Address, proxy)
+		if err != nil {
+			return err
+		}
+		lnLogFunc("udp/" + pc.LocalAddr().String())
+		if ph == nil {
+			ph, err = s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
+			if err != nil {
+				return err
+			}
+		}
+		go ph.Handle(pc)
+
+	case listenerTypeProxy:
+		for _, proxyLnConfig := range lnConfig.Listeners {
+			err := s.startListenerFromConfig(lnSet, serviceConfig, proxyLnConfig, true, sh, ph)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // Stop stops serving the current config.

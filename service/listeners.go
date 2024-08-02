@@ -76,7 +76,7 @@ var _ StreamListener = (*TCPListener)(nil)
 
 func (t *TCPListener) AcceptStream() (ClientStreamConn, error) {
 	conn, err := t.ln.AcceptTCP()
-	return &clientStreamConn{StreamConn: conn}, err
+	return &clientStreamConn{StreamConn: conn, clientAddr: conn.RemoteAddr()}, err
 }
 
 func (t *TCPListener) Close() error {
@@ -88,7 +88,7 @@ func (t *TCPListener) Addr() net.Addr {
 }
 
 type acceptResponse struct {
-	conn transport.StreamConn
+	conn ClientStreamConn
 	err  error
 }
 
@@ -109,7 +109,7 @@ func (sl *virtualStreamListener) AcceptStream() (ClientStreamConn, error) {
 		if !ok {
 			return nil, net.ErrClosed
 		}
-		return &clientStreamConn{StreamConn: acceptResponse.conn}, acceptResponse.err
+		return acceptResponse.conn, acceptResponse.err
 	case <-sl.closeCh:
 		return nil, net.ErrClosed
 	}
@@ -215,12 +215,12 @@ type ListenerManager interface {
 	// config is started before the old config is destroyed. This is done by using
 	// reusable listener wrappers, which do not actually close the underlying socket
 	// until all uses of the shared listener have been closed.
-	ListenStream(network string, addr string) (StreamListener, error)
+	ListenStream(network string, addr string, proxy bool) (StreamListener, error)
 
 	// ListenPacket creates a new packet listener for a given network and address.
 	//
 	// See notes on [ListenStream].
-	ListenPacket(network string, addr string) (net.PacketConn, error)
+	ListenPacket(network string, addr string, proxy bool) (net.PacketConn, error)
 }
 
 type listenerManager struct {
@@ -235,7 +235,7 @@ func NewListenerManager() ListenerManager {
 	}
 }
 
-func (m *listenerManager) newStreamListener(network string, addr string) (Listener, error) {
+func (m *listenerManager) newStreamListener(network string, addr string, proxy bool) (Listener, error) {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -244,7 +244,11 @@ func (m *listenerManager) newStreamListener(network string, addr string) (Listen
 	if err != nil {
 		return nil, err
 	}
-	streamLn := &TCPListener{ln}
+	var streamLn StreamListener
+	streamLn = &TCPListener{ln}
+	if proxy {
+		streamLn = &ProxyStreamListener{StreamListener: streamLn}
+	}
 	lnAddr := &listenAddr{
 		ln:       streamLn,
 		acceptCh: make(chan acceptResponse),
@@ -266,7 +270,7 @@ func (m *listenerManager) newStreamListener(network string, addr string) (Listen
 	return lnAddr, nil
 }
 
-func (m *listenerManager) newPacketListener(network string, addr string) (Listener, error) {
+func (m *listenerManager) newPacketListener(network string, addr string, proxy bool) (Listener, error) {
 	pc, err := net.ListenPacket(network, addr)
 	if err != nil {
 		return nil, err
@@ -280,7 +284,7 @@ func (m *listenerManager) newPacketListener(network string, addr string) (Listen
 	}, nil
 }
 
-func (m *listenerManager) getListener(network string, addr string) (RefCount[Listener], error) {
+func (m *listenerManager) getListener(network string, addr string, proxy bool) (RefCount[Listener], error) {
 	m.listenersMu.Lock()
 	defer m.listenersMu.Unlock()
 
@@ -294,9 +298,9 @@ func (m *listenerManager) getListener(network string, addr string) (RefCount[Lis
 		err error
 	)
 	if network == "tcp" {
-		ln, err = m.newStreamListener(network, addr)
+		ln, err = m.newStreamListener(network, addr, proxy)
 	} else {
-		ln, err = m.newPacketListener(network, addr)
+		ln, err = m.newPacketListener(network, addr, proxy)
 	}
 	if err != nil {
 		return nil, err
@@ -306,8 +310,8 @@ func (m *listenerManager) getListener(network string, addr string) (RefCount[Lis
 	return lnRefCount, nil
 }
 
-func (m *listenerManager) ListenStream(network string, addr string) (StreamListener, error) {
-	lnRefCount, err := m.getListener(network, addr)
+func (m *listenerManager) ListenStream(network string, addr string, proxy bool) (StreamListener, error) {
+	lnRefCount, err := m.getListener(network, addr, proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -317,8 +321,8 @@ func (m *listenerManager) ListenStream(network string, addr string) (StreamListe
 	return nil, fmt.Errorf("unable to create stream listener for %s/%s", network, addr)
 }
 
-func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketConn, error) {
-	lnRefCount, err := m.getListener(network, addr)
+func (m *listenerManager) ListenPacket(network string, addr string, proxy bool) (net.PacketConn, error) {
+	lnRefCount, err := m.getListener(network, addr, proxy)
 	if err != nil {
 		return nil, err
 	}
