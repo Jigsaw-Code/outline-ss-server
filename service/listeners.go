@@ -139,7 +139,7 @@ func (l *ProxyStreamListener) AcceptStream() (ClientStreamConn, error) {
 	}
 	r := bufio.NewReader(conn)
 	h, err := proxyproto.Read(r)
-	if err == proxyproto.ErrNoProxyProtocol {
+	if errors.Is(err, proxyproto.ErrNoProxyProtocol) {
 		logger.Warningf("Received connection from %v without proxy header.", conn.RemoteAddr())
 		return conn, nil
 	}
