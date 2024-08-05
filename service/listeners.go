@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
-	proxyproto "github.com/pires/go-proxyproto"
+	"github.com/pires/go-proxyproto"
 )
 
 // The implementations of listeners for different network types are not
@@ -138,15 +138,18 @@ func (l *ProxyStreamListener) AcceptStream() (ClientStreamConn, error) {
 		return nil, err
 	}
 	r := bufio.NewReader(conn)
-	h, err := proxyproto.Read(r)
+	header, err := proxyproto.Read(r)
 	if errors.Is(err, proxyproto.ErrNoProxyProtocol) {
 		logger.Warningf("Received connection from %v without proxy header.", conn.RemoteAddr())
 		return conn, nil
 	}
-	if err != nil {
+	if header == nil || err != nil {
 		return nil, fmt.Errorf("error parsing proxy header: %v", err)
 	}
-	return &clientStreamConn{StreamConn: conn, clientAddr: h.SourceAddr}, nil
+	if header.Command.IsLocal() {
+		return conn, nil
+	}
+	return &clientStreamConn{StreamConn: conn, clientAddr: header.SourceAddr}, nil
 }
 
 type virtualPacketConn struct {
