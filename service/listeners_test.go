@@ -24,7 +24,7 @@ import (
 
 func TestListenerManagerStreamListenerEarlyClose(t *testing.T) {
 	m := NewListenerManager()
-	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 
 	ln.Close()
@@ -47,9 +47,9 @@ func writeTestPayload(ln StreamListener) error {
 
 func TestListenerManagerStreamListenerNotClosedIfStillInUse(t *testing.T) {
 	m := NewListenerManager()
-	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
-	ln2, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln2, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 
 	// Close only the first listener.
@@ -69,11 +69,11 @@ func TestListenerManagerStreamListenerNotClosedIfStillInUse(t *testing.T) {
 func TestListenerManagerStreamListenerCreatesListenerOnDemand(t *testing.T) {
 	m := NewListenerManager()
 	// Create a listener and immediately close it.
-	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 	ln.Close()
 	// Now create another listener on the same address.
-	ln2, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln2, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 
 	done := make(chan struct{})

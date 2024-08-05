@@ -72,8 +72,8 @@ type acceptResponse struct {
 type OnCloseFunc func() error
 
 type virtualStreamListener struct {
-	listener    StreamListener
-	acceptCh    chan acceptResponse
+	addr        net.Addr
+	acceptCh    <-chan acceptResponse
 	closeCh     chan struct{}
 	onCloseFunc OnCloseFunc
 }
@@ -93,12 +93,13 @@ func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 }
 
 func (sl *virtualStreamListener) Close() error {
+	sl.acceptCh = nil
 	close(sl.closeCh)
 	return sl.onCloseFunc()
 }
 
 func (sl *virtualStreamListener) Addr() net.Addr {
-	return sl.listener.Addr()
+	return sl.addr
 }
 
 type virtualPacketConn struct {
@@ -126,7 +127,7 @@ var _ canCreateStreamListener = (*listenAddr)(nil)
 func (la *listenAddr) NewStreamListener(onCloseFunc OnCloseFunc) StreamListener {
 	if ln, ok := la.ln.(StreamListener); ok {
 		return &virtualStreamListener{
-			listener:    ln,
+			addr:        ln.Addr(),
 			acceptCh:    la.acceptCh,
 			closeCh:     make(chan struct{}),
 			onCloseFunc: onCloseFunc,
@@ -161,18 +162,18 @@ func (la *listenAddr) Close() error {
 
 // ListenerManager holds and manages the state of shared listeners.
 type ListenerManager interface {
-	// ListenStream creates a new stream listener for a given network and address.
+	// ListenStream creates a new stream listener for a given address.
 	//
 	// Listeners can overlap one another, because during config changes the new
 	// config is started before the old config is destroyed. This is done by using
 	// reusable listener wrappers, which do not actually close the underlying socket
 	// until all uses of the shared listener have been closed.
-	ListenStream(network string, addr string) (StreamListener, error)
+	ListenStream(addr string) (StreamListener, error)
 
-	// ListenPacket creates a new packet listener for a given network and address.
+	// ListenPacket creates a new packet listener for a given address.
 	//
 	// See notes on [ListenStream].
-	ListenPacket(network string, addr string) (net.PacketConn, error)
+	ListenPacket(addr string) (net.PacketConn, error)
 }
 
 type listenerManager struct {
@@ -187,12 +188,12 @@ func NewListenerManager() ListenerManager {
 	}
 }
 
-func (m *listenerManager) newStreamListener(network string, addr string) (Listener, error) {
+func (m *listenerManager) newStreamListener(addr string) (Listener, error) {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	ln, err := net.ListenTCP(network, tcpAddr)
+	ln, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +202,7 @@ func (m *listenerManager) newStreamListener(network string, addr string) (Listen
 		ln:       streamLn,
 		acceptCh: make(chan acceptResponse),
 		onCloseFunc: func() error {
-			m.delete(listenerKey(network, addr))
+			m.delete(listenerKey("tcp", addr))
 			return nil
 		},
 	}
@@ -218,15 +219,15 @@ func (m *listenerManager) newStreamListener(network string, addr string) (Listen
 	return lnAddr, nil
 }
 
-func (m *listenerManager) newPacketListener(network string, addr string) (Listener, error) {
-	pc, err := net.ListenPacket(network, addr)
+func (m *listenerManager) newPacketListener(addr string) (Listener, error) {
+	pc, err := net.ListenPacket("udp", addr)
 	if err != nil {
 		return nil, err
 	}
 	return &listenAddr{
 		ln: pc,
 		onCloseFunc: func() error {
-			m.delete(listenerKey(network, addr))
+			m.delete(listenerKey("udp", addr))
 			return nil
 		},
 	}, nil
@@ -246,9 +247,11 @@ func (m *listenerManager) getListener(network string, addr string) (RefCount[Lis
 		err error
 	)
 	if network == "tcp" {
-		ln, err = m.newStreamListener(network, addr)
+		ln, err = m.newStreamListener(addr)
+	} else if network == "udp" {
+		ln, err = m.newPacketListener(addr)
 	} else {
-		ln, err = m.newPacketListener(network, addr)
+		return nil, fmt.Errorf("unable to get listener for unsupported network %s", network)
 	}
 	if err != nil {
 		return nil, err
@@ -258,26 +261,26 @@ func (m *listenerManager) getListener(network string, addr string) (RefCount[Lis
 	return lnRefCount, nil
 }
 
-func (m *listenerManager) ListenStream(network string, addr string) (StreamListener, error) {
-	lnRefCount, err := m.getListener(network, addr)
+func (m *listenerManager) ListenStream(addr string) (StreamListener, error) {
+	lnRefCount, err := m.getListener("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 	if lnAddr, ok := lnRefCount.Get().(canCreateStreamListener); ok {
 		return lnAddr.NewStreamListener(lnRefCount.Close), nil
 	}
-	return nil, fmt.Errorf("unable to create stream listener for %s/%s", network, addr)
+	return nil, fmt.Errorf("unable to create stream listener for %s", addr)
 }
 
-func (m *listenerManager) ListenPacket(network string, addr string) (net.PacketConn, error) {
-	lnRefCount, err := m.getListener(network, addr)
+func (m *listenerManager) ListenPacket(addr string) (net.PacketConn, error) {
+	lnRefCount, err := m.getListener("udp", addr)
 	if err != nil {
 		return nil, err
 	}
 	if lnAddr, ok := lnRefCount.Get().(canCreatePacketListener); ok {
 		return lnAddr.NewPacketListener(lnRefCount.Close), nil
 	}
-	return nil, fmt.Errorf("unable to create packet listener for %s/%s", network, addr)
+	return nil, fmt.Errorf("unable to create packet listener for %s", addr)
 }
 
 func (m *listenerManager) delete(key string) {

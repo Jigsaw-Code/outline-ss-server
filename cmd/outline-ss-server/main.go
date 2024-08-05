@@ -101,17 +101,17 @@ type listenerSet struct {
 	listenersMu        sync.Mutex
 }
 
-// ListenStream announces on a given TCP network address. Trying to listen on
-// the same address twice will result in an error.
+// ListenStream announces on a given network address. Trying to listen for stream connections
+// on the same address twice will result in an error.
 func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error) {
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
 
-	lnKey := "tcp/" + addr
+	lnKey := "stream-" + addr
 	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
-		return nil, fmt.Errorf("listener %s already exists", lnKey)
+		return nil, fmt.Errorf("stream listener for %s already exists", addr)
 	}
-	ln, err := ls.manager.ListenStream("tcp", addr)
+	ln, err := ls.manager.ListenStream(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -119,17 +119,17 @@ func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error)
 	return ln, nil
 }
 
-// ListenPacket announces on a given UDP network address. Trying to listen on
-// the same address twice will result in an error.
+// ListenPacket announces on a given network address. Trying to listen for packet connections
+// on the same address twice will result in an error.
 func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
 
-	lnKey := "udp/" + addr
+	lnKey := "packet-" + addr
 	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
-		return nil, fmt.Errorf("listener %s already exists", lnKey)
+		return nil, fmt.Errorf("packet listener for %s already exists", addr)
 	}
-	ln, err := ls.manager.ListenPacket("udp", addr)
+	ln, err := ls.manager.ListenPacket(addr)
 	if err != nil {
 		return nil, err
 	}
