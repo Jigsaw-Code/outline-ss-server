@@ -305,24 +305,28 @@ type RefCount[T io.Closer] interface {
 }
 
 type refCount[T io.Closer] struct {
+	mu    sync.Mutex
 	count *atomic.Int32
 	value T
 }
 
 func NewRefCount[T io.Closer](value T) RefCount[T] {
-	res := &refCount[T]{
+	r := &refCount[T]{
 		count: &atomic.Int32{},
 		value: value,
 	}
-	res.count.Store(1)
-	return res
+	r.count.Store(1)
+	return r
 }
 
 func (r refCount[T]) Close() error {
+	// Lock to prevent someone from acquiring while we close the value.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if count := r.count.Add(-1); count == 0 {
 		return r.value.Close()
 	}
-
 	return nil
 }
 
