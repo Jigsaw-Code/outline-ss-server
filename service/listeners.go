@@ -45,10 +45,7 @@ type clientStreamConn struct {
 }
 
 func (c *clientStreamConn) ClientAddr() net.Addr {
-	if c.clientAddr != nil {
-		return c.clientAddr
-	}
-	return c.StreamConn.RemoteAddr()
+	return c.clientAddr
 }
 
 // StreamListener is a network listener for stream-oriented protocols that
@@ -124,7 +121,7 @@ func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.listener.Addr()
 }
 
-// ProxyListener wraps a [StreamListener] and fetches the source of the connection from the PROXY
+// ProxyStreamListener wraps a [StreamListener] and fetches the source of the connection from the PROXY
 // protocol header string. See https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt.
 type ProxyStreamListener struct {
 	StreamListener

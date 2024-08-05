@@ -215,7 +215,7 @@ type StreamAcceptFunc func() (ClientStreamConn, error)
 func WrapStreamAcceptFunc[T transport.StreamConn](f func() (T, error)) StreamAcceptFunc {
 	return func() (ClientStreamConn, error) {
 		c, err := f()
-		return &clientStreamConn{StreamConn: c}, err
+		return &clientStreamConn{StreamConn: c, clientAddr: c.RemoteAddr()}, err
 	}
 }
 
