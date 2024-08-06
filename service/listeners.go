@@ -139,45 +139,50 @@ type multiStreamListener struct {
 func NewMultiStreamListener(addr string, onCloseFunc OnCloseFunc) MultiListener[StreamListener] {
 	return &multiStreamListener{
 		addr:        addr,
-		acceptCh:    make(chan acceptResponse),
 		onCloseFunc: onCloseFunc,
 	}
 }
 
 func (m *multiStreamListener) Acquire() (StreamListener, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	refCount, err := func() (RefCount[StreamListener], error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	var sl StreamListener
-	if m.ln == nil {
-		tcpAddr, err := net.ResolveTCPAddr("tcp", m.addr)
-		if err != nil {
-			return nil, err
-		}
-		ln, err := net.ListenTCP("tcp", tcpAddr)
-		if err != nil {
-			return nil, err
-		}
-		sl = &TCPListener{ln}
-		m.ln = NewRefCount(sl, m.onCloseFunc)
-		go func() {
-			for {
-				conn, err := sl.AcceptStream()
-				if errors.Is(err, net.ErrClosed) {
-					close(m.acceptCh)
-					return
-				}
-				m.acceptCh <- acceptResponse{conn, err}
+		if m.ln == nil {
+			tcpAddr, err := net.ResolveTCPAddr("tcp", m.addr)
+			if err != nil {
+				return nil, err
 			}
-		}()
+			ln, err := net.ListenTCP("tcp", tcpAddr)
+			if err != nil {
+				return nil, err
+			}
+			sl := &TCPListener{ln}
+			m.ln = NewRefCount[StreamListener](sl, m.onCloseFunc)
+			m.acceptCh = make(chan acceptResponse)
+			go func() {
+				for {
+					conn, err := sl.AcceptStream()
+					if errors.Is(err, net.ErrClosed) {
+						close(m.acceptCh)
+						return
+					}
+					m.acceptCh <- acceptResponse{conn, err}
+				}
+			}()
+		}
+		return m.ln, nil
+	}()
+	if err != nil {
+		return nil, err
 	}
 
-	sl = m.ln.Acquire()
+	sl := refCount.Acquire()
 	return &virtualStreamListener{
 		addr:        sl.Addr(),
 		acceptCh:    m.acceptCh,
 		closeCh:     make(chan struct{}),
-		onCloseFunc: m.ln.Close,
+		onCloseFunc: refCount.Close,
 	}, nil
 }
 
@@ -197,21 +202,27 @@ func NewMultiPacketListener(addr string, onCloseFunc OnCloseFunc) MultiListener[
 }
 
 func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	refCount, err := func() (RefCount[net.PacketConn], error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	var pc net.PacketConn
-	if m.pc == nil {
-		pc, err := net.ListenPacket("udp", m.addr)
-		if err != nil {
-			return nil, err
+		if m.pc == nil {
+			pc, err := net.ListenPacket("udp", m.addr)
+			if err != nil {
+				return nil, err
+			}
+			m.pc = NewRefCount(pc, m.onCloseFunc)
 		}
-		m.pc = NewRefCount(pc, m.onCloseFunc)
+		return m.pc, nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	pc = m.pc.Acquire()
+
+	pc := refCount.Acquire()
 	return &virtualPacketConn{
 		PacketConn:  pc,
-		onCloseFunc: m.pc.Close,
+		onCloseFunc: refCount.Close,
 	}, nil
 }
 
