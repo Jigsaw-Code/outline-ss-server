@@ -139,13 +139,14 @@ func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
 
 // Close closes all the listeners in the set, after which the set can't be used again.
 func (ls *listenerSet) Close() error {
+	ls.listenersMu.Lock()
+	defer ls.listenersMu.Unlock()
+
 	for addr, listenerCloseFunc := range ls.listenerCloseFuncs {
 		if err := listenerCloseFunc(); err != nil {
 			return fmt.Errorf("listener on address %s failed to stop: %w", addr, err)
 		}
 	}
-	ls.listenersMu.Lock()
-	defer ls.listenersMu.Unlock()
 	ls.listenerCloseFuncs = nil
 	return nil
 }
