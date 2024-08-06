@@ -97,17 +97,27 @@ func (t *testRefCount) Close() error {
 }
 
 func TestRefCount(t *testing.T) {
-	var done bool
-	rc := NewRefCount[*testRefCount](&testRefCount{
-		onCloseFunc: func() {
-			done = true
+	var objectCloseDone bool
+	var onCloseFuncDone bool
+	rc := NewRefCount[*testRefCount](
+		&testRefCount{
+			onCloseFunc: func() {
+				objectCloseDone = true
+			},
 		},
-	})
+		func() error {
+			onCloseFuncDone = true
+			return nil
+		},
+	)
+	rc.Acquire()
 	rc.Acquire()
 
 	require.NoError(t, rc.Close())
-	require.False(t, done)
+	require.False(t, objectCloseDone)
+	require.False(t, onCloseFuncDone)
 
 	require.NoError(t, rc.Close())
-	require.True(t, done)
+	require.True(t, objectCloseDone)
+	require.True(t, onCloseFuncDone)
 }
