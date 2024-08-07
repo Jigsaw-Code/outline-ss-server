@@ -107,7 +107,7 @@ func (ls *listenerSet) ListenStream(addr string) (service.StreamListener, error)
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
 
-	lnKey := "stream-" + addr
+	lnKey := "stream/" + addr
 	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
 		return nil, fmt.Errorf("stream listener for %s already exists", addr)
 	}
@@ -125,7 +125,7 @@ func (ls *listenerSet) ListenPacket(addr string) (net.PacketConn, error) {
 	ls.listenersMu.Lock()
 	defer ls.listenersMu.Unlock()
 
-	lnKey := "packet-" + addr
+	lnKey := "packet/" + addr
 	if _, exists := ls.listenerCloseFuncs[lnKey]; exists {
 		return nil, fmt.Errorf("packet listener for %s already exists", addr)
 	}
