@@ -64,12 +64,12 @@ func (t *TCPListener) Addr() net.Addr {
 	return t.ln.Addr()
 }
 
+type OnCloseFunc func() error
+
 type acceptResponse struct {
 	conn transport.StreamConn
 	err  error
 }
-
-type OnCloseFunc func() error
 
 type virtualStreamListener struct {
 	mu          sync.Mutex // Mutex to protect access to the channels
@@ -119,14 +119,52 @@ func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.addr
 }
 
+type packetResponse struct {
+	n    int
+	addr net.Addr
+	err  error
+	data []byte
+}
+
 type virtualPacketConn struct {
 	net.PacketConn
+	mu          sync.Mutex // Mutex to protect access to the channels
+	readCh      <-chan packetResponse
+	closeCh     chan struct{}
+	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
-func (spc *virtualPacketConn) Close() error {
-	if spc.onCloseFunc != nil {
-		return spc.onCloseFunc()
+func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	pc.mu.Lock()
+	readCh := pc.readCh
+	pc.mu.Unlock()
+
+	select {
+	case packetResponse, ok := <-readCh:
+		if !ok {
+			return 0, nil, net.ErrClosed
+		}
+		copy(p, packetResponse.data)
+		return packetResponse.n, packetResponse.addr, packetResponse.err
+	case <-pc.closeCh:
+		return 0, nil, net.ErrClosed
+	}
+}
+
+func (pc *virtualPacketConn) Close() error {
+	pc.mu.Lock()
+	if pc.closed {
+		pc.mu.Unlock()
+		return nil
+	}
+	pc.closed = true
+	pc.readCh = nil
+	close(pc.closeCh)
+	pc.mu.Unlock()
+
+	if pc.onCloseFunc != nil {
+		return pc.onCloseFunc()
 	}
 	return nil
 }
@@ -204,6 +242,7 @@ type multiPacketListener struct {
 	mu          sync.Mutex
 	addr        string
 	pc          RefCount[net.PacketConn]
+	readCh      chan packetResponse
 	onCloseFunc OnCloseFunc
 }
 
@@ -226,6 +265,18 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 				return nil, err
 			}
 			m.pc = NewRefCount(pc, m.onCloseFunc)
+			m.readCh = make(chan packetResponse)
+			go func() {
+				for {
+					buffer := make([]byte, serverUDPBufferSize)
+					n, addr, err := pc.ReadFrom(buffer)
+					if err != nil {
+						close(m.readCh)
+						return
+					}
+					m.readCh <- packetResponse{n: n, addr: addr, err: err, data: buffer[:n]}
+				}
+			}()
 		}
 		return m.pc, nil
 	}()
@@ -236,6 +287,8 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 	pc := refCount.Acquire()
 	return &virtualPacketConn{
 		PacketConn:  pc,
+		readCh:      m.readCh,
+		closeCh:     make(chan struct{}),
 		onCloseFunc: refCount.Close,
 	}, nil
 }
