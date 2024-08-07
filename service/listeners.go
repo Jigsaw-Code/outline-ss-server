@@ -73,6 +73,9 @@ var _ StreamListener = (*TCPListener)(nil)
 
 func (t *TCPListener) AcceptStream() (ClientStreamConn, error) {
 	conn, err := t.ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
 	return &clientStreamConn{StreamConn: conn, clientAddr: conn.RemoteAddr()}, err
 }
 
@@ -84,25 +87,31 @@ func (t *TCPListener) Addr() net.Addr {
 	return t.ln.Addr()
 }
 
+type OnCloseFunc func() error
+
 type acceptResponse struct {
 	conn ClientStreamConn
 	err  error
 }
 
-type OnCloseFunc func() error
-
 type virtualStreamListener struct {
-	listener    StreamListener
-	acceptCh    chan acceptResponse
+	mu          sync.Mutex // Mutex to protect access to the channels
+	addr        net.Addr
+	acceptCh    <-chan acceptResponse
 	closeCh     chan struct{}
+	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
 var _ StreamListener = (*virtualStreamListener)(nil)
 
 func (sl *virtualStreamListener) AcceptStream() (ClientStreamConn, error) {
+	sl.mu.Lock()
+	acceptCh := sl.acceptCh
+	sl.mu.Unlock()
+
 	select {
-	case acceptResponse, ok := <-sl.acceptCh:
+	case acceptResponse, ok := <-acceptCh:
 		if !ok {
 			return nil, net.ErrClosed
 		}
@@ -113,12 +122,24 @@ func (sl *virtualStreamListener) AcceptStream() (ClientStreamConn, error) {
 }
 
 func (sl *virtualStreamListener) Close() error {
+	sl.mu.Lock()
+	if sl.closed {
+		sl.mu.Unlock()
+		return nil
+	}
+	sl.closed = true
+	sl.acceptCh = nil
 	close(sl.closeCh)
-	return sl.onCloseFunc()
+	sl.mu.Unlock()
+
+	if sl.onCloseFunc != nil {
+		return sl.onCloseFunc()
+	}
+	return nil
 }
 
 func (sl *virtualStreamListener) Addr() net.Addr {
-	return sl.listener.Addr()
+	return sl.addr
 }
 
 // ProxyStreamListener wraps a [StreamListener] and fetches the source of the connection from the PROXY
@@ -149,197 +170,257 @@ func (l *ProxyStreamListener) AcceptStream() (ClientStreamConn, error) {
 	return &clientStreamConn{StreamConn: conn, clientAddr: header.SourceAddr}, nil
 }
 
+type packetResponse struct {
+	n    int
+	addr net.Addr
+	err  error
+	data []byte
+}
+
 type virtualPacketConn struct {
 	net.PacketConn
+	mu          sync.Mutex // Mutex to protect access to the channels
+	readCh      <-chan packetResponse
+	closeCh     chan struct{}
+	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
-func (spc *virtualPacketConn) Close() error {
-	return spc.onCloseFunc()
+func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	pc.mu.Lock()
+	readCh := pc.readCh
+	pc.mu.Unlock()
+
+	select {
+	case packetResponse, ok := <-readCh:
+		if !ok {
+			return 0, nil, net.ErrClosed
+		}
+		copy(p, packetResponse.data)
+		return packetResponse.n, packetResponse.addr, packetResponse.err
+	case <-pc.closeCh:
+		return 0, nil, net.ErrClosed
+	}
 }
 
-type listenAddr struct {
-	ln          Listener
+func (pc *virtualPacketConn) Close() error {
+	pc.mu.Lock()
+	if pc.closed {
+		pc.mu.Unlock()
+		return nil
+	}
+	pc.closed = true
+	pc.readCh = nil
+	close(pc.closeCh)
+	pc.mu.Unlock()
+
+	if pc.onCloseFunc != nil {
+		return pc.onCloseFunc()
+	}
+	return nil
+}
+
+// MultiListener manages shared listeners.
+type MultiListener[T Listener] interface {
+	// Acquire creates a new listener from the shared listener. Listeners can overlap
+	// one another (e.g. during config changes the new config is started before the
+	// old config is destroyed), which is done by creating virtual listeners that wrap
+	// the shared listener. These virtual listeners do not actually close the
+	// underlying socket until all uses of the shared listener have been closed.
+	Acquire() (T, error)
+}
+
+type multiStreamListener struct {
+	mu          sync.Mutex
+	addr        string
+	proxy       bool
+	ln          RefCount[StreamListener]
 	acceptCh    chan acceptResponse
 	onCloseFunc OnCloseFunc
 }
 
-type canCreateStreamListener interface {
-	NewStreamListener(onCloseFunc OnCloseFunc) StreamListener
+// NewMultiStreamListener creates a new stream-based [MultiListener].
+func NewMultiStreamListener(addr string, proxy bool, onCloseFunc OnCloseFunc) MultiListener[StreamListener] {
+	return &multiStreamListener{
+		addr:        addr,
+		proxy:       proxy,
+		onCloseFunc: onCloseFunc,
+	}
 }
 
-var _ canCreateStreamListener = (*listenAddr)(nil)
+func (m *multiStreamListener) Acquire() (StreamListener, error) {
+	refCount, err := func() (RefCount[StreamListener], error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-// NewStreamListener creates a new [StreamListener].
-func (la *listenAddr) NewStreamListener(onCloseFunc OnCloseFunc) StreamListener {
-	if ln, ok := la.ln.(StreamListener); ok {
-		return &virtualStreamListener{
-			listener:    ln,
-			acceptCh:    la.acceptCh,
-			closeCh:     make(chan struct{}),
-			onCloseFunc: onCloseFunc,
+		if m.ln == nil {
+			tcpAddr, err := net.ResolveTCPAddr("tcp", m.addr)
+			if err != nil {
+				return nil, err
+			}
+			ln, err := net.ListenTCP("tcp", tcpAddr)
+			if err != nil {
+				return nil, err
+			}
+			var sl StreamListener
+			sl = &TCPListener{ln}
+			if m.proxy {
+				sl = &ProxyStreamListener{StreamListener: sl}
+			}
+			m.ln = NewRefCount[StreamListener](sl, m.onCloseFunc)
+			m.acceptCh = make(chan acceptResponse)
+			go func() {
+				for {
+					conn, err := sl.AcceptStream()
+					if errors.Is(err, net.ErrClosed) {
+						close(m.acceptCh)
+						return
+					}
+					m.acceptCh <- acceptResponse{conn, err}
+				}
+			}()
 		}
+		return m.ln, nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+
+	sl := refCount.Acquire()
+	return &virtualStreamListener{
+		addr:        sl.Addr(),
+		acceptCh:    m.acceptCh,
+		closeCh:     make(chan struct{}),
+		onCloseFunc: refCount.Close,
+	}, nil
 }
 
-type canCreatePacketListener interface {
-	NewPacketListener(onCloseFunc OnCloseFunc) net.PacketConn
+type multiPacketListener struct {
+	mu          sync.Mutex
+	addr        string
+	pc          RefCount[net.PacketConn]
+	readCh      chan packetResponse
+	onCloseFunc OnCloseFunc
 }
 
-var _ canCreatePacketListener = (*listenAddr)(nil)
+// NewMultiPacketListener creates a new packet-based [MultiListener].
+func NewMultiPacketListener(addr string, onCloseFunc OnCloseFunc) MultiListener[net.PacketConn] {
+	return &multiPacketListener{
+		addr:        addr,
+		onCloseFunc: onCloseFunc,
+	}
+}
 
-// NewPacketListener creates a new [net.PacketConn].
-func (cl *listenAddr) NewPacketListener(onCloseFunc OnCloseFunc) net.PacketConn {
-	if ln, ok := cl.ln.(net.PacketConn); ok {
-		return &virtualPacketConn{
-			PacketConn:  ln,
-			onCloseFunc: onCloseFunc,
+func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
+	refCount, err := func() (RefCount[net.PacketConn], error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		if m.pc == nil {
+			pc, err := net.ListenPacket("udp", m.addr)
+			if err != nil {
+				return nil, err
+			}
+			m.pc = NewRefCount(pc, m.onCloseFunc)
+			m.readCh = make(chan packetResponse)
+			go func() {
+				for {
+					buffer := make([]byte, serverUDPBufferSize)
+					n, addr, err := pc.ReadFrom(buffer)
+					if err != nil {
+						close(m.readCh)
+						return
+					}
+					m.readCh <- packetResponse{n: n, addr: addr, err: err, data: buffer[:n]}
+				}
+			}()
 		}
+		return m.pc, nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+
+	pc := refCount.Acquire()
+	return &virtualPacketConn{
+		PacketConn:  pc,
+		readCh:      m.readCh,
+		closeCh:     make(chan struct{}),
+		onCloseFunc: refCount.Close,
+	}, nil
 }
 
-func (la *listenAddr) Close() error {
-	if err := la.ln.Close(); err != nil {
-		return err
-	}
-	return la.onCloseFunc()
-}
-
-// ListenerManager holds and manages the state of shared listeners.
+// ListenerManager holds the state of shared listeners.
 type ListenerManager interface {
-	// ListenStream creates a new stream listener for a given network and address.
-	//
-	// Listeners can overlap one another, because during config changes the new
-	// config is started before the old config is destroyed. This is done by using
-	// reusable listener wrappers, which do not actually close the underlying socket
-	// until all uses of the shared listener have been closed.
-	ListenStream(network string, addr string, proxy bool) (StreamListener, error)
+	// ListenStream creates a new stream listener for a given address.
+	ListenStream(addr string, proxy bool) (StreamListener, error)
 
-	// ListenPacket creates a new packet listener for a given network and address.
-	//
-	// See notes on [ListenStream].
-	ListenPacket(network string, addr string, proxy bool) (net.PacketConn, error)
+	// ListenPacket creates a new packet listener for a given address.
+	ListenPacket(addr string, proxy bool) (net.PacketConn, error)
 }
 
 type listenerManager struct {
-	listeners   map[string]RefCount[Listener]
-	listenersMu sync.Mutex
+	streamListeners map[string]MultiListener[StreamListener]
+	packetListeners map[string]MultiListener[net.PacketConn]
+	mu              sync.Mutex
 }
 
 // NewListenerManager creates a new [ListenerManger].
 func NewListenerManager() ListenerManager {
 	return &listenerManager{
-		listeners: make(map[string]RefCount[Listener]),
+		streamListeners: make(map[string]MultiListener[StreamListener]),
+		packetListeners: make(map[string]MultiListener[net.PacketConn]),
 	}
 }
 
-func (m *listenerManager) newStreamListener(network string, addr string, proxy bool) (Listener, error) {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+func (m *listenerManager) ListenStream(addr string, proxy bool) (StreamListener, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	streamLn, exists := m.streamListeners[addr]
+	if !exists {
+		streamLn = NewMultiStreamListener(
+			addr,
+			proxy,
+			func() error {
+				m.mu.Lock()
+				delete(m.streamListeners, addr)
+				m.mu.Unlock()
+				return nil
+			},
+		)
+		m.streamListeners[addr] = streamLn
+	}
+	ln, err := streamLn.Acquire()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to create stream listener for %s: %v", addr, err)
 	}
-	ln, err := net.ListenTCP(network, tcpAddr)
+	return ln, nil
+}
+
+func (m *listenerManager) ListenPacket(addr string, proxy bool) (net.PacketConn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	packetLn, exists := m.packetListeners[addr]
+	if !exists {
+		packetLn = NewMultiPacketListener(
+			addr,
+			func() error {
+				m.mu.Lock()
+				delete(m.packetListeners, addr)
+				m.mu.Unlock()
+				return nil
+			},
+		)
+		m.packetListeners[addr] = packetLn
+	}
+
+	ln, err := packetLn.Acquire()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to create packet listener for %s: %v", addr, err)
 	}
-	var streamLn StreamListener
-	streamLn = &TCPListener{ln}
-	if proxy {
-		streamLn = &ProxyStreamListener{StreamListener: streamLn}
-	}
-	lnAddr := &listenAddr{
-		ln:       streamLn,
-		acceptCh: make(chan acceptResponse),
-		onCloseFunc: func() error {
-			m.delete(listenerKey(network, addr))
-			return nil
-		},
-	}
-	go func() {
-		for {
-			conn, err := streamLn.AcceptStream()
-			if errors.Is(err, net.ErrClosed) {
-				close(lnAddr.acceptCh)
-				return
-			}
-			lnAddr.acceptCh <- acceptResponse{conn, err}
-		}
-	}()
-	return lnAddr, nil
-}
-
-func (m *listenerManager) newPacketListener(network string, addr string, proxy bool) (Listener, error) {
-	pc, err := net.ListenPacket(network, addr)
-	if err != nil {
-		return nil, err
-	}
-	return &listenAddr{
-		ln: pc,
-		onCloseFunc: func() error {
-			m.delete(listenerKey(network, addr))
-			return nil
-		},
-	}, nil
-}
-
-func (m *listenerManager) getListener(network string, addr string, proxy bool) (RefCount[Listener], error) {
-	m.listenersMu.Lock()
-	defer m.listenersMu.Unlock()
-
-	lnKey := listenerKey(network, addr)
-	if lnRefCount, exists := m.listeners[lnKey]; exists {
-		return lnRefCount.Acquire(), nil
-	}
-
-	var (
-		ln  Listener
-		err error
-	)
-	if network == "tcp" {
-		ln, err = m.newStreamListener(network, addr, proxy)
-	} else {
-		ln, err = m.newPacketListener(network, addr, proxy)
-	}
-	if err != nil {
-		return nil, err
-	}
-	lnRefCount := NewRefCount(ln)
-	m.listeners[lnKey] = lnRefCount
-	return lnRefCount, nil
-}
-
-func (m *listenerManager) ListenStream(network string, addr string, proxy bool) (StreamListener, error) {
-	lnRefCount, err := m.getListener(network, addr, proxy)
-	if err != nil {
-		return nil, err
-	}
-	if lnAddr, ok := lnRefCount.Get().(canCreateStreamListener); ok {
-		return lnAddr.NewStreamListener(lnRefCount.Close), nil
-	}
-	return nil, fmt.Errorf("unable to create stream listener for %s/%s", network, addr)
-}
-
-func (m *listenerManager) ListenPacket(network string, addr string, proxy bool) (net.PacketConn, error) {
-	lnRefCount, err := m.getListener(network, addr, proxy)
-	if err != nil {
-		return nil, err
-	}
-	if lnAddr, ok := lnRefCount.Get().(canCreatePacketListener); ok {
-		return lnAddr.NewPacketListener(lnRefCount.Close), nil
-	}
-	return nil, fmt.Errorf("unable to create packet listener for %s/%s", network, addr)
-}
-
-func (m *listenerManager) delete(key string) {
-	m.listenersMu.Lock()
-	delete(m.listeners, key)
-	m.listenersMu.Unlock()
-}
-
-func listenerKey(network string, addr string) string {
-	return network + "/" + addr
+	return ln, nil
 }
 
 // RefCount is an atomic reference counter that can be used to track a shared
@@ -348,38 +429,44 @@ type RefCount[T io.Closer] interface {
 	io.Closer
 
 	// Acquire increases the ref count and returns the wrapped object.
-	Acquire() RefCount[T]
-
-	Get() T
+	Acquire() T
 }
 
 type refCount[T io.Closer] struct {
-	count *atomic.Int32
-	value T
+	mu          sync.Mutex
+	count       *atomic.Int32
+	value       T
+	onCloseFunc OnCloseFunc
 }
 
-func NewRefCount[T io.Closer](value T) RefCount[T] {
-	res := &refCount[T]{
-		count: &atomic.Int32{},
-		value: value,
+func NewRefCount[T io.Closer](value T, onCloseFunc OnCloseFunc) RefCount[T] {
+	r := &refCount[T]{
+		count:       &atomic.Int32{},
+		value:       value,
+		onCloseFunc: onCloseFunc,
 	}
-	res.count.Store(1)
-	return res
-}
-
-func (r refCount[T]) Close() error {
-	if count := r.count.Add(-1); count == 0 {
-		return r.value.Close()
-	}
-
-	return nil
-}
-
-func (r refCount[T]) Acquire() RefCount[T] {
-	r.count.Add(1)
 	return r
 }
 
-func (r refCount[T]) Get() T {
+func (r refCount[T]) Acquire() T {
+	r.count.Add(1)
 	return r.value
+}
+
+func (r refCount[T]) Close() error {
+	// Lock to prevent someone from acquiring while we close the value.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if count := r.count.Add(-1); count == 0 {
+		err := r.value.Close()
+		if err != nil {
+			return err
+		}
+		if r.onCloseFunc != nil {
+			return r.onCloseFunc()
+		}
+		return nil
+	}
+	return nil
 }

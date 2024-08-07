@@ -99,8 +99,13 @@ func TestReadConfig(t *testing.T) {
 				Listeners: []ListenerConfig{
 					ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
 					ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9000"},
-					Listener{Type: listenerTypeProxy, Address: "tcp://[::]:9010"},
-					Listener{Type: listenerTypeProxy, Address: "udp://[::]:9010"},
+					ListenerConfig{
+						Type: listenerTypeProxy,
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9010"},
+							ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9010"},
+						},
+					},
 				},
 				Keys: []KeyConfig{
 					KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
