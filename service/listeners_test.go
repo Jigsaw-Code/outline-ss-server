@@ -51,18 +51,17 @@ func TestListenerManagerStreamListenerNotClosedIfStillInUse(t *testing.T) {
 	require.NoError(t, err)
 	ln2, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
-
 	// Close only the first listener.
 	ln.Close()
+
 	done := make(chan struct{})
 	go func() {
 		ln2.AcceptStream()
 		done <- struct{}{}
 	}()
-
 	err = writeTestPayload(ln2)
-	require.NoError(t, err)
 
+	require.NoError(t, err)
 	<-done
 }
 
@@ -82,8 +81,64 @@ func TestListenerManagerStreamListenerCreatesListenerOnDemand(t *testing.T) {
 		done <- struct{}{}
 	}()
 	err = writeTestPayload(ln2)
+
+	require.NoError(t, err)
+	<-done
+}
+
+func TestListenerManagerPacketListenerEarlyClose(t *testing.T) {
+	m := NewListenerManager()
+	pc, err := m.ListenPacket("127.0.0.1:0")
 	require.NoError(t, err)
 
+	pc.Close()
+	_, _, readErr := pc.ReadFrom(nil)
+	_, writeErr := pc.WriteTo(nil, &net.UDPAddr{})
+
+	require.ErrorIs(t, readErr, net.ErrClosed)
+	require.ErrorIs(t, writeErr, net.ErrClosed)
+}
+
+func TestListenerManagerPacketListenerNotClosedIfStillInUse(t *testing.T) {
+	m := NewListenerManager()
+	pc, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	pc2, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	// Close only the first listener.
+	pc.Close()
+
+	done := make(chan struct{})
+	go func() {
+		_, _, readErr := pc2.ReadFrom(nil)
+		require.NoError(t, readErr)
+		done <- struct{}{}
+	}()
+	_, err = pc.WriteTo(nil, pc2.LocalAddr())
+
+	require.NoError(t, err)
+	<-done
+}
+
+func TestListenerManagerPacketListenerCreatesListenerOnDemand(t *testing.T) {
+	m := NewListenerManager()
+	// Create a listener and immediately close it.
+	pc, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	pc.Close()
+	// Now create another listener on the same address.
+	pc2, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		_, _, readErr := pc2.ReadFrom(nil)
+		require.NoError(t, readErr)
+		done <- struct{}{}
+	}()
+	_, err = pc2.WriteTo(nil, pc2.LocalAddr())
+
+	require.NoError(t, err)
 	<-done
 }
 
