@@ -61,7 +61,7 @@ func init() {
 }
 
 type SSServer struct {
-	stopConfig  func()
+	stopConfig  func() error
 	lnManager   service.ListenerManager
 	natTimeout  time.Duration
 	m           *outlineMetrics
@@ -76,12 +76,14 @@ func (s *SSServer) loadConfig(filename string) error {
 	// We hot swap the config by having the old and new listeners both live at
 	// the same time. This means we create listeners for the new config first,
 	// and then close the old ones after.
-	stopConfig, err := s.runConfig(*config)
+	sopConfig, err := s.runConfig(*config)
 	if err != nil {
 		return err
 	}
-	go s.stopConfig()
-	s.stopConfig = stopConfig
+	if err := s.Stop(); err != nil {
+		return fmt.Errorf("unable to stop old config: %v", err)
+	}
+	s.stopConfig = sopConfig
 	return nil
 }
 
@@ -156,8 +158,9 @@ func (ls *listenerSet) Len() int {
 	return len(ls.listenerCloseFuncs)
 }
 
-func (s *SSServer) runConfig(config Config) (func(), error) {
+func (s *SSServer) runConfig(config Config) (func() error, error) {
 	startErrCh := make(chan error)
+	stopErrCh := make(chan error)
 	stopCh := make(chan struct{})
 
 	go func() {
@@ -165,7 +168,9 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 			manager:            s.lnManager,
 			listenerCloseFuncs: make(map[string]func() error),
 		}
-		defer lnSet.Close() // This closes all the listeners in the set.
+		defer func() {
+			stopErrCh <- lnSet.Close()
+		}()
 
 		startErrCh <- func() error {
 			portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
@@ -216,24 +221,33 @@ func (s *SSServer) runConfig(config Config) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	return func() {
+	return func() error {
 		logger.Infof("Stopping running config.")
 		// TODO(sbruens): Actually wait for all handlers to be stopped, e.g. by
 		// using a https://pkg.go.dev/sync#WaitGroup.
 		stopCh <- struct{}{}
+		stopErr := <-stopErrCh
+		return stopErr
 	}, nil
 }
 
 // Stop stops serving the current config.
-func (s *SSServer) Stop() {
-	go s.stopConfig()
+func (s *SSServer) Stop() error {
+	stopFunc := s.stopConfig
+	if stopFunc == nil {
+		return nil
+	}
+	if err := stopFunc(); err != nil {
+		logger.Errorf("Error stopping config: %v", err)
+		return err
+	}
 	logger.Info("Stopped all listeners for running config")
+	return nil
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
 func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
-		stopConfig:  func() {},
 		lnManager:   service.NewListenerManager(),
 		natTimeout:  natTimeout,
 		m:           sm,
