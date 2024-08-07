@@ -15,7 +15,6 @@
 package service
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +23,6 @@ import (
 	"sync/atomic"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
-	"github.com/pires/go-proxyproto"
 )
 
 // The implementations of listeners for different network types are not
@@ -140,34 +138,6 @@ func (sl *virtualStreamListener) Close() error {
 
 func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.addr
-}
-
-// ProxyStreamListener wraps a [StreamListener] and fetches the source of the connection from the PROXY
-// protocol header string. See https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt.
-type ProxyStreamListener struct {
-	StreamListener
-}
-
-// AcceptStream waits for the next incoming connection, parses the client IP from the PROXY protocol
-// header, and adds it to the connection.
-func (l *ProxyStreamListener) AcceptStream() (ClientStreamConn, error) {
-	conn, err := l.StreamListener.AcceptStream()
-	if err != nil {
-		return nil, err
-	}
-	r := bufio.NewReader(conn)
-	header, err := proxyproto.Read(r)
-	if errors.Is(err, proxyproto.ErrNoProxyProtocol) {
-		logger.Warningf("Received connection from %v without proxy header.", conn.RemoteAddr())
-		return conn, nil
-	}
-	if header == nil || err != nil {
-		return nil, fmt.Errorf("error parsing proxy header: %v", err)
-	}
-	if header.Command.IsLocal() {
-		return conn, nil
-	}
-	return &clientStreamConn{StreamConn: conn, clientAddr: header.SourceAddr}, nil
 }
 
 type packetResponse struct {
