@@ -72,17 +72,23 @@ type acceptResponse struct {
 type OnCloseFunc func() error
 
 type virtualStreamListener struct {
+	mu          sync.Mutex // Mutex to protect access to the channels
 	addr        net.Addr
 	acceptCh    <-chan acceptResponse
 	closeCh     chan struct{}
+	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
 var _ StreamListener = (*virtualStreamListener)(nil)
 
 func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
+	sl.mu.Lock()
+	acceptCh := sl.acceptCh
+	sl.mu.Unlock()
+
 	select {
-	case acceptResponse, ok := <-sl.acceptCh:
+	case acceptResponse, ok := <-acceptCh:
 		if !ok {
 			return nil, net.ErrClosed
 		}
@@ -93,8 +99,16 @@ func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 }
 
 func (sl *virtualStreamListener) Close() error {
+	sl.mu.Lock()
+	if sl.closed {
+		sl.mu.Unlock()
+		return nil
+	}
+	sl.closed = true
 	sl.acceptCh = nil
 	close(sl.closeCh)
+	sl.mu.Unlock()
+
 	if sl.onCloseFunc != nil {
 		return sl.onCloseFunc()
 	}
