@@ -24,7 +24,7 @@ import (
 
 func TestListenerManagerStreamListenerEarlyClose(t *testing.T) {
 	m := NewListenerManager()
-	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 
 	ln.Close()
@@ -47,33 +47,32 @@ func writeTestPayload(ln StreamListener) error {
 
 func TestListenerManagerStreamListenerNotClosedIfStillInUse(t *testing.T) {
 	m := NewListenerManager()
-	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
-	ln2, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln2, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
-
 	// Close only the first listener.
 	ln.Close()
+
 	done := make(chan struct{})
 	go func() {
 		ln2.AcceptStream()
 		done <- struct{}{}
 	}()
-
 	err = writeTestPayload(ln2)
-	require.NoError(t, err)
 
+	require.NoError(t, err)
 	<-done
 }
 
 func TestListenerManagerStreamListenerCreatesListenerOnDemand(t *testing.T) {
 	m := NewListenerManager()
 	// Create a listener and immediately close it.
-	ln, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 	ln.Close()
 	// Now create another listener on the same address.
-	ln2, err := m.ListenStream("tcp", "127.0.0.1:0")
+	ln2, err := m.ListenStream("127.0.0.1:0")
 	require.NoError(t, err)
 
 	done := make(chan struct{})
@@ -82,8 +81,64 @@ func TestListenerManagerStreamListenerCreatesListenerOnDemand(t *testing.T) {
 		done <- struct{}{}
 	}()
 	err = writeTestPayload(ln2)
+
+	require.NoError(t, err)
+	<-done
+}
+
+func TestListenerManagerPacketListenerEarlyClose(t *testing.T) {
+	m := NewListenerManager()
+	pc, err := m.ListenPacket("127.0.0.1:0")
 	require.NoError(t, err)
 
+	pc.Close()
+	_, _, readErr := pc.ReadFrom(nil)
+	_, writeErr := pc.WriteTo(nil, &net.UDPAddr{})
+
+	require.ErrorIs(t, readErr, net.ErrClosed)
+	require.ErrorIs(t, writeErr, net.ErrClosed)
+}
+
+func TestListenerManagerPacketListenerNotClosedIfStillInUse(t *testing.T) {
+	m := NewListenerManager()
+	pc, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	pc2, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	// Close only the first listener.
+	pc.Close()
+
+	done := make(chan struct{})
+	go func() {
+		_, _, readErr := pc2.ReadFrom(nil)
+		require.NoError(t, readErr)
+		done <- struct{}{}
+	}()
+	_, err = pc.WriteTo(nil, pc2.LocalAddr())
+
+	require.NoError(t, err)
+	<-done
+}
+
+func TestListenerManagerPacketListenerCreatesListenerOnDemand(t *testing.T) {
+	m := NewListenerManager()
+	// Create a listener and immediately close it.
+	pc, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	pc.Close()
+	// Now create another listener on the same address.
+	pc2, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		_, _, readErr := pc2.ReadFrom(nil)
+		require.NoError(t, readErr)
+		done <- struct{}{}
+	}()
+	_, err = pc2.WriteTo(nil, pc2.LocalAddr())
+
+	require.NoError(t, err)
 	<-done
 }
 
@@ -97,17 +152,27 @@ func (t *testRefCount) Close() error {
 }
 
 func TestRefCount(t *testing.T) {
-	var done bool
-	rc := NewRefCount[*testRefCount](&testRefCount{
-		onCloseFunc: func() {
-			done = true
+	var objectCloseDone bool
+	var onCloseFuncDone bool
+	rc := NewRefCount[*testRefCount](
+		&testRefCount{
+			onCloseFunc: func() {
+				objectCloseDone = true
+			},
 		},
-	})
+		func() error {
+			onCloseFuncDone = true
+			return nil
+		},
+	)
+	rc.Acquire()
 	rc.Acquire()
 
 	require.NoError(t, rc.Close())
-	require.False(t, done)
+	require.False(t, objectCloseDone)
+	require.False(t, onCloseFuncDone)
 
 	require.NoError(t, rc.Close())
-	require.True(t, done)
+	require.True(t, objectCloseDone)
+	require.True(t, onCloseFuncDone)
 }
