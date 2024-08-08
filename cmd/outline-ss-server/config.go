@@ -15,6 +15,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 
@@ -28,12 +29,43 @@ type ServiceConfig struct {
 
 type ListenerType string
 
-const listenerTypeTCP ListenerType = "tcp"
-const listenerTypeUDP ListenerType = "udp"
+const (
+	listenerTypeTCP   ListenerType = "tcp"
+	listenerTypeUDP   ListenerType = "udp"
+	listenerTypeProxy ListenerType = "proxy_protocol"
+)
 
 type ListenerConfig struct {
-	Type    ListenerType
-	Address string
+	Type      ListenerType
+	Address   string
+	Listeners []ListenerConfig
+}
+
+// Validate checks that the config is valid.
+func (lc *ListenerConfig) Validate() error {
+	if lc.Type != listenerTypeTCP && lc.Type != listenerTypeUDP && lc.Type != listenerTypeProxy {
+		return fmt.Errorf("unsupported listener type: %s", lc.Type)
+	}
+	if lc.Address != "" && len(lc.Listeners) > 0 {
+		return errors.New("cannot specify both `listeners` and `address` on a listener type")
+	}
+	if len(lc.Listeners) > 0 {
+		for _, childLnConfig := range lc.Listeners {
+			if err := childLnConfig.Validate(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	host, _, err := net.SplitHostPort(lc.Address)
+	if err != nil {
+		return fmt.Errorf("invalid listener address `%s`: %v", lc.Address, err)
+	}
+	if ip := net.ParseIP(host); ip == nil {
+		return fmt.Errorf("address must be IP, found: %s", host)
+	}
+	return nil
 }
 
 type KeyConfig struct {
@@ -60,22 +92,15 @@ func (c *Config) Validate() error {
 	existingListeners := make(map[string]bool)
 	for _, serviceConfig := range c.Services {
 		for _, lnConfig := range serviceConfig.Listeners {
-			// TODO: Support more listener types.
-			if lnConfig.Type != listenerTypeTCP && lnConfig.Type != listenerTypeUDP {
-				return fmt.Errorf("unsupported listener type: %s", lnConfig.Type)
-			}
-			host, _, err := net.SplitHostPort(lnConfig.Address)
-			if err != nil {
-				return fmt.Errorf("invalid listener address `%s`: %v", lnConfig.Address, err)
-			}
-			if ip := net.ParseIP(host); ip == nil {
-				return fmt.Errorf("address must be IP, found: %s", host)
-			}
 			key := string(lnConfig.Type) + "/" + lnConfig.Address
 			if _, exists := existingListeners[key]; exists {
 				return fmt.Errorf("listener of type %s with address %s already exists.", lnConfig.Type, lnConfig.Address)
 			}
 			existingListeners[key] = true
+
+			if err := lnConfig.Validate(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

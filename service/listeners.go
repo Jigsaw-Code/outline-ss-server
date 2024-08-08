@@ -29,11 +29,28 @@ import (
 // interchangeable. The type of listener depends on the network type.
 type Listener = io.Closer
 
+// ClientStreamConn wraps a [transport.StreamConn] and sets the client source of the connection.
+// This is useful for handling the PROXY protocol where the RemoteAddr() points to the
+// server/load balancer address and we need the perceived source of the connection.
+type ClientStreamConn interface {
+	transport.StreamConn
+	ClientAddr() net.Addr
+}
+
+type clientStreamConn struct {
+	transport.StreamConn
+	clientAddr net.Addr
+}
+
+func (c *clientStreamConn) ClientAddr() net.Addr {
+	return c.clientAddr
+}
+
 // StreamListener is a network listener for stream-oriented protocols that
 // accepts [transport.StreamConn] connections.
 type StreamListener interface {
 	// Accept waits for and returns the next connection to the listener.
-	AcceptStream() (transport.StreamConn, error)
+	AcceptStream() (ClientStreamConn, error)
 
 	// Close closes the listener.
 	// Any blocked Accept operations will be unblocked and return errors. This
@@ -52,8 +69,12 @@ type TCPListener struct {
 
 var _ StreamListener = (*TCPListener)(nil)
 
-func (t *TCPListener) AcceptStream() (transport.StreamConn, error) {
-	return t.ln.AcceptTCP()
+func (t *TCPListener) AcceptStream() (ClientStreamConn, error) {
+	conn, err := t.ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+	return &clientStreamConn{StreamConn: conn, clientAddr: conn.RemoteAddr()}, err
 }
 
 func (t *TCPListener) Close() error {
@@ -67,7 +88,7 @@ func (t *TCPListener) Addr() net.Addr {
 type OnCloseFunc func() error
 
 type acceptResponse struct {
-	conn transport.StreamConn
+	conn ClientStreamConn
 	err  error
 }
 
@@ -82,7 +103,7 @@ type virtualStreamListener struct {
 
 var _ StreamListener = (*virtualStreamListener)(nil)
 
-func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
+func (sl *virtualStreamListener) AcceptStream() (ClientStreamConn, error) {
 	sl.mu.Lock()
 	acceptCh := sl.acceptCh
 	sl.mu.Unlock()
@@ -182,15 +203,17 @@ type MultiListener[T Listener] interface {
 type multiStreamListener struct {
 	mu          sync.Mutex
 	addr        string
+	proxy       bool
 	ln          RefCount[StreamListener]
 	acceptCh    chan acceptResponse
 	onCloseFunc OnCloseFunc
 }
 
 // NewMultiStreamListener creates a new stream-based [MultiListener].
-func NewMultiStreamListener(addr string, onCloseFunc OnCloseFunc) MultiListener[StreamListener] {
+func NewMultiStreamListener(addr string, proxy bool, onCloseFunc OnCloseFunc) MultiListener[StreamListener] {
 	return &multiStreamListener{
 		addr:        addr,
+		proxy:       proxy,
 		onCloseFunc: onCloseFunc,
 	}
 }
@@ -209,7 +232,11 @@ func (m *multiStreamListener) Acquire() (StreamListener, error) {
 			if err != nil {
 				return nil, err
 			}
-			sl := &TCPListener{ln}
+			var sl StreamListener
+			sl = &TCPListener{ln}
+			if m.proxy {
+				sl = &ProxyStreamListener{StreamListener: sl}
+			}
 			m.ln = NewRefCount[StreamListener](sl, m.onCloseFunc)
 			m.acceptCh = make(chan acceptResponse)
 			go func() {
@@ -296,10 +323,10 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 // ListenerManager holds the state of shared listeners.
 type ListenerManager interface {
 	// ListenStream creates a new stream listener for a given address.
-	ListenStream(addr string) (StreamListener, error)
+	ListenStream(addr string, proxy bool) (StreamListener, error)
 
 	// ListenPacket creates a new packet listener for a given address.
-	ListenPacket(addr string) (net.PacketConn, error)
+	ListenPacket(addr string, proxy bool) (net.PacketConn, error)
 }
 
 type listenerManager struct {
@@ -316,7 +343,7 @@ func NewListenerManager() ListenerManager {
 	}
 }
 
-func (m *listenerManager) ListenStream(addr string) (StreamListener, error) {
+func (m *listenerManager) ListenStream(addr string, proxy bool) (StreamListener, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -324,6 +351,7 @@ func (m *listenerManager) ListenStream(addr string) (StreamListener, error) {
 	if !exists {
 		streamLn = NewMultiStreamListener(
 			addr,
+			proxy,
 			func() error {
 				m.mu.Lock()
 				delete(m.streamListeners, addr)
@@ -340,7 +368,7 @@ func (m *listenerManager) ListenStream(addr string) (StreamListener, error) {
 	return ln, nil
 }
 
-func (m *listenerManager) ListenPacket(addr string) (net.PacketConn, error) {
+func (m *listenerManager) ListenPacket(addr string, proxy bool) (net.PacketConn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

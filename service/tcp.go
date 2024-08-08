@@ -162,7 +162,6 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 }
 
 type streamHandler struct {
-	listenerId   string
 	m            TCPMetrics
 	readTimeout  time.Duration
 	authenticate StreamAuthenticateFunc
@@ -190,7 +189,7 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 
 // StreamHandler is a handler that handles stream connections.
 type StreamHandler interface {
-	Handle(ctx context.Context, conn transport.StreamConn)
+	Handle(ctx context.Context, conn ClientStreamConn)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
 }
@@ -211,15 +210,19 @@ func ensureConnectionError(err error, fallbackStatus string, fallbackMsg string)
 	}
 }
 
-type StreamAcceptFunc func() (transport.StreamConn, error)
+type StreamAcceptFunc func() (ClientStreamConn, error)
 
 func WrapStreamAcceptFunc[T transport.StreamConn](f func() (T, error)) StreamAcceptFunc {
-	return func() (transport.StreamConn, error) {
-		return f()
+	return func() (ClientStreamConn, error) {
+		c, err := f()
+		if err != nil {
+			return nil, err
+		}
+		return &clientStreamConn{StreamConn: c, clientAddr: c.RemoteAddr()}, err
 	}
 }
 
-type StreamHandleFunc func(ctx context.Context, conn transport.StreamConn)
+type StreamHandleFunc func(ctx context.Context, conn ClientStreamConn)
 
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
@@ -253,12 +256,12 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 	}
 }
 
-func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
+func (h *streamHandler) Handle(ctx context.Context, clientConn ClientStreamConn) {
+	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.ClientAddr())
 	if err != nil {
 		logger.Warningf("Failed client info lookup: %v", err)
 	}
-	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, clientConn.RemoteAddr().String())
+	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, clientConn.ClientAddr().String())
 	h.m.AddOpenTCPConnection(clientInfo)
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
@@ -272,7 +275,7 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 		status = connError.Status
 		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
 	}
-	h.m.AddClosedTCPConnection(clientInfo, clientConn.RemoteAddr(), id, status, proxyMetrics, connDuration)
+	h.m.AddClosedTCPConnection(clientInfo, clientConn.ClientAddr(), id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	logger.Debugf("Done with status %v, duration %v", status, connDuration)
 }

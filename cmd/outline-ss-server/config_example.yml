@@ -6,6 +6,12 @@ services:
         address: "[::]:9000"
       - type: udp
         address: "[::]:9000"
+      - type: proxy_protocol
+        listeners:
+        - type: tcp
+          address: "[::]:9010"
+        - type: udp
+          address: "[::]:9010"
     keys:
         - id: user-0
           cipher: chacha20-ietf-poly1305
