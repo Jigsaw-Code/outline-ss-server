@@ -3,6 +3,7 @@ module github.com/Jigsaw-Code/outline-ss-server
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.14
 	github.com/go-task/task/v3 v3.34.1
+	github.com/google/addlicense v1.1.1
 	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
@@ -79,6 +80,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blakesmith/ar v0.0.0-20190502131153-809d4375e1fb // indirect
+	github.com/bmatcuk/doublestar/v4 v4.0.2 // indirect
 	github.com/caarlos0/ctrlc v1.2.0 // indirect
 	github.com/caarlos0/env/v8 v8.0.0 // indirect
 	github.com/caarlos0/go-reddit/v3 v3.0.1 // indirect
