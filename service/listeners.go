@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -98,14 +99,13 @@ func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 
 func (sl *virtualStreamListener) Close() error {
 	sl.mu.Lock()
+	defer sl.mu.Unlock()
+
 	if sl.acceptCh == nil {
-		sl.mu.Unlock()
 		return nil
 	}
 	sl.acceptCh = nil
 	close(sl.closeCh)
-	sl.mu.Unlock()
-
 	if sl.onCloseFunc != nil {
 		return sl.onCloseFunc()
 	}
@@ -116,47 +116,54 @@ func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.addr
 }
 
-type packetResponse struct {
-	n    int
-	addr net.Addr
-	err  error
-	data []byte
+type readRequest struct {
+	buffer []byte
+	respCh chan struct {
+		n    int
+		addr net.Addr
+		err  error
+	}
 }
 
 type virtualPacketConn struct {
 	net.PacketConn
 	mu          sync.Mutex // Mutex to protect access to the channels
-	readCh      <-chan packetResponse
+	readCh      chan readRequest
 	closeCh     chan struct{}
 	onCloseFunc OnCloseFunc
 }
 
 func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	pc.mu.Lock()
-	readCh := pc.readCh
-	pc.mu.Unlock()
+	respCh := make(chan struct {
+		n    int
+		addr net.Addr
+		err  error
+	}, 1)
 
-	select {
-	case packetResponse, ok := <-readCh:
-		if !ok {
-			return 0, nil, net.ErrClosed
-		}
-		copy(p, packetResponse.data)
-		return packetResponse.n, packetResponse.addr, packetResponse.err
-	case <-pc.closeCh:
+	pc.mu.Lock()
+	if pc.readCh == nil {
+		pc.mu.Unlock()
 		return 0, nil, net.ErrClosed
 	}
+	pc.readCh <- readRequest{
+		buffer: p,
+		respCh: respCh,
+	}
+	pc.mu.Unlock()
+
+	resp := <-respCh
+	return resp.n, resp.addr, resp.err
 }
 
 func (pc *virtualPacketConn) Close() error {
 	pc.mu.Lock()
+	defer pc.mu.Unlock()
+
 	if pc.readCh == nil {
-		pc.mu.Unlock()
 		return nil
 	}
 	pc.readCh = nil
 	close(pc.closeCh)
-	pc.mu.Unlock()
 
 	if pc.onCloseFunc != nil {
 		return pc.onCloseFunc()
@@ -242,7 +249,8 @@ type multiPacketListener struct {
 	mu          sync.Mutex
 	addr        string
 	pc          net.PacketConn
-	readCh      chan packetResponse
+	readCh      chan readRequest
+	cancel      context.CancelFunc
 	count       uint32
 	onCloseFunc OnCloseFunc
 }
@@ -265,16 +273,22 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			return nil, err
 		}
 		m.pc = pc
-		m.readCh = make(chan packetResponse)
+		m.readCh = make(chan readRequest)
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancel = cancel
 		go func() {
 			for {
-				buffer := make([]byte, serverUDPBufferSize)
-				n, addr, err := pc.ReadFrom(buffer)
-				if err != nil {
-					close(m.readCh)
+				select {
+				case req := <-m.readCh:
+					n, addr, err := pc.ReadFrom(req.buffer)
+					req.respCh <- struct {
+						n    int
+						addr net.Addr
+						err  error
+					}{n, addr, err}
+				case <-ctx.Done():
 					return
 				}
-				m.readCh <- packetResponse{n: n, addr: addr, err: err, data: buffer[:n]}
 			}
 		}()
 	}
@@ -289,6 +303,7 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			defer m.mu.Unlock()
 			m.count--
 			if m.count == 0 {
+				m.cancel()
 				m.pc.Close()
 				if m.onCloseFunc != nil {
 					return m.onCloseFunc()
