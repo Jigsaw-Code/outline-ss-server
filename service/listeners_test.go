@@ -141,38 +141,3 @@ func TestListenerManagerPacketListenerCreatesListenerOnDemand(t *testing.T) {
 	require.NoError(t, err)
 	<-done
 }
-
-type testRefCount struct {
-	onCloseFunc func()
-}
-
-func (t *testRefCount) Close() error {
-	t.onCloseFunc()
-	return nil
-}
-
-func TestRefCount(t *testing.T) {
-	var objectCloseDone bool
-	var onCloseFuncDone bool
-	rc := NewRefCount[*testRefCount](
-		&testRefCount{
-			onCloseFunc: func() {
-				objectCloseDone = true
-			},
-		},
-		func() error {
-			onCloseFuncDone = true
-			return nil
-		},
-	)
-	rc.Acquire()
-	rc.Acquire()
-
-	require.NoError(t, rc.Close())
-	require.False(t, objectCloseDone)
-	require.False(t, onCloseFuncDone)
-
-	require.NoError(t, rc.Close())
-	require.True(t, objectCloseDone)
-	require.True(t, onCloseFuncDone)
-}

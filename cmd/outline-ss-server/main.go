@@ -83,14 +83,14 @@ func (s *SSServer) loadConfig(filename string) error {
 	// We hot swap the config by having the old and new listeners both live at
 	// the same time. This means we create listeners for the new config first,
 	// and then close the old ones after.
-	sopConfig, err := s.runConfig(*config)
+	stopConfig, err := s.runConfig(*config)
 	if err != nil {
 		return err
 	}
 	if err := s.Stop(); err != nil {
-		return fmt.Errorf("unable to stop old config: %v", err)
+		logger.Warningf("Failed to stop old config: %v", err)
 	}
-	s.stopConfig = sopConfig
+	s.stopConfig = stopConfig
 	return nil
 }
 

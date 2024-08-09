@@ -20,7 +20,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 )
@@ -76,7 +75,6 @@ type virtualStreamListener struct {
 	addr        net.Addr
 	acceptCh    <-chan acceptResponse
 	closeCh     chan struct{}
-	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
@@ -100,15 +98,13 @@ func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 
 func (sl *virtualStreamListener) Close() error {
 	sl.mu.Lock()
-	if sl.closed {
-		sl.mu.Unlock()
+	defer sl.mu.Unlock()
+
+	if sl.acceptCh == nil {
 		return nil
 	}
-	sl.closed = true
 	sl.acceptCh = nil
 	close(sl.closeCh)
-	sl.mu.Unlock()
-
 	if sl.onCloseFunc != nil {
 		return sl.onCloseFunc()
 	}
@@ -119,49 +115,52 @@ func (sl *virtualStreamListener) Addr() net.Addr {
 	return sl.addr
 }
 
-type packetResponse struct {
-	n    int
-	addr net.Addr
-	err  error
-	data []byte
+type readRequest struct {
+	buffer []byte
+	respCh chan struct {
+		n    int
+		addr net.Addr
+		err  error
+	}
 }
 
 type virtualPacketConn struct {
 	net.PacketConn
 	mu          sync.Mutex // Mutex to protect access to the channels
-	readCh      <-chan packetResponse
-	closeCh     chan struct{}
-	closed      bool
+	readCh      chan readRequest
 	onCloseFunc OnCloseFunc
 }
 
 func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	pc.mu.Lock()
-	readCh := pc.readCh
-	pc.mu.Unlock()
+	respCh := make(chan struct {
+		n    int
+		addr net.Addr
+		err  error
+	}, 1)
 
-	select {
-	case packetResponse, ok := <-readCh:
-		if !ok {
-			return 0, nil, net.ErrClosed
-		}
-		copy(p, packetResponse.data)
-		return packetResponse.n, packetResponse.addr, packetResponse.err
-	case <-pc.closeCh:
+	pc.mu.Lock()
+	if pc.readCh == nil {
+		pc.mu.Unlock()
 		return 0, nil, net.ErrClosed
 	}
+	pc.readCh <- readRequest{
+		buffer: p,
+		respCh: respCh,
+	}
+	pc.mu.Unlock()
+
+	resp := <-respCh
+	return resp.n, resp.addr, resp.err
 }
 
 func (pc *virtualPacketConn) Close() error {
 	pc.mu.Lock()
-	if pc.closed {
-		pc.mu.Unlock()
+	defer pc.mu.Unlock()
+
+	if pc.readCh == nil {
 		return nil
 	}
-	pc.closed = true
 	pc.readCh = nil
-	close(pc.closeCh)
-	pc.mu.Unlock()
 
 	if pc.onCloseFunc != nil {
 		return pc.onCloseFunc()
@@ -182,7 +181,8 @@ type MultiListener[T Listener] interface {
 type multiStreamListener struct {
 	mu          sync.Mutex
 	addr        string
-	ln          RefCount[StreamListener]
+	ln          StreamListener
+	count       uint32
 	acceptCh    chan acceptResponse
 	onCloseFunc OnCloseFunc
 }
@@ -196,53 +196,59 @@ func NewMultiStreamListener(addr string, onCloseFunc OnCloseFunc) MultiListener[
 }
 
 func (m *multiStreamListener) Acquire() (StreamListener, error) {
-	refCount, err := func() (RefCount[StreamListener], error) {
-		m.mu.Lock()
-		defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-		if m.ln == nil {
-			tcpAddr, err := net.ResolveTCPAddr("tcp", m.addr)
-			if err != nil {
-				return nil, err
-			}
-			ln, err := net.ListenTCP("tcp", tcpAddr)
-			if err != nil {
-				return nil, err
-			}
-			sl := &TCPListener{ln}
-			m.ln = NewRefCount[StreamListener](sl, m.onCloseFunc)
-			m.acceptCh = make(chan acceptResponse)
-			go func() {
-				for {
-					conn, err := sl.AcceptStream()
-					if errors.Is(err, net.ErrClosed) {
-						close(m.acceptCh)
-						return
-					}
-					m.acceptCh <- acceptResponse{conn, err}
-				}
-			}()
+	if m.ln == nil {
+		tcpAddr, err := net.ResolveTCPAddr("tcp", m.addr)
+		if err != nil {
+			return nil, err
 		}
-		return m.ln, nil
-	}()
-	if err != nil {
-		return nil, err
+		ln, err := net.ListenTCP("tcp", tcpAddr)
+		if err != nil {
+			return nil, err
+		}
+		m.ln = &TCPListener{ln}
+		m.acceptCh = make(chan acceptResponse)
+		go func() {
+			for {
+				conn, err := m.ln.AcceptStream()
+				if errors.Is(err, net.ErrClosed) {
+					close(m.acceptCh)
+					return
+				}
+				m.acceptCh <- acceptResponse{conn, err}
+			}
+		}()
 	}
 
-	sl := refCount.Acquire()
+	m.count++
 	return &virtualStreamListener{
-		addr:        sl.Addr(),
-		acceptCh:    m.acceptCh,
-		closeCh:     make(chan struct{}),
-		onCloseFunc: refCount.Close,
+		addr:     m.ln.Addr(),
+		acceptCh: m.acceptCh,
+		closeCh:  make(chan struct{}),
+		onCloseFunc: func() error {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			m.count--
+			if m.count == 0 {
+				m.ln.Close()
+				if m.onCloseFunc != nil {
+					return m.onCloseFunc()
+				}
+			}
+			return nil
+		},
 	}, nil
 }
 
 type multiPacketListener struct {
 	mu          sync.Mutex
 	addr        string
-	pc          RefCount[net.PacketConn]
-	readCh      chan packetResponse
+	pc          net.PacketConn
+	count       uint32
+	readCh      chan readRequest
+	doneCh      chan struct{}
 	onCloseFunc OnCloseFunc
 }
 
@@ -255,41 +261,51 @@ func NewMultiPacketListener(addr string, onCloseFunc OnCloseFunc) MultiListener[
 }
 
 func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
-	refCount, err := func() (RefCount[net.PacketConn], error) {
-		m.mu.Lock()
-		defer m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-		if m.pc == nil {
-			pc, err := net.ListenPacket("udp", m.addr)
-			if err != nil {
-				return nil, err
-			}
-			m.pc = NewRefCount(pc, m.onCloseFunc)
-			m.readCh = make(chan packetResponse)
-			go func() {
-				for {
-					buffer := make([]byte, serverUDPBufferSize)
-					n, addr, err := pc.ReadFrom(buffer)
-					if err != nil {
-						close(m.readCh)
-						return
-					}
-					m.readCh <- packetResponse{n: n, addr: addr, err: err, data: buffer[:n]}
-				}
-			}()
+	if m.pc == nil {
+		pc, err := net.ListenPacket("udp", m.addr)
+		if err != nil {
+			return nil, err
 		}
-		return m.pc, nil
-	}()
-	if err != nil {
-		return nil, err
+		m.pc = pc
+		m.readCh = make(chan readRequest)
+		m.doneCh = make(chan struct{})
+		go func() {
+			for {
+				select {
+				case req := <-m.readCh:
+					n, addr, err := pc.ReadFrom(req.buffer)
+					req.respCh <- struct {
+						n    int
+						addr net.Addr
+						err  error
+					}{n, addr, err}
+				case <-m.doneCh:
+					return
+				}
+			}
+		}()
 	}
 
-	pc := refCount.Acquire()
+	m.count++
 	return &virtualPacketConn{
-		PacketConn:  pc,
-		readCh:      m.readCh,
-		closeCh:     make(chan struct{}),
-		onCloseFunc: refCount.Close,
+		PacketConn: m.pc,
+		readCh:     m.readCh,
+		onCloseFunc: func() error {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			m.count--
+			if m.count == 0 {
+				close(m.doneCh)
+				m.pc.Close()
+				if m.onCloseFunc != nil {
+					return m.onCloseFunc()
+				}
+			}
+			return nil
+		},
 	}, nil
 }
 
@@ -363,52 +379,4 @@ func (m *listenerManager) ListenPacket(addr string) (net.PacketConn, error) {
 		return nil, fmt.Errorf("unable to create packet listener for %s: %v", addr, err)
 	}
 	return ln, nil
-}
-
-// RefCount is an atomic reference counter that can be used to track a shared
-// [io.Closer] resource.
-type RefCount[T io.Closer] interface {
-	io.Closer
-
-	// Acquire increases the ref count and returns the wrapped object.
-	Acquire() T
-}
-
-type refCount[T io.Closer] struct {
-	mu          sync.Mutex
-	count       *atomic.Int32
-	value       T
-	onCloseFunc OnCloseFunc
-}
-
-func NewRefCount[T io.Closer](value T, onCloseFunc OnCloseFunc) RefCount[T] {
-	r := &refCount[T]{
-		count:       &atomic.Int32{},
-		value:       value,
-		onCloseFunc: onCloseFunc,
-	}
-	return r
-}
-
-func (r refCount[T]) Acquire() T {
-	r.count.Add(1)
-	return r.value
-}
-
-func (r refCount[T]) Close() error {
-	// Lock to prevent someone from acquiring while we close the value.
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if count := r.count.Add(-1); count == 0 {
-		err := r.value.Close()
-		if err != nil {
-			return err
-		}
-		if r.onCloseFunc != nil {
-			return r.onCloseFunc()
-		}
-		return nil
-	}
-	return nil
 }
