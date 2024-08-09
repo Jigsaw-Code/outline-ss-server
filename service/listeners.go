@@ -76,7 +76,6 @@ type virtualStreamListener struct {
 	addr        net.Addr
 	acceptCh    <-chan acceptResponse
 	closeCh     chan struct{}
-	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
@@ -100,11 +99,10 @@ func (sl *virtualStreamListener) AcceptStream() (transport.StreamConn, error) {
 
 func (sl *virtualStreamListener) Close() error {
 	sl.mu.Lock()
-	if sl.closed {
+	if sl.acceptCh == nil {
 		sl.mu.Unlock()
 		return nil
 	}
-	sl.closed = true
 	sl.acceptCh = nil
 	close(sl.closeCh)
 	sl.mu.Unlock()
@@ -131,7 +129,6 @@ type virtualPacketConn struct {
 	mu          sync.Mutex // Mutex to protect access to the channels
 	readCh      <-chan packetResponse
 	closeCh     chan struct{}
-	closed      bool
 	onCloseFunc OnCloseFunc
 }
 
@@ -154,11 +151,10 @@ func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error
 
 func (pc *virtualPacketConn) Close() error {
 	pc.mu.Lock()
-	if pc.closed {
+	if pc.readCh == nil {
 		pc.mu.Unlock()
 		return nil
 	}
-	pc.closed = true
 	pc.readCh = nil
 	close(pc.closeCh)
 	pc.mu.Unlock()
