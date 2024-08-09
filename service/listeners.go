@@ -15,7 +15,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -129,7 +128,6 @@ type virtualPacketConn struct {
 	net.PacketConn
 	mu          sync.Mutex // Mutex to protect access to the channels
 	readCh      chan readRequest
-	closeCh     chan struct{}
 	onCloseFunc OnCloseFunc
 }
 
@@ -163,7 +161,6 @@ func (pc *virtualPacketConn) Close() error {
 		return nil
 	}
 	pc.readCh = nil
-	close(pc.closeCh)
 
 	if pc.onCloseFunc != nil {
 		return pc.onCloseFunc()
@@ -185,8 +182,8 @@ type multiStreamListener struct {
 	mu          sync.Mutex
 	addr        string
 	ln          StreamListener
-	acceptCh    chan acceptResponse
 	count       uint32
+	acceptCh    chan acceptResponse
 	onCloseFunc OnCloseFunc
 }
 
@@ -249,9 +246,9 @@ type multiPacketListener struct {
 	mu          sync.Mutex
 	addr        string
 	pc          net.PacketConn
-	readCh      chan readRequest
-	cancel      context.CancelFunc
 	count       uint32
+	readCh      chan readRequest
+	doneCh      chan struct{}
 	onCloseFunc OnCloseFunc
 }
 
@@ -274,8 +271,7 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 		}
 		m.pc = pc
 		m.readCh = make(chan readRequest)
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancel = cancel
+		m.doneCh = make(chan struct{})
 		go func() {
 			for {
 				select {
@@ -286,7 +282,7 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 						addr net.Addr
 						err  error
 					}{n, addr, err}
-				case <-ctx.Done():
+				case <-m.doneCh:
 					return
 				}
 			}
@@ -297,13 +293,12 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 	return &virtualPacketConn{
 		PacketConn: m.pc,
 		readCh:     m.readCh,
-		closeCh:    make(chan struct{}),
 		onCloseFunc: func() error {
 			m.mu.Lock()
 			defer m.mu.Unlock()
 			m.count--
 			if m.count == 0 {
-				m.cancel()
+				close(m.doneCh)
 				m.pc.Close()
 				if m.onCloseFunc != nil {
 					return m.onCloseFunc()
