@@ -216,7 +216,14 @@ func (m *multiStreamListener) Acquire() (StreamListener, error) {
 		m.acceptCh = make(chan acceptResponse)
 		go func() {
 			for {
-				conn, err := m.ln.AcceptStream()
+				m.mu.Lock()
+				ln := m.ln
+				m.mu.Unlock()
+
+				if ln == nil {
+					return
+				}
+				conn, err := ln.AcceptStream()
 				if errors.Is(err, net.ErrClosed) {
 					close(m.acceptCh)
 					return
