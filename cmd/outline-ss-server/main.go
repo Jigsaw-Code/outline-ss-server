@@ -18,25 +18,26 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
-	"github.com/op/go-logging"
+	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 )
 
-var logger *logging.Logger
+var logLevel = new(slog.LevelVar) // Info by default
+var logHandler slog.Handler
 
 // Set by goreleaser default ldflags. See https://goreleaser.com/customization/build/
 var version = "dev"
@@ -48,14 +49,10 @@ const tcpReadTimeout time.Duration = 59 * time.Second
 const defaultNatTimeout time.Duration = 5 * time.Minute
 
 func init() {
-	var prefix = "%{level:.1s}%{time:2006-01-02T15:04:05.000Z07:00} %{pid} %{shortfile}]"
-	if term.IsTerminal(int(os.Stderr.Fd())) {
-		// Add color only if the output is the terminal
-		prefix = strings.Join([]string{"%{color}", prefix, "%{color:reset}"}, "")
-	}
-	logging.SetFormatter(logging.MustStringFormatter(strings.Join([]string{prefix, " %{message}"}, "")))
-	logging.SetBackend(logging.NewLogBackend(os.Stderr, "", 0))
-	logger = logging.MustGetLogger("")
+	logHandler = tint.NewHandler(
+		os.Stderr,
+		&tint.Options{NoColor: !term.IsTerminal(int(os.Stderr.Fd())), Level: logLevel},
+	)
 }
 
 type ssPort struct {
@@ -77,13 +74,13 @@ func (s *SSServer) startPort(portNum int) error {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks TCP service failed to start on port %v: %w", portNum, err)
 	}
-	logger.Infof("Shadowsocks TCP service listening on %v", listener.Addr().String())
+	slog.Info("Shadowsocks TCP service started.", "address", listener.Addr().String())
 	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: portNum})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks UDP service failed to start on port %v: %w", portNum, err)
 	}
-	logger.Infof("Shadowsocks UDP service listening on %v", packetConn.LocalAddr().String())
+	slog.Info("Shadowsocks UDP service started.", "address", packetConn.LocalAddr().String())
 	port := &ssPort{tcpListener: listener, packetConn: packetConn, cipherList: service.NewCipherList()}
 	authFunc := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m)
 	// TODO: Register initial data metrics at zero.
@@ -107,12 +104,12 @@ func (s *SSServer) removePort(portNum int) error {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks TCP service on port %v failed to stop: %w", portNum, tcpErr)
 	}
-	logger.Infof("Shadowsocks TCP service on port %v stopped", portNum)
+	slog.Info("Shadowsocks TCP service stopped.", "port", portNum)
 	if udpErr != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks UDP service on port %v failed to stop: %w", portNum, udpErr)
 	}
-	logger.Infof("Shadowsocks UDP service on port %v stopped", portNum)
+	slog.Info("Shadowsocks UDP service stopped.", "port", portNum)
 	return nil
 }
 
@@ -155,7 +152,7 @@ func (s *SSServer) loadConfig(filename string) error {
 	for portNum, cipherList := range portCiphers {
 		s.ports[portNum].cipherList.Update(cipherList)
 	}
-	logger.Infof("Loaded %v access keys over %v ports", len(config.Keys), len(s.ports))
+	slog.Info("Loaded config.", "access keys", len(config.Keys), "ports", len(s.ports))
 	s.m.SetNumAccessKeys(len(config.Keys), len(portCiphers))
 	return nil
 }
@@ -186,9 +183,9 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 	signal.Notify(sigHup, syscall.SIGHUP)
 	go func() {
 		for range sigHup {
-			logger.Infof("SIGHUP received. Loading config from %v", filename)
+			slog.Info("SIGHUP received. Loading config.", "config", filename)
 			if err := server.loadConfig(filename); err != nil {
-				logger.Errorf("Failed to update server: %v. Server state may be invalid. Fix the error and try the update again", err)
+				slog.Error("Failed to update server. Server state may be invalid. Fix the error and try the update again", "err", err)
 			}
 		}
 	}()
@@ -218,6 +215,8 @@ func readConfig(filename string) (*Config, error) {
 }
 
 func main() {
+	slog.SetDefault(slog.New(logHandler))
+
 	var flags struct {
 		ConfigFile    string
 		MetricsAddr   string
@@ -240,9 +239,7 @@ func main() {
 	flag.Parse()
 
 	if flags.Verbose {
-		logging.SetLevel(logging.DEBUG, "")
-	} else {
-		logging.SetLevel(logging.INFO, "")
+		logLevel.Set(slog.LevelDebug)
 	}
 
 	if flags.Version {
@@ -258,21 +255,21 @@ func main() {
 	if flags.MetricsAddr != "" {
 		http.Handle("/metrics", promhttp.Handler())
 		go func() {
-			logger.Fatalf("Failed to run metrics server: %v. Aborting.", http.ListenAndServe(flags.MetricsAddr, nil))
+			slog.Error("Failed to run metrics server. Aborting.", "err", http.ListenAndServe(flags.MetricsAddr, nil))
 		}()
-		logger.Infof("Prometheus metrics available at http://%v/metrics", flags.MetricsAddr)
+		slog.Info(fmt.Sprintf("Prometheus metrics available at http://%v/metrics.", flags.MetricsAddr))
 	}
 
 	var err error
 	if flags.IPCountryDB != "" {
-		logger.Infof("Using IP-Country database at %v", flags.IPCountryDB)
+		slog.Info("Using IP-Country database.", "db", flags.IPCountryDB)
 	}
 	if flags.IPASNDB != "" {
-		logger.Infof("Using IP-ASN database at %v", flags.IPASNDB)
+		slog.Info("Using IP-ASN database.", "db", flags.IPASNDB)
 	}
 	ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, flags.IPASNDB)
 	if err != nil {
-		logger.Fatalf("Could create IP info map: %v. Aborting", err)
+		slog.Error("Failed to create IP info map. Aborting.", "err", err)
 	}
 	defer ip2info.Close()
 
@@ -280,7 +277,7 @@ func main() {
 	m.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
 	if err != nil {
-		logger.Fatalf("Server failed to start: %v. Aborting", err)
+		slog.Error("Server failed to start. Aborting.", "err", err)
 	}
 
 	sigCh := make(chan os.Signal, 1)

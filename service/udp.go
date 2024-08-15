@@ -15,8 +15,10 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"runtime/debug"
@@ -26,7 +28,6 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -47,19 +48,20 @@ type UDPMetrics interface {
 // Max UDP buffer size for the server code.
 const serverUDPBufferSize = 64 * 1024
 
-// Wrapper for logger.Debugf during UDP proxying.
-func debugUDP(tag string, template string, val interface{}) {
+// Wrapper for slog.Debug during UDP proxying.
+func debugUDP(template string, cipherID string, args ...any) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
-	// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
-	if logger.IsEnabledFor(logging.DEBUG) {
-		logger.Debugf("UDP(%s): "+template, tag, val)
+	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
+	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+		args = append(args, slog.String("ID", cipherID))
+		slog.Debug(fmt.Sprintf("UDP: %s", template), args...)
 	}
 }
 
-func debugUDPAddr(addr net.Addr, template string, val interface{}) {
-	if logger.IsEnabledFor(logging.DEBUG) {
-		// Avoid calling addr.String() unless debugging is enabled.
-		debugUDP(addr.String(), template, val)
+func debugUDPAddr(template string, addr net.Addr, args ...any) {
+	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+		args = append(args, slog.String("address", addr.String()))
+		slog.Debug(fmt.Sprintf("UDP: %s", template), args...)
 	}
 }
 
@@ -73,10 +75,10 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 		id, cryptoKey := entry.Value.(*CipherEntry).ID, entry.Value.(*CipherEntry).CryptoKey
 		buf, err := shadowsocks.Unpack(dst, src, cryptoKey)
 		if err != nil {
-			debugUDP(id, "Failed to unpack: %v", err)
+			debugUDP("Failed to unpack.", id, slog.Any("err", err))
 			continue
 		}
-		debugUDP(id, "Found cipher at index %d", ci)
+		debugUDP("Found cipher.", id, slog.Int("index", ci))
 		// Move the active cipher to the front, so that the search is quicker next time.
 		cipherList.MarkUsedByClientIP(entry, clientIP)
 		return buf, id, cryptoKey, nil
@@ -131,7 +133,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 		connError := func() (connError *onet.ConnectionError) {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("Panic in UDP loop: %v. Continuing to listen.", r)
+					slog.Error("Panic in UDP loop: %v. Continuing to listen.", r)
 					debug.PrintStack()
 				}
 			}()
@@ -140,10 +142,8 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			if err != nil {
 				return onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
 			}
-			if logger.IsEnabledFor(logging.DEBUG) {
-				defer logger.Debugf("UDP(%v): done", clientAddr)
-				logger.Debugf("UDP(%v): Outbound packet has %d bytes", clientAddr, clientProxyBytes)
-			}
+			defer slog.Debug("UDP: Done.", "address", clientAddr)
+			slog.Debug("UDP: Outbound packet.", "address", clientAddr, "bytes", clientProxyBytes)
 
 			cipherData := cipherBuf[:clientProxyBytes]
 			var payload []byte
@@ -153,9 +153,9 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				var locErr error
 				clientInfo, locErr = ipinfo.GetIPInfoFromAddr(h.m, clientAddr)
 				if locErr != nil {
-					logger.Warningf("Failed client info lookup: %v", locErr)
+					slog.Warn("Failed client info lookup.", "err", locErr)
 				}
-				debugUDPAddr(clientAddr, "Got info \"%#v\"", clientInfo)
+				debugUDPAddr("Got info for IP.", clientAddr, slog.Any("info", clientInfo))
 
 				ip := clientAddr.(*net.UDPAddr).AddrPort().Addr()
 				var textData []byte
@@ -200,7 +200,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				}
 			}
 
-			debugUDPAddr(clientAddr, "Proxy exit %v", targetConn.LocalAddr())
+			debugUDPAddr("Proxy exit.", clientAddr, slog.Any("target", targetConn.LocalAddr()))
 			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
@@ -210,7 +210,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 		status := "OK"
 		if connError != nil {
-			logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
+			slog.Debug("UDP: Error.", "msg", connError.Message, "cause", connError.Cause)
 			status = connError.Status
 		}
 		h.m.AddUDPPacketFromClient(clientInfo, keyID, status, clientProxyBytes, proxyTargetBytes)
@@ -424,7 +424,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 				return onet.NewConnectionError("ERR_READ", "Failed to read from target", err)
 			}
 
-			debugUDPAddr(clientAddr, "Got response from %v", raddr)
+			debugUDPAddr("Got response.", clientAddr, slog.Any("target", raddr))
 			srcAddr := socks.ParseAddr(raddr.String())
 			addrStart := bodyStart - len(srcAddr)
 			// `plainTextBuf` concatenates the SOCKS address and body:
@@ -453,7 +453,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		}()
 		status := "OK"
 		if connError != nil {
-			logger.Debugf("UDP Error: %v: %v", connError.Message, connError.Cause)
+			slog.Debug("UDP: Error.", "msg", connError.Message, "cause", connError.Cause)
 			status = connError.Status
 		}
 		if expired {
