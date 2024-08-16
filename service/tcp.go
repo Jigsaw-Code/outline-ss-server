@@ -374,7 +374,7 @@ func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, addr, status string, 
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
-	slog.Debug("Drain error: %v, drain result: %v", drainErr, drainResult)
+	slog.Debug("Drain error.", "err", drainErr, "result", drainResult)
 	h.m.AddTCPProbe(status, drainResult, addr, proxyMetrics.ClientProxy)
 }
 
