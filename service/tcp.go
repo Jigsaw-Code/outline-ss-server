@@ -297,7 +297,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 		return ensureConnectionError(dialErr, "ERR_CONNECT", "Failed to connect to target")
 	}
 	defer tgtConn.Close()
-	slog.Debug("proxy %s <-> %s", clientConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
+	slog.Debug("Proxy connection.", "client", clientConn.RemoteAddr().String(), "target", tgtConn.RemoteAddr().String())
 
 	fromClientErrCh := make(chan error)
 	go func() {
