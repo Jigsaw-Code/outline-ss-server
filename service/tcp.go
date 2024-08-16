@@ -30,20 +30,16 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
-// TCPMetrics is used to report metrics on TCP connections.
-type TCPMetrics interface {
-	ipinfo.IPInfoMap
-
-	// TCP metrics
-	AddOpenTCPConnection(clientInfo ipinfo.IPInfo)
+// TCPMetricsCollector is used to report metrics on TCP connections.
+type TCPMetricsCollector interface {
+	AddOpenTCPConnection(clientAddr net.Addr)
 	AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string)
-	AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
+	AddClosedTCPConnection(clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration)
 	AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64)
 }
 
@@ -164,14 +160,14 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 
 type tcpHandler struct {
 	listenerId   string
-	m            TCPMetrics
+	m            TCPMetricsCollector
 	readTimeout  time.Duration
 	authenticate StreamAuthenticateFunc
 	dialer       transport.StreamDialer
 }
 
 // NewTCPService creates a TCPService
-func NewTCPHandler(authenticate StreamAuthenticateFunc, m TCPMetrics, timeout time.Duration) TCPHandler {
+func NewTCPHandler(authenticate StreamAuthenticateFunc, m TCPMetricsCollector, timeout time.Duration) TCPHandler {
 	return &tcpHandler{
 		m:            m,
 		readTimeout:  timeout,
@@ -255,12 +251,7 @@ func StreamServe(accept StreamListener, handle StreamHandler) {
 }
 
 func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
-	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
-	if err != nil {
-		slog.Warn("Failed client info lookup", "err", err)
-	}
-	slog.Debug("Got info for IP.", "info", clientInfo, "IP", clientConn.RemoteAddr().String())
-	h.m.AddOpenTCPConnection(clientInfo)
+	h.m.AddOpenTCPConnection(clientConn.RemoteAddr())
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
@@ -273,7 +264,7 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 		status = connError.Status
 		slog.Debug("TCP: Error", "msg", connError.Message, "cause", connError.Cause)
 	}
-	h.m.AddClosedTCPConnection(clientInfo, clientConn.RemoteAddr(), id, status, proxyMetrics, connDuration)
+	h.m.AddClosedTCPConnection(clientConn.RemoteAddr(), id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	slog.Debug("TCP: Done.", "status", status, "duration", connDuration)
 }
@@ -390,20 +381,18 @@ func drainErrToString(drainErr error) string {
 	}
 }
 
-// NoOpTCPMetrics is a [TCPMetrics] that doesn't do anything. Useful in tests
+// NoOpTCPMetricsCollector is a [TCPMetricsCollector] that doesn't do anything. Useful in tests
 // or if you don't want to track metrics.
-type NoOpTCPMetrics struct{}
+type NoOpTCPMetricsCollector struct{}
 
-var _ TCPMetrics = (*NoOpTCPMetrics)(nil)
+var _ TCPMetricsCollector = (*NoOpTCPMetricsCollector)(nil)
 
-func (m *NoOpTCPMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *NoOpTCPMetricsCollector) AddClosedTCPConnection(clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
-func (m *NoOpTCPMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
-	return ipinfo.IPInfo{}, nil
+func (m *NoOpTCPMetricsCollector) AddOpenTCPConnection(clientAddr net.Addr) {}
+func (m *NoOpTCPMetricsCollector) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
-func (m *NoOpTCPMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {}
-func (m *NoOpTCPMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
+func (m *NoOpTCPMetricsCollector) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
 }
-func (m *NoOpTCPMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
+func (m *NoOpTCPMetricsCollector) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }
-func (m *NoOpTCPMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}

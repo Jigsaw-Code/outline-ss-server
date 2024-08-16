@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
@@ -93,41 +92,38 @@ func (conn *fakePacketConn) Close() error {
 }
 
 type udpReport struct {
-	clientInfo                         ipinfo.IPInfo
 	accessKey, status                  string
 	clientProxyBytes, proxyTargetBytes int
 }
 
 // Stub metrics implementation for testing NAT behaviors.
-type natTestMetrics struct {
+type natTestMetricsCollector struct {
 	natEntriesAdded int
 	upstreamPackets []udpReport
 }
 
-var _ UDPMetrics = (*natTestMetrics)(nil)
+var _ UDPMetricsCollector = (*natTestMetricsCollector)(nil)
 
-func (m *natTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
-	return ipinfo.IPInfo{}, nil
+func (m *natTestMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+	m.upstreamPackets = append(m.upstreamPackets, udpReport{accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
+func (m *natTestMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
-func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
-}
-func (m *natTestMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *natTestMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.natEntriesAdded++
 }
-func (m *natTestMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *natTestMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
-func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
+func (m *natTestMetricsCollector) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+}
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
-func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
+func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetricsCollector {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
-	metrics := &natTestMetrics{}
+	metrics := &natTestMetricsCollector{}
 	handler := NewPacketHandler(timeout, ciphers, metrics)
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
@@ -205,17 +201,17 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetricsCollector{}, &sync.WaitGroup{})
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetricsCollector{}, &sync.WaitGroup{})
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, ipinfo.IPInfo{CountryCode: "ZZ"}, "key id")
+	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }
@@ -478,7 +474,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMetrics := &natTestMetrics{}
+	testMetrics := &natTestMetricsCollector{}
 	const testTimeout = 200 * time.Millisecond
 	s := NewPacketHandler(testTimeout, cipherList, testMetrics)
 

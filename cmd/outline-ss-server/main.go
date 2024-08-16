@@ -63,7 +63,7 @@ type ssPort struct {
 
 type SSServer struct {
 	natTimeout  time.Duration
-	m           *outlineMetrics
+	m           *outlineMetricsCollector
 	replayCache service.ReplayCache
 	ports       map[int]*ssPort
 }
@@ -168,7 +168,7 @@ func (s *SSServer) Stop() error {
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
-func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
+func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetricsCollector, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
 		natTimeout:  natTimeout,
 		m:           sm,

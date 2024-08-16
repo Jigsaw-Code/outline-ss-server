@@ -27,7 +27,6 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
@@ -131,7 +130,7 @@ func TestTCPEcho(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
-	testMetrics := &service.NoOpTCPMetrics{}
+	testMetrics := &service.NoOpTCPMetricsCollector{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -182,12 +181,12 @@ func TestTCPEcho(t *testing.T) {
 }
 
 type statusMetrics struct {
-	service.NoOpTCPMetrics
+	service.NoOpTCPMetricsCollector
 	sync.Mutex
 	statuses []string
 }
 
-func (m *statusMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, ip net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *statusMetrics) AddClosedTCPConnection(addr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.Lock()
 	m.statuses = append(m.statuses, status)
 	m.Unlock()
@@ -246,35 +245,33 @@ func TestRestrictedAddresses(t *testing.T) {
 
 // Metrics about one UDP packet.
 type udpRecord struct {
-	clientInfo        ipinfo.IPInfo
+	clientAddr        net.Addr
 	accessKey, status string
 	in, out           int
 }
 
 // Fake metrics implementation for UDP
-type fakeUDPMetrics struct {
+type fakeUDPMetricsCollector struct {
 	up, down []udpRecord
 	natAdded int
 }
 
-var _ service.UDPMetrics = (*fakeUDPMetrics)(nil)
+var _ service.UDPMetricsCollector = (*fakeUDPMetricsCollector)(nil)
 
-func (m *fakeUDPMetrics) GetIPInfo(ip net.IP) (ipinfo.IPInfo, error) {
-	return ipinfo.IPInfo{CountryCode: "QQ"}, nil
+func (m *fakeUDPMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+	m.up = append(m.up, udpRecord{clientAddr, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.up = append(m.up, udpRecord{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
+func (m *fakeUDPMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+	m.down = append(m.down, udpRecord{clientAddr, accessKey, status, targetProxyBytes, proxyClientBytes})
 }
-func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
-	m.down = append(m.down, udpRecord{clientInfo, accessKey, status, targetProxyBytes, proxyClientBytes})
-}
-func (m *fakeUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *fakeUDPMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.natAdded++
 }
-func (m *fakeUDPMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *fakeUDPMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	// Not tested because it requires waiting for a long timeout.
 }
-func (m *fakeUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
+func (m *fakeUDPMetricsCollector) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+}
 
 func TestUDPEcho(t *testing.T) {
 	echoConn, echoRunning := startUDPEchoServer(t)
@@ -288,7 +285,7 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMetrics := &fakeUDPMetrics{}
+	testMetrics := &fakeUDPMetricsCollector{}
 	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics)
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
@@ -346,26 +343,21 @@ func TestUDPEcho(t *testing.T) {
 		t.Errorf("Wrong number of packets sent: %v", testMetrics.up)
 	} else {
 		record := testMetrics.up[0]
-		require.Equal(t, "XL", record.clientInfo.CountryCode.String())
-		if record.clientInfo.CountryCode != "XL" ||
-			record.accessKey != keyID ||
-			record.status != "OK" ||
-			record.in <= record.out ||
-			record.out != N {
-			t.Errorf("Bad upstream metrics: %v", record)
-		}
+		require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad upstream metrics")
+		require.Equal(t, keyID, record.accessKey, "Bad upstream metrics")
+		require.Equal(t, "OK", record.status, "Bad upstream metrics")
+		require.Greater(t, record.in, record.out, "Bad upstream metrics")
+		require.Equal(t, N, record.out, "Bad upstream metrics")
 	}
 	if len(testMetrics.down) != 1 {
 		t.Errorf("Wrong number of packets received: %v", testMetrics.down)
 	} else {
 		record := testMetrics.down[0]
-		if record.clientInfo.CountryCode != "XL" ||
-			record.accessKey != keyID ||
-			record.status != "OK" ||
-			record.in != N ||
-			record.out <= record.in {
-			t.Errorf("Bad upstream metrics: %v", record)
-		}
+		require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad downstream metrics")
+		require.Equal(t, keyID, record.accessKey, "Bad downstream metrics")
+		require.Equal(t, "OK", record.status, "Bad downstream metrics")
+		require.Greater(t, record.out, record.in, "Bad downstream metrics")
+		require.Equal(t, N, record.in, "Bad downstream metrics")
 	}
 }
 
@@ -382,7 +374,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 		b.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	testMetrics := &service.NoOpTCPMetrics{}
+	testMetrics := &service.NoOpTCPMetricsCollector{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -446,7 +438,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
-	testMetrics := &service.NoOpTCPMetrics{}
+	testMetrics := &service.NoOpTCPMetricsCollector{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -521,7 +513,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetricsCollector{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -565,7 +557,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetricsCollector{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {

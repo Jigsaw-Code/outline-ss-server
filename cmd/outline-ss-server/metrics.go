@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -33,8 +34,11 @@ const namespace = "shadowsocks"
 // `now` is stubbable for testing.
 var now = time.Now
 
-type outlineMetrics struct {
-	ipinfo.IPInfoMap
+type outlineMetricsCollector struct {
+	ip2info ipinfo.IPInfoMap
+	mu      sync.Mutex // Protects the clientInfo map.
+	ipInfos map[net.Addr]ipinfo.IPInfo
+
 	*tunnelTimeCollector
 
 	buildInfo            *prometheus.GaugeVec
@@ -55,8 +59,8 @@ type outlineMetrics struct {
 	udpRemovedNatEntries            prometheus.Counter
 }
 
-var _ service.TCPMetrics = (*outlineMetrics)(nil)
-var _ service.UDPMetrics = (*outlineMetrics)(nil)
+var _ service.TCPMetricsCollector = (*outlineMetricsCollector)(nil)
+var _ service.UDPMetricsCollector = (*outlineMetricsCollector)(nil)
 
 // Converts a [net.Addr] to an [IPKey].
 func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
@@ -93,6 +97,8 @@ type tunnelTimeCollector struct {
 	tunnelTimePerKey      *prometheus.CounterVec
 	tunnelTimePerLocation *prometheus.CounterVec
 }
+
+var _ prometheus.Collector = (*tunnelTimeCollector)(nil)
 
 func (c *tunnelTimeCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.tunnelTimePerKey.Describe(ch)
@@ -171,9 +177,11 @@ func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap, registerer prometheus.Regi
 // `ip2info` to convert IP addresses to countries, and reports all
 // metrics to Prometheus via `registerer`. `ip2info` may be nil, but
 // `registerer` must not be.
-func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) *outlineMetrics {
-	m := &outlineMetrics{
-		IPInfoMap: ip2info,
+func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) *outlineMetricsCollector {
+	m := &outlineMetricsCollector{
+		ip2info: ip2info,
+		ipInfos: make(map[net.Addr]ipinfo.IPInfo),
+
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "build_info",
@@ -272,20 +280,40 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus
 	return m
 }
 
-func (m *outlineMetrics) SetBuildInfo(version string) {
+func (m *outlineMetricsCollector) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ipInfo, exists := m.ipInfos[addr]
+	if !exists {
+		ipInfo, err := ipinfo.GetIPInfoFromAddr(m.ip2info, addr)
+		if err != nil {
+			slog.Warn("Failed client info lookup.", "err", err)
+			return ipInfo
+		}
+		m.ipInfos[addr] = ipInfo
+	}
+	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+		slog.Debug("Got IP info for address.", "address", addr, "info", ipInfo)
+	}
+	return ipInfo
+}
+
+func (m *outlineMetricsCollector) SetBuildInfo(version string) {
 	m.buildInfo.WithLabelValues(version).Set(1)
 }
 
-func (m *outlineMetrics) SetNumAccessKeys(numKeys int, ports int) {
+func (m *outlineMetricsCollector) SetNumAccessKeys(numKeys int, ports int) {
 	m.accessKeys.Set(float64(numKeys))
 	m.ports.Set(float64(ports))
 }
 
-func (m *outlineMetrics) AddOpenTCPConnection(clientInfo ipinfo.IPInfo) {
+func (m *outlineMetricsCollector) AddOpenTCPConnection(clientAddr net.Addr) {
+	clientInfo := m.getIPInfoFromAddr(clientAddr)
 	m.tcpOpenConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
 }
 
-func (m *outlineMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
+func (m *outlineMetricsCollector) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 	ipKey, err := toIPKey(clientAddr, accessKey)
 	if err == nil {
 		m.tunnelTimeCollector.startConnection(*ipKey)
@@ -306,7 +334,8 @@ func asnLabel(asn int) string {
 	return fmt.Sprint(asn)
 }
 
-func (m *outlineMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, clientAddr net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *outlineMetricsCollector) AddClosedTCPConnection(clientAddr net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+	clientInfo := m.getIPInfoFromAddr(clientAddr)
 	m.tcpClosedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
 	m.tcpConnectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 	addIfNonZero(data.ClientProxy, m.dataBytes, "c>p", "tcp", accessKey)
@@ -324,7 +353,8 @@ func (m *outlineMetrics) AddClosedTCPConnection(clientInfo ipinfo.IPInfo, client
 	}
 }
 
-func (m *outlineMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *outlineMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+	clientInfo := m.getIPInfoFromAddr(clientAddr)
 	m.udpPacketsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status).Inc()
 	addIfNonZero(int64(clientProxyBytes), m.dataBytes, "c>p", "udp", accessKey)
 	addIfNonZero(int64(clientProxyBytes), m.dataBytesPerLocation, "c>p", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
@@ -332,14 +362,15 @@ func (m *outlineMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, access
 	addIfNonZero(int64(proxyTargetBytes), m.dataBytesPerLocation, "p>t", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 }
 
-func (m *outlineMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *outlineMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+	clientInfo := m.getIPInfoFromAddr(clientAddr)
 	addIfNonZero(int64(targetProxyBytes), m.dataBytes, "p<t", "udp", accessKey)
 	addIfNonZero(int64(targetProxyBytes), m.dataBytesPerLocation, "p<t", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 	addIfNonZero(int64(proxyClientBytes), m.dataBytes, "c<p", "udp", accessKey)
 	addIfNonZero(int64(proxyClientBytes), m.dataBytesPerLocation, "c<p", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 }
 
-func (m *outlineMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *outlineMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpAddedNatEntries.Inc()
 
 	ipKey, err := toIPKey(clientAddr, accessKey)
@@ -348,7 +379,7 @@ func (m *outlineMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	}
 }
 
-func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *outlineMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.udpRemovedNatEntries.Inc()
 
 	ipKey, err := toIPKey(clientAddr, accessKey)
@@ -357,11 +388,11 @@ func (m *outlineMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string
 	}
 }
 
-func (m *outlineMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
+func (m *outlineMetricsCollector) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
 	m.tcpProbes.WithLabelValues(listenerId, status, drainResult).Observe(float64(clientProxyBytes))
 }
 
-func (m *outlineMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (m *outlineMetricsCollector) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 	foundStr := "false"
 	if accessKeyFound {
 		foundStr = "true"
@@ -369,7 +400,7 @@ func (m *outlineMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher ti
 	m.timeToCipherMs.WithLabelValues("tcp", foundStr).Observe(timeToCipher.Seconds() * 1000)
 }
 
-func (m *outlineMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (m *outlineMetricsCollector) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 	foundStr := "false"
 	if accessKeyFound {
 		foundStr = "true"
