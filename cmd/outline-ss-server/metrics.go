@@ -29,38 +29,136 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const namespace = "shadowsocks"
-
 // `now` is stubbable for testing.
 var now = time.Now
 
-type outlineMetricsCollector struct {
-	ip2info ipinfo.IPInfoMap
-	mu      sync.Mutex // Protects the clientInfo map.
-	ipInfos map[net.Addr]ipinfo.IPInfo
-
-	*tunnelTimeCollector
-
-	buildInfo            *prometheus.GaugeVec
-	accessKeys           prometheus.Gauge
-	ports                prometheus.Gauge
-	dataBytes            *prometheus.CounterVec
-	dataBytesPerLocation *prometheus.CounterVec
-	timeToCipherMs       *prometheus.HistogramVec
-	// TODO: Add time to first byte.
-
-	tcpProbes               *prometheus.HistogramVec
-	tcpOpenConnections      *prometheus.CounterVec
-	tcpClosedConnections    *prometheus.CounterVec
-	tcpConnectionDurationMs *prometheus.HistogramVec
-
-	udpPacketsFromClientPerLocation *prometheus.CounterVec
-	udpAddedNatEntries              prometheus.Counter
-	udpRemovedNatEntries            prometheus.Counter
+type tcpCollector struct {
+	probes               *prometheus.HistogramVec
+	openConnections      *prometheus.CounterVec
+	closedConnections    *prometheus.CounterVec
+	connectionDurationMs *prometheus.HistogramVec
 }
 
-var _ service.TCPMetricsCollector = (*outlineMetricsCollector)(nil)
-var _ service.UDPMetricsCollector = (*outlineMetricsCollector)(nil)
+var _ prometheus.Collector = (*tcpCollector)(nil)
+
+func newTcpCollector() *tcpCollector {
+	namespace := "tcp"
+	return &tcpCollector{
+		probes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "probes",
+			Buckets:   []float64{0, 49, 50, 51, 73, 91},
+			Help:      "Histogram of number of bytes from client to proxy, for detecting possible probes",
+		}, []string{"port", "status", "error"}),
+		openConnections: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "connections_opened",
+			Help:      "Count of open TCP connections",
+		}, []string{"location", "asn"}),
+		closedConnections: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "connections_closed",
+			Help:      "Count of closed TCP connections",
+		}, []string{"location", "asn", "status", "access_key"}),
+		connectionDurationMs: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: namespace,
+				Name:      "connection_duration_ms",
+				Help:      "TCP connection duration distributions.",
+				Buckets: []float64{
+					100,
+					float64(time.Second.Milliseconds()),
+					float64(time.Minute.Milliseconds()),
+					float64(time.Hour.Milliseconds()),
+					float64(24 * time.Hour.Milliseconds()),     // Day
+					float64(7 * 24 * time.Hour.Milliseconds()), // Week
+				},
+			}, []string{"status"}),
+	}
+}
+
+func (c *tcpCollector) Describe(ch chan<- *prometheus.Desc) {
+	c.probes.Describe(ch)
+	c.openConnections.Describe(ch)
+	c.closedConnections.Describe(ch)
+	c.connectionDurationMs.Describe(ch)
+}
+
+func (c *tcpCollector) Collect(ch chan<- prometheus.Metric) {
+	c.probes.Collect(ch)
+	c.openConnections.Collect(ch)
+	c.closedConnections.Collect(ch)
+	c.connectionDurationMs.Collect(ch)
+}
+
+func (c *tcpCollector) openConnection(clientInfo ipinfo.IPInfo) {
+	c.openConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
+}
+
+func (c *tcpCollector) closeConnection(clientInfo ipinfo.IPInfo, status, accessKey string, duration time.Duration) {
+	c.closedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
+	c.connectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
+}
+
+func (c *tcpCollector) addProbe(listenerId, status, drainResult string, clientProxyBytes int64) {
+	c.probes.WithLabelValues(listenerId, status, drainResult).Observe(float64(clientProxyBytes))
+}
+
+type udpCollector struct {
+	packetsFromClientPerLocation *prometheus.CounterVec
+	addedNatEntries              prometheus.Counter
+	removedNatEntries            prometheus.Counter
+}
+
+var _ prometheus.Collector = (*udpCollector)(nil)
+
+func newUdpCollector() *udpCollector {
+	namespace := "udp"
+	return &udpCollector{
+		packetsFromClientPerLocation: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "packets_from_client_per_location",
+				Help:      "Packets received from the client, per location and status",
+			}, []string{"location", "asn", "status"}),
+		addedNatEntries: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "nat_entries_added",
+				Help:      "Entries added to the UDP NAT table",
+			}),
+		removedNatEntries: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "nat_entries_removed",
+				Help:      "Entries removed from the UDP NAT table",
+			}),
+	}
+}
+
+func (c *udpCollector) Describe(ch chan<- *prometheus.Desc) {
+	c.packetsFromClientPerLocation.Describe(ch)
+	c.addedNatEntries.Describe(ch)
+	c.removedNatEntries.Describe(ch)
+}
+
+func (c *udpCollector) Collect(ch chan<- prometheus.Metric) {
+	c.packetsFromClientPerLocation.Collect(ch)
+	c.addedNatEntries.Collect(ch)
+	c.removedNatEntries.Collect(ch)
+}
+
+func (c *udpCollector) addPacketFromClient(clientInfo ipinfo.IPInfo, status string) {
+	c.packetsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status).Inc()
+}
+
+func (c *udpCollector) addNatEntry() {
+	c.addedNatEntries.Inc()
+}
+
+func (c *udpCollector) removeNatEntry() {
+	c.removedNatEntries.Inc()
+}
 
 // Converts a [net.Addr] to an [IPKey].
 func toIPKey(addr net.Addr, accessKey string) (*IPKey, error) {
@@ -99,6 +197,25 @@ type tunnelTimeCollector struct {
 }
 
 var _ prometheus.Collector = (*tunnelTimeCollector)(nil)
+
+func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap) *tunnelTimeCollector {
+	namespace := "tunnel_time"
+	return &tunnelTimeCollector{
+		ip2info:       ip2info,
+		activeClients: make(map[IPKey]*activeClient),
+
+		tunnelTimePerKey: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "seconds",
+			Help:      "Tunnel time, per access key.",
+		}, []string{"access_key"}),
+		tunnelTimePerLocation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "seconds_per_location",
+			Help:      "Tunnel time, per location.",
+		}, []string{"location", "asn"}),
+	}
+}
 
 func (c *tunnelTimeCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.tunnelTimePerKey.Describe(ch)
@@ -155,129 +272,99 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 	}
 }
 
-func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) *tunnelTimeCollector {
-	return &tunnelTimeCollector{
-		ip2info:       ip2info,
-		activeClients: make(map[IPKey]*activeClient),
+type outlineMetricsCollector struct {
+	ip2info ipinfo.IPInfoMap
+	mu      sync.Mutex // Protects the ipInfos map.
+	ipInfos map[net.Addr]ipinfo.IPInfo
 
-		tunnelTimePerKey: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace,
-			Name:      "tunnel_time_seconds",
-			Help:      "Tunnel time, per access key.",
-		}, []string{"access_key"}),
-		tunnelTimePerLocation: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace,
-			Name:      "tunnel_time_seconds_per_location",
-			Help:      "Tunnel time, per location.",
-		}, []string{"location", "asn"}),
-	}
+	*tcpCollector
+	*udpCollector
+	*tunnelTimeCollector
+
+	buildInfo            *prometheus.GaugeVec
+	accessKeys           prometheus.Gauge
+	ports                prometheus.Gauge
+	dataBytes            *prometheus.CounterVec
+	dataBytesPerLocation *prometheus.CounterVec
+	timeToCipherMs       *prometheus.HistogramVec
+	// TODO: Add time to first byte.
 }
 
-// newPrometheusOutlineMetrics constructs a metrics object that uses
-// `ip2info` to convert IP addresses to countries, and reports all
-// metrics to Prometheus via `registerer`. `ip2info` may be nil, but
-// `registerer` must not be.
-func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap, registerer prometheus.Registerer) *outlineMetricsCollector {
-	m := &outlineMetricsCollector{
+var _ prometheus.Collector = (*outlineMetricsCollector)(nil)
+var _ service.TCPMetricsCollector = (*outlineMetricsCollector)(nil)
+var _ service.UDPMetricsCollector = (*outlineMetricsCollector)(nil)
+
+// newPrometheusOutlineMetrics constructs a Prometheus metrics collector that uses
+// `ip2info` to convert IP addresses to countries. `ip2info` may be nil.
+func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) *outlineMetricsCollector {
+	tcpCollector := newTcpCollector()
+	udpCollector := newUdpCollector()
+	tunnelTimeCollector := newTunnelTimeCollector(ip2info)
+
+	return &outlineMetricsCollector{
 		ip2info: ip2info,
 		ipInfos: make(map[net.Addr]ipinfo.IPInfo),
 
+		tcpCollector:        tcpCollector,
+		udpCollector:        udpCollector,
+		tunnelTimeCollector: tunnelTimeCollector,
+
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: namespace,
-			Name:      "build_info",
-			Help:      "Information on the outline-ss-server build",
+			Name: "build_info",
+			Help: "Information on the outline-ss-server build",
 		}, []string{"version"}),
 		accessKeys: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: namespace,
-			Name:      "keys",
-			Help:      "Count of access keys",
+			Name: "keys",
+			Help: "Count of access keys",
 		}),
 		ports: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: namespace,
-			Name:      "ports",
-			Help:      "Count of open Shadowsocks ports",
+			Name: "ports",
+			Help: "Count of open Shadowsocks ports",
 		}),
-		tcpProbes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: namespace,
-			Name:      "tcp_probes",
-			Buckets:   []float64{0, 49, 50, 51, 73, 91},
-			Help:      "Histogram of number of bytes from client to proxy, for detecting possible probes",
-		}, []string{"port", "status", "error"}),
-		tcpOpenConnections: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: "tcp",
-			Name:      "connections_opened",
-			Help:      "Count of open TCP connections",
-		}, []string{"location", "asn"}),
-		tcpClosedConnections: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: "tcp",
-			Name:      "connections_closed",
-			Help:      "Count of closed TCP connections",
-		}, []string{"location", "asn", "status", "access_key"}),
-		tcpConnectionDurationMs: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: "tcp",
-				Name:      "connection_duration_ms",
-				Help:      "TCP connection duration distributions.",
-				Buckets: []float64{
-					100,
-					float64(time.Second.Milliseconds()),
-					float64(time.Minute.Milliseconds()),
-					float64(time.Hour.Milliseconds()),
-					float64(24 * time.Hour.Milliseconds()),     // Day
-					float64(7 * 24 * time.Hour.Milliseconds()), // Week
-				},
-			}, []string{"status"}),
 		dataBytes: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: namespace,
-				Name:      "data_bytes",
-				Help:      "Bytes transferred by the proxy, per access key",
+				Name: "data_bytes",
+				Help: "Bytes transferred by the proxy, per access key",
 			}, []string{"dir", "proto", "access_key"}),
 		dataBytesPerLocation: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: namespace,
-				Name:      "data_bytes_per_location",
-				Help:      "Bytes transferred by the proxy, per location",
+				Name: "data_bytes_per_location",
+				Help: "Bytes transferred by the proxy, per location",
 			}, []string{"dir", "proto", "location", "asn"}),
 		timeToCipherMs: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Name:      "time_to_cipher_ms",
-				Help:      "Time needed to find the cipher",
-				Buckets:   []float64{0.1, 1, 10, 100, 1000},
+				Name:    "time_to_cipher_ms",
+				Help:    "Time needed to find the cipher",
+				Buckets: []float64{0.1, 1, 10, 100, 1000},
 			}, []string{"proto", "found_key"}),
-		udpPacketsFromClientPerLocation: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: "udp",
-				Name:      "packets_from_client_per_location",
-				Help:      "Packets received from the client, per location and status",
-			}, []string{"location", "asn", "status"}),
-		udpAddedNatEntries: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: "udp",
-				Name:      "nat_entries_added",
-				Help:      "Entries added to the UDP NAT table",
-			}),
-		udpRemovedNatEntries: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: "udp",
-				Name:      "nat_entries_removed",
-				Help:      "Entries removed from the UDP NAT table",
-			}),
 	}
-	m.tunnelTimeCollector = newTunnelTimeCollector(ip2info, registerer)
+}
 
-	// TODO: Is it possible to pass where to register the collectors?
-	registerer.MustRegister(m.buildInfo, m.accessKeys, m.ports, m.tcpProbes, m.tcpOpenConnections, m.tcpClosedConnections, m.tcpConnectionDurationMs,
-		m.dataBytes, m.dataBytesPerLocation, m.timeToCipherMs, m.udpPacketsFromClientPerLocation, m.udpAddedNatEntries, m.udpRemovedNatEntries,
-		m.tunnelTimeCollector)
-	return m
+func (m *outlineMetricsCollector) collectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		m.tcpCollector,
+		m.udpCollector,
+		m.tunnelTimeCollector,
+
+		m.buildInfo,
+		m.accessKeys,
+		m.ports,
+		m.dataBytes,
+		m.dataBytesPerLocation,
+		m.timeToCipherMs,
+	}
+}
+
+func (m *outlineMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	for _, collector := range m.collectors() {
+		collector.Describe(ch)
+	}
+}
+
+func (m *outlineMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	for _, collector := range m.collectors() {
+		collector.Collect(ch)
+	}
 }
 
 func (m *outlineMetricsCollector) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo {
@@ -310,7 +397,7 @@ func (m *outlineMetricsCollector) SetNumAccessKeys(numKeys int, ports int) {
 
 func (m *outlineMetricsCollector) AddOpenTCPConnection(clientAddr net.Addr) {
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
-	m.tcpOpenConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
+	m.tcpCollector.openConnection(clientInfo)
 }
 
 func (m *outlineMetricsCollector) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
@@ -336,8 +423,7 @@ func asnLabel(asn int) string {
 
 func (m *outlineMetricsCollector) AddClosedTCPConnection(clientAddr net.Addr, accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
-	m.tcpClosedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
-	m.tcpConnectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
+	m.tcpCollector.closeConnection(clientInfo, status, accessKey, duration)
 	addIfNonZero(data.ClientProxy, m.dataBytes, "c>p", "tcp", accessKey)
 	addIfNonZero(data.ClientProxy, m.dataBytesPerLocation, "c>p", "tcp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 	addIfNonZero(data.ProxyTarget, m.dataBytes, "p>t", "tcp", accessKey)
@@ -355,7 +441,7 @@ func (m *outlineMetricsCollector) AddClosedTCPConnection(clientAddr net.Addr, ac
 
 func (m *outlineMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
-	m.udpPacketsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status).Inc()
+	m.udpCollector.addPacketFromClient(clientInfo, status)
 	addIfNonZero(int64(clientProxyBytes), m.dataBytes, "c>p", "udp", accessKey)
 	addIfNonZero(int64(clientProxyBytes), m.dataBytesPerLocation, "c>p", "udp", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 	addIfNonZero(int64(proxyTargetBytes), m.dataBytes, "p>t", "udp", accessKey)
@@ -371,7 +457,7 @@ func (m *outlineMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, ac
 }
 
 func (m *outlineMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
-	m.udpAddedNatEntries.Inc()
+	m.udpCollector.addNatEntry()
 
 	ipKey, err := toIPKey(clientAddr, accessKey)
 	if err == nil {
@@ -380,7 +466,7 @@ func (m *outlineMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey 
 }
 
 func (m *outlineMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
-	m.udpRemovedNatEntries.Inc()
+	m.udpCollector.removeNatEntry()
 
 	ipKey, err := toIPKey(clientAddr, accessKey)
 	if err == nil {
@@ -388,8 +474,8 @@ func (m *outlineMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessK
 	}
 }
 
-func (m *outlineMetricsCollector) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
-	m.tcpProbes.WithLabelValues(listenerId, status, drainResult).Observe(float64(clientProxyBytes))
+func (m *outlineMetricsCollector) AddTCPProbe(status, drainResult, listenerId string, clientProxyBytes int64) {
+	m.tcpCollector.addProbe(listenerId, status, drainResult, clientProxyBytes)
 }
 
 func (m *outlineMetricsCollector) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {

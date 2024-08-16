@@ -87,14 +87,14 @@ func TestTunnelTimePerKey(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_tunnel_time_seconds Tunnel time, per access key.
-	# TYPE shadowsocks_tunnel_time_seconds counter
-	shadowsocks_tunnel_time_seconds{access_key="key-1"} 15
+	# HELP tunnel_time_seconds Tunnel time, per access key.
+	# TYPE tunnel_time_seconds counter
+	tunnel_time_seconds{access_key="key-1"} 15
 `)
 	err := promtest.GatherAndCompare(
 		reg,
 		expected,
-		"shadowsocks_tunnel_time_seconds",
+		"tunnel_time_seconds",
 	)
 	require.NoError(t, err, "unexpected metric value found")
 }
@@ -108,14 +108,14 @@ func TestTunnelTimePerLocation(t *testing.T) {
 	setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 
 	expected := strings.NewReader(`
-	# HELP shadowsocks_tunnel_time_seconds_per_location Tunnel time, per location.
-	# TYPE shadowsocks_tunnel_time_seconds_per_location counter
-	shadowsocks_tunnel_time_seconds_per_location{asn="",location="XL"} 5
+	# HELP tunnel_time_seconds_per_location Tunnel time, per location.
+	# TYPE tunnel_time_seconds_per_location counter
+	tunnel_time_seconds_per_location{asn="",location="XL"} 5
 `)
 	err := promtest.GatherAndCompare(
 		reg,
 		expected,
-		"shadowsocks_tunnel_time_seconds_per_location",
+		"tunnel_time_seconds_per_location",
 	)
 	require.NoError(t, err, "unexpected metric value found")
 }
@@ -129,7 +129,7 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	err := promtest.GatherAndCompare(
 		reg,
 		strings.NewReader(""),
-		"shadowsocks_tunnel_time_seconds",
+		"tunnel_time_seconds",
 	)
 	require.NoError(t, err, "unexpectedly found metric value")
 }
