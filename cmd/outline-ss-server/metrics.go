@@ -291,8 +291,8 @@ type outlineMetricsCollector struct {
 }
 
 var _ prometheus.Collector = (*outlineMetricsCollector)(nil)
-var _ service.TCPMetricsCollector = (*outlineMetricsCollector)(nil)
-var _ service.UDPMetricsCollector = (*outlineMetricsCollector)(nil)
+var _ service.TCPMetrics = (*outlineMetricsCollector)(nil)
+var _ service.UDPMetrics = (*outlineMetricsCollector)(nil)
 
 // newPrometheusOutlineMetrics constructs a Prometheus metrics collector that uses
 // `ip2info` to convert IP addresses to countries. `ip2info` may be nil.

@@ -30,8 +30,8 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
-// UDPMetricsCollector is used to report metrics on UDP connections.
-type UDPMetricsCollector interface {
+// UDPMetrics is used to report metrics on UDP connections.
+type UDPMetrics interface {
 	AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int)
 	AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int)
 	AddUDPNatEntry(clientAddr net.Addr, accessKey string)
@@ -85,12 +85,12 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 type packetHandler struct {
 	natTimeout        time.Duration
 	ciphers           CipherList
-	m                 UDPMetricsCollector
+	m                 UDPMetrics
 	targetIPValidator onet.TargetIPValidator
 }
 
 // NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetricsCollector) PacketHandler {
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics) PacketHandler {
 	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, targetIPValidator: onet.RequirePublicIP}
 }
 
@@ -293,11 +293,11 @@ type natmap struct {
 	sync.RWMutex
 	keyConn map[string]*natconn
 	timeout time.Duration
-	metrics UDPMetricsCollector
+	metrics UDPMetrics
 	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, sm UDPMetricsCollector, running *sync.WaitGroup) *natmap {
+func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup) *natmap {
 	m := &natmap{metrics: sm, running: running}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
@@ -373,7 +373,7 @@ var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
 func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn,
-	keyID string, sm UDPMetricsCollector) {
+	keyID string, sm UDPMetrics) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
@@ -445,19 +445,19 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 	}
 }
 
-// NoOpUDPMetricsCollector is a [UDPMetricsCollector] that doesn't do anything. Useful in tests
+// NoOpUDPMetrics is a [UDPMetrics] that doesn't do anything. Useful in tests
 // or if you don't want to track metrics.
-type NoOpUDPMetricsCollector struct{}
+type NoOpUDPMetrics struct{}
 
-var _ UDPMetricsCollector = (*NoOpUDPMetricsCollector)(nil)
+var _ UDPMetrics = (*NoOpUDPMetrics)(nil)
 
-func (m *NoOpUDPMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *NoOpUDPMetrics) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 }
-func (m *NoOpUDPMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *NoOpUDPMetrics) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
-func (m *NoOpUDPMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *NoOpUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
-func (m *NoOpUDPMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *NoOpUDPMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
-func (m *NoOpUDPMetricsCollector) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (m *NoOpUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }

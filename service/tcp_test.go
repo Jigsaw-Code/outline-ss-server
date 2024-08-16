@@ -214,38 +214,38 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 }
 
 // Stub metrics implementation for testing replay defense.
-type probeTestMetricsCollector struct {
+type probeTestMetrics struct {
 	mu          sync.Mutex
 	probeData   []int64
 	probeStatus []string
 	closeStatus []string
 }
 
-var _ TCPMetricsCollector = (*probeTestMetricsCollector)(nil)
+var _ TCPMetrics = (*probeTestMetrics)(nil)
 
-func (m *probeTestMetricsCollector) AddClosedTCPConnection(clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *probeTestMetrics) AddClosedTCPConnection(clientAddr net.Addr, accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()
 }
 
-func (m *probeTestMetricsCollector) AddOpenTCPConnection(clientAddr net.Addr) {
+func (m *probeTestMetrics) AddOpenTCPConnection(clientAddr net.Addr) {
 }
 
-func (m *probeTestMetricsCollector) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
+func (m *probeTestMetrics) AddAuthenticatedTCPConnection(clientAddr net.Addr, accessKey string) {
 }
 
-func (m *probeTestMetricsCollector) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
+func (m *probeTestMetrics) AddTCPProbe(status, drainResult string, listenerId string, clientProxyBytes int64) {
 	m.mu.Lock()
 	m.probeData = append(m.probeData, clientProxyBytes)
 	m.probeStatus = append(m.probeStatus, status)
 	m.mu.Unlock()
 }
 
-func (m *probeTestMetricsCollector) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (m *probeTestMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }
 
-func (m *probeTestMetricsCollector) countStatuses() map[string]int {
+func (m *probeTestMetrics) countStatuses() map[string]int {
 	counts := make(map[string]int)
 	for _, status := range m.closeStatus {
 		counts[status] = counts[status] + 1
@@ -276,7 +276,7 @@ func TestProbeRandom(t *testing.T) {
 	listener := makeLocalhostListener(t)
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	done := make(chan struct{})
@@ -353,7 +353,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
@@ -388,7 +388,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
@@ -424,7 +424,7 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
@@ -467,7 +467,7 @@ func TestProbeServerBytesModified(t *testing.T) {
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
 	cipher := firstCipher(cipherList)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, 200*time.Millisecond)
 	done := make(chan struct{})
@@ -497,7 +497,7 @@ func TestReplayDefense(t *testing.T) {
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
 	replayCache := NewReplayCache(5)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, testTimeout)
@@ -576,7 +576,7 @@ func TestReverseReplayDefense(t *testing.T) {
 	cipherList, err := MakeTestCiphers(makeTestSecrets(1))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
 	replayCache := NewReplayCache(5)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, testTimeout)
@@ -648,7 +648,7 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 	listener := makeLocalhostListener(t)
 	cipherList, err := MakeTestCiphers(makeTestSecrets(5))
 	require.NoError(t, err, "MakeTestCiphers failed: %v", err)
-	testMetrics := &probeTestMetricsCollector{}
+	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := NewTCPHandler(authFunc, testMetrics, testTimeout)
 

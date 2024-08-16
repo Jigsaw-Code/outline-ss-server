@@ -97,33 +97,33 @@ type udpReport struct {
 }
 
 // Stub metrics implementation for testing NAT behaviors.
-type natTestMetricsCollector struct {
+type natTestMetrics struct {
 	natEntriesAdded int
 	upstreamPackets []udpReport
 }
 
-var _ UDPMetricsCollector = (*natTestMetricsCollector)(nil)
+var _ UDPMetrics = (*natTestMetrics)(nil)
 
-func (m *natTestMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *natTestMetrics) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *natTestMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *natTestMetrics) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 }
-func (m *natTestMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *natTestMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.natEntriesAdded++
 }
-func (m *natTestMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *natTestMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 }
-func (m *natTestMetricsCollector) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
-func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetricsCollector {
+func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTestMetrics {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
-	metrics := &natTestMetricsCollector{}
+	metrics := &natTestMetrics{}
 	handler := NewPacketHandler(timeout, ciphers, metrics)
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
@@ -201,14 +201,14 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(timeout, &natTestMetricsCollector{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(timeout, &natTestMetricsCollector{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
@@ -474,7 +474,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMetrics := &natTestMetricsCollector{}
+	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
 	s := NewPacketHandler(testTimeout, cipherList, testMetrics)
 
