@@ -274,9 +274,9 @@ func main() {
 	defer ip2info.Close()
 
 	metrics := newPrometheusOutlineMetrics(ip2info)
+	metrics.SetBuildInfo(version)
 	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 	r.MustRegister(metrics)
-	metrics.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, metrics, flags.replayHistory)
 	if err != nil {
 		slog.Error("Server failed to start. Aborting.", "err", err)
