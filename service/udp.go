@@ -15,7 +15,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,14 +51,14 @@ const serverUDPBufferSize = 64 * 1024
 func debugUDP(template string, cipherID string, args ...any) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
-	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+	if slog.Default().Enabled(nil, slog.LevelDebug) {
 		args = append(args, slog.String("ID", cipherID))
 		slog.Debug(fmt.Sprintf("UDP: %s", template), args...)
 	}
 }
 
 func debugUDPAddr(template string, addr net.Addr, args ...any) {
-	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+	if slog.Default().Enabled(nil, slog.LevelDebug) {
 		args = append(args, slog.String("address", addr.String()))
 		slog.Debug(fmt.Sprintf("UDP: %s", template), args...)
 	}
