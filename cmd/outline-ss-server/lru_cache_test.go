@@ -15,6 +15,8 @@
 package main
 
 import (
+	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,4 +77,30 @@ func TestLRUCache(t *testing.T) {
 		require.Len(t, cache.items, 0, "Expected `a` to have been evicted in cleanup")
 		cache.StopCleanup()
 	})
+}
+
+func BenchmarkLRUCache(b *testing.B) {
+	cache := NewLRUCache[int, int](1000, time.Minute, time.Minute)
+
+	keys := make([]int, b.N)
+	for i := 0; i < b.N; i++ {
+		keys[i] = rand.Intn(2000)
+	}
+
+	b.ResetTimer()
+
+	var wg sync.WaitGroup
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		go func(key int) {
+			defer wg.Done()
+			cache.Get(key)
+			if rand.Intn(2) == 0 {
+				cache.Set(key, rand.Int())
+			}
+		}(keys[i])
+	}
+	wg.Wait()
+
+	cache.StopCleanup()
 }

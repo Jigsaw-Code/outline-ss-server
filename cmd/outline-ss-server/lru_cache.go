@@ -49,22 +49,28 @@ func NewLRUCache[K comparable, V any](capacity int, duration time.Duration, clea
 
 func (c *LRUCache[K, V]) Get(key K) (V, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if elem, ok := c.items[key]; ok {
-		c.lru.MoveToFront(elem)
-		ent := elem.Value.(*entry[K, V])
-		if time.Since(ent.lastAccess) > c.duration {
-			c.lru.Remove(elem)
-			delete(c.items, key)
-			var zero V
-			return zero, false
-		}
-		ent.lastAccess = time.Now()
-		return ent.value, true
+	elem, ok := c.items[key]
+	if !ok {
+		c.mu.RUnlock()
+		var zero V
+		return zero, false
 	}
-	var zero V
-	return zero, false
+	ent := elem.Value.(*entry[K, V])
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if time.Since(ent.lastAccess) > c.duration {
+		c.lru.Remove(elem)
+		delete(c.items, key)
+		var zero V
+		return zero, false
+	}
+
+	c.lru.MoveToFront(elem)
+	ent.lastAccess = time.Now()
+	return ent.value, true
 }
 
 func (c *LRUCache[K, V]) Set(key K, value V) {
