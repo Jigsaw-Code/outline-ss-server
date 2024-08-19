@@ -51,7 +51,7 @@ func init() {
 }
 
 func TestMethodsDontPanic(t *testing.T) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewPedanticRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	proxyMetrics := metrics.ProxyMetrics{
 		ClientProxy: 1,
 		ProxyTarget: 2,
@@ -78,51 +78,55 @@ func TestASNLabel(t *testing.T) {
 	require.Equal(t, "100", asnLabel(100))
 }
 
-func TestTunnelTimePerKey(t *testing.T) {
-	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
-	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+func TestTunnelTime(t *testing.T) {
+	t.Run("PerKey", func(t *testing.T) {
+		setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
+		ssMetrics := newPrometheusOutlineMetrics(nil)
+		reg := prometheus.NewPedanticRegistry()
+		reg.MustRegister(ssMetrics)
 
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
-	setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
+		ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
+		setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 
-	expected := strings.NewReader(`
-	# HELP tunnel_time_seconds Tunnel time, per access key.
-	# TYPE tunnel_time_seconds counter
-	tunnel_time_seconds{access_key="key-1"} 15
-`)
-	err := promtest.GatherAndCompare(
-		reg,
-		expected,
-		"tunnel_time_seconds",
-	)
-	require.NoError(t, err, "unexpected metric value found")
-}
+		expected := strings.NewReader(`
+		# HELP tunnel_time_seconds Tunnel time, per access key.
+		# TYPE tunnel_time_seconds counter
+		tunnel_time_seconds{access_key="key-1"} 15
+	`)
+		err := promtest.GatherAndCompare(
+			reg,
+			expected,
+			"tunnel_time_seconds",
+		)
+		require.NoError(t, err, "unexpected metric value found")
+	})
 
-func TestTunnelTimePerLocation(t *testing.T) {
-	setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
-	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(&noopMap{}, reg)
+	t.Run("PerLocation", func(t *testing.T) {
+		setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
+		ssMetrics := newPrometheusOutlineMetrics(&noopMap{})
+		reg := prometheus.NewPedanticRegistry()
+		reg.MustRegister(ssMetrics)
 
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
-	setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
+		ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
+		setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 
-	expected := strings.NewReader(`
-	# HELP tunnel_time_seconds_per_location Tunnel time, per location.
-	# TYPE tunnel_time_seconds_per_location counter
-	tunnel_time_seconds_per_location{asn="",location="XL"} 5
-`)
-	err := promtest.GatherAndCompare(
-		reg,
-		expected,
-		"tunnel_time_seconds_per_location",
-	)
-	require.NoError(t, err, "unexpected metric value found")
+		expected := strings.NewReader(`
+		# HELP tunnel_time_seconds_per_location Tunnel time, per location.
+		# TYPE tunnel_time_seconds_per_location counter
+		tunnel_time_seconds_per_location{asn="",location="XL"} 5
+	`)
+		err := promtest.GatherAndCompare(
+			reg,
+			expected,
+			"tunnel_time_seconds_per_location",
+		)
+		require.NoError(t, err, "unexpected metric value found")
+	})
 }
 
 func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil, reg)
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 
 	ssMetrics.AddClosedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1", "OK", metrics.ProxyMetrics{}, time.Minute)
 
@@ -135,7 +139,7 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 }
 
 func BenchmarkOpenTCP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -144,7 +148,7 @@ func BenchmarkOpenTCP(b *testing.B) {
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
@@ -160,7 +164,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 }
 
 func BenchmarkProbe(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	status := "ERR_REPLAY"
 	drainResult := "other"
 	data := metrics.ProxyMetrics{}
@@ -171,7 +175,7 @@ func BenchmarkProbe(b *testing.B) {
 }
 
 func BenchmarkClientUDP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
@@ -185,7 +189,7 @@ func BenchmarkClientUDP(b *testing.B) {
 }
 
 func BenchmarkTargetUDP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
@@ -197,7 +201,7 @@ func BenchmarkTargetUDP(b *testing.B) {
 }
 
 func BenchmarkNAT(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil, prometheus.NewRegistry())
+	ssMetrics := newPrometheusOutlineMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

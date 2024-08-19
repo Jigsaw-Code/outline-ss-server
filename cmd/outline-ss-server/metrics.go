@@ -273,9 +273,8 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 }
 
 type outlineMetricsCollector struct {
-	ip2info ipinfo.IPInfoMap
-	mu      sync.Mutex // Protects the ipInfos map.
-	ipInfos map[net.Addr]ipinfo.IPInfo
+	ip2info     ipinfo.IPInfoMap
+	ipInfoCache *LRUCache[net.Addr, ipinfo.IPInfo]
 
 	*tcpCollector
 	*udpCollector
@@ -302,8 +301,8 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) *outlineMetricsCollec
 	tunnelTimeCollector := newTunnelTimeCollector(ip2info)
 
 	return &outlineMetricsCollector{
-		ip2info: ip2info,
-		ipInfos: make(map[net.Addr]ipinfo.IPInfo),
+		ip2info:     ip2info,
+		ipInfoCache: NewLRUCache[net.Addr, ipinfo.IPInfo](10000, 60*time.Second, 30*time.Second),
 
 		tcpCollector:        tcpCollector,
 		udpCollector:        udpCollector,
@@ -368,17 +367,14 @@ func (m *outlineMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (m *outlineMetricsCollector) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	ipInfo, exists := m.ipInfos[addr]
+	ipInfo, exists := m.ipInfoCache.Get(addr)
 	if !exists {
 		ipInfo, err := ipinfo.GetIPInfoFromAddr(m.ip2info, addr)
 		if err != nil {
 			slog.Warn("Failed client info lookup.", "err", err)
 			return ipInfo
 		}
-		m.ipInfos[addr] = ipInfo
+		m.ipInfoCache.Set(addr, ipInfo)
 	}
 	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
 		slog.Debug("Got IP info for address.", "address", addr, "info", ipInfo)
