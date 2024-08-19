@@ -59,12 +59,11 @@ func remoteIP(conn net.Conn) netip.Addr {
 }
 
 // Wrapper for slog.Debug during TCP access key searches.
-func debugTCP(template string, cipherID string, args ...any) {
+func debugTCP(template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
-	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
-		args = append(args, slog.String("ID", cipherID))
-		slog.Debug(fmt.Sprintf("TCP: %s", template), args...)
+	if slog.Default().Enabled(nil, slog.LevelDebug) {
+		slog.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("TCP: %s", template), slog.String("ID", cipherID), attr)
 	}
 }
 
@@ -262,11 +261,11 @@ func (h *tcpHandler) Handle(ctx context.Context, clientConn transport.StreamConn
 	status := "OK"
 	if connError != nil {
 		status = connError.Status
-		slog.Debug("TCP: Error", "msg", connError.Message, "cause", connError.Cause)
+		slog.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 	}
 	h.m.AddClosedTCPConnection(clientConn.RemoteAddr(), id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
-	slog.Debug("TCP: Done.", "status", status, "duration", connDuration)
+	slog.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
 }
 
 func getProxyRequest(clientConn transport.StreamConn) (string, error) {
@@ -288,7 +287,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 		return ensureConnectionError(dialErr, "ERR_CONNECT", "Failed to connect to target")
 	}
 	defer tgtConn.Close()
-	slog.Debug("Proxy connection.", "client", clientConn.RemoteAddr().String(), "target", tgtConn.RemoteAddr().String())
+	slog.LogAttrs(nil, slog.LevelDebug, "Proxy connection.", slog.String("client", clientConn.RemoteAddr().String()), slog.String("target", tgtConn.RemoteAddr().String()))
 
 	fromClientErrCh := make(chan error)
 	go func() {
@@ -365,7 +364,7 @@ func (h *tcpHandler) absorbProbe(clientConn io.ReadCloser, addr, status string, 
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
-	slog.Debug("Drain error.", "err", drainErr, "result", drainResult)
+	slog.LogAttrs(nil, slog.LevelDebug, "Drain error.", slog.Any("err", drainErr), slog.String("result", drainResult))
 	h.m.AddTCPProbe(status, drainResult, addr, proxyMetrics.ClientProxy)
 }
 
