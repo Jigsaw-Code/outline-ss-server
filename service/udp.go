@@ -48,19 +48,17 @@ type UDPMetrics interface {
 const serverUDPBufferSize = 64 * 1024
 
 // Wrapper for slog.Debug during UDP proxying.
-func debugUDP(template string, cipherID string, args ...any) {
+func debugUDP(template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
 	if slog.Default().Enabled(nil, slog.LevelDebug) {
-		args = append(args, slog.String("ID", cipherID))
-		slog.Debug(fmt.Sprintf("UDP: %s", template), args...)
+		slog.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("ID", cipherID), attr)
 	}
 }
 
-func debugUDPAddr(template string, addr net.Addr, args ...any) {
+func debugUDPAddr(template string, addr net.Addr, attr slog.Attr) {
 	if slog.Default().Enabled(nil, slog.LevelDebug) {
-		args = append(args, slog.String("address", addr.String()))
-		slog.Debug(fmt.Sprintf("UDP: %s", template), args...)
+		slog.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("address", addr.String()), attr)
 	}
 }
 
@@ -141,8 +139,8 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			if err != nil {
 				return onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
 			}
-			defer slog.Debug("UDP: Done.", "address", clientAddr)
-			slog.Debug("UDP: Outbound packet.", "address", clientAddr, "bytes", clientProxyBytes)
+			defer slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAddr.String()))
+			debugUDPAddr("Outbound packet.", clientAddr, slog.Int("bytes", clientProxyBytes))
 
 			cipherData := cipherBuf[:clientProxyBytes]
 			var payload []byte
@@ -209,7 +207,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 		status := "OK"
 		if connError != nil {
-			slog.Debug("UDP: Error.", "msg", connError.Message, "cause", connError.Cause)
+			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
 		h.m.AddUDPPacketFromClient(clientInfo, keyID, status, clientProxyBytes, proxyTargetBytes)
@@ -452,7 +450,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		}()
 		status := "OK"
 		if connError != nil {
-			slog.Debug("UDP: Error.", "msg", connError.Message, "cause", connError.Cause)
+			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
 		if expired {
