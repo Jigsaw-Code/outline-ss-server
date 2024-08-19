@@ -273,7 +273,7 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 
 type outlineMetricsCollector struct {
 	ip2info     ipinfo.IPInfoMap
-	ipInfoCache *LRUCache[net.Addr, ipinfo.IPInfo]
+	ipInfoCache *ExpiringMap[net.Addr, ipinfo.IPInfo]
 
 	*tcpCollector
 	*udpCollector
@@ -301,7 +301,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) *outlineMetricsCollec
 
 	return &outlineMetricsCollector{
 		ip2info:     ip2info,
-		ipInfoCache: NewLRUCache[net.Addr, ipinfo.IPInfo](10000, 60*time.Second, 30*time.Second),
+		ipInfoCache: NewExpiringMap[net.Addr, ipinfo.IPInfo](20 * time.Second),
 
 		tcpCollector:        tcpCollector,
 		udpCollector:        udpCollector,
