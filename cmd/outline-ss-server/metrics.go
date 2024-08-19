@@ -15,7 +15,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -236,7 +235,7 @@ func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
 // Calculates and reports the tunnel time for a given active client.
 func (c *tunnelTimeCollector) reportTunnelTime(ipKey IPKey, client *activeClient, tNow time.Time) {
 	tunnelTime := tNow.Sub(client.startTime)
-	slog.Debug("Reporting tunnel time.", "key", ipKey.accessKey, "duration", tunnelTime)
+	slog.LogAttrs(nil, slog.LevelDebug, "Reporting tunnel time.", slog.String("key", ipKey.accessKey), slog.Duration("duration", tunnelTime))
 	c.tunnelTimePerKey.WithLabelValues(ipKey.accessKey).Add(tunnelTime.Seconds())
 	c.tunnelTimePerLocation.WithLabelValues(client.info.CountryCode.String(), asnLabel(client.info.ASN)).Add(tunnelTime.Seconds())
 	// Reset the start time now that the tunnel time has been reported.
@@ -371,13 +370,13 @@ func (m *outlineMetricsCollector) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo
 	if !exists {
 		ipInfo, err := ipinfo.GetIPInfoFromAddr(m.ip2info, addr)
 		if err != nil {
-			slog.Warn("Failed client info lookup.", "err", err)
+			slog.LogAttrs(nil, slog.LevelWarn, "Failed client info lookup.", slog.Any("err", err))
 			return ipInfo
 		}
 		m.ipInfoCache.Set(addr, ipInfo)
 	}
-	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
-		slog.Debug("Got IP info for address.", "address", addr, "info", ipInfo)
+	if slog.Default().Enabled(nil, slog.LevelDebug) {
+		slog.LogAttrs(nil, slog.LevelDebug, "Got info for IP.", slog.String("IP", addr.String()), slog.Any("info", ipInfo))
 	}
 	return ipInfo
 }
