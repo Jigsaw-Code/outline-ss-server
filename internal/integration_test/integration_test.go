@@ -130,7 +130,7 @@ func TestTCPEcho(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
-	testMetrics := &service.NoOpTCPMetricsCollector{}
+	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -181,7 +181,7 @@ func TestTCPEcho(t *testing.T) {
 }
 
 type statusMetrics struct {
-	service.NoOpTCPMetricsCollector
+	service.NoOpTCPMetrics
 	sync.Mutex
 	statuses []string
 }
@@ -251,26 +251,26 @@ type udpRecord struct {
 }
 
 // Fake metrics implementation for UDP
-type fakeUDPMetricsCollector struct {
+type fakeUDPMetrics struct {
 	up, down []udpRecord
 	natAdded int
 }
 
-var _ service.UDPMetricsCollector = (*fakeUDPMetricsCollector)(nil)
+var _ service.UDPMetrics = (*fakeUDPMetrics)(nil)
 
-func (m *fakeUDPMetricsCollector) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *fakeUDPMetrics) AddUDPPacketFromClient(clientAddr net.Addr, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
 	m.up = append(m.up, udpRecord{clientAddr, accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *fakeUDPMetricsCollector) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
+func (m *fakeUDPMetrics) AddUDPPacketFromTarget(clientAddr net.Addr, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
 	m.down = append(m.down, udpRecord{clientAddr, accessKey, status, targetProxyBytes, proxyClientBytes})
 }
-func (m *fakeUDPMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *fakeUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	m.natAdded++
 }
-func (m *fakeUDPMetricsCollector) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
+func (m *fakeUDPMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
 	// Not tested because it requires waiting for a long timeout.
 }
-func (m *fakeUDPMetricsCollector) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (m *fakeUDPMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }
 
 func TestUDPEcho(t *testing.T) {
@@ -285,7 +285,7 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMetrics := &fakeUDPMetricsCollector{}
+	testMetrics := &fakeUDPMetrics{}
 	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics)
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
@@ -374,7 +374,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 		b.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	testMetrics := &service.NoOpTCPMetricsCollector{}
+	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, testMetrics)
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -438,7 +438,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
-	testMetrics := &service.NoOpTCPMetricsCollector{}
+	testMetrics := &service.NoOpTCPMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, testMetrics)
 	handler := service.NewTCPHandler(authFunc, testMetrics, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -513,7 +513,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetricsCollector{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -557,7 +557,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetricsCollector{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
