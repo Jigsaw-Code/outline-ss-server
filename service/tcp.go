@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"sync"
@@ -32,7 +33,6 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
@@ -62,12 +62,12 @@ func remoteIP(conn net.Conn) netip.Addr {
 	return netip.Addr{}
 }
 
-// Wrapper for logger.Debugf during TCP access key searches.
-func debugTCP(cipherID, template string, val interface{}) {
+// Wrapper for slog.Debug during TCP access key searches.
+func debugTCP(template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
-	// between Go's inlining/escape analysis and varargs functions like logger.Debugf.
-	if logger.IsEnabledFor(logging.DEBUG) {
-		logger.Debugf("TCP(%s): "+template, cipherID, val)
+	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
+	if slog.Default().Enabled(nil, slog.LevelDebug) {
+		slog.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("TCP: %s", template), slog.String("ID", cipherID), attr)
 	}
 }
 
@@ -108,10 +108,10 @@ func findEntry(firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.
 		cryptoKey := entry.CryptoKey
 		_, err := shadowsocks.Unpack(chunkLenBuf[:0], firstBytes[:cryptoKey.SaltSize()+2+cryptoKey.TagSize()], cryptoKey)
 		if err != nil {
-			debugTCP(entry.ID, "Failed to decrypt length: %v", err)
+			debugTCP("Failed to decrypt length.", entry.ID, slog.Any("err", err))
 			continue
 		}
-		debugTCP(entry.ID, "Found cipher at index %d", ci)
+		debugTCP("Found cipher.", entry.ID, slog.Int("index", ci))
 		return entry, elt
 	}
 	return nil, nil
@@ -235,7 +235,7 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 			if errors.Is(err, net.ErrClosed) {
 				break
 			}
-			logger.Warningf("Accept failed: %v. Continuing to listen.", err)
+			slog.Warn("Accept failed. Continuing to listen.", "err", err)
 			continue
 		}
 
@@ -245,7 +245,7 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 			defer clientConn.Close()
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Warningf("Panic in TCP handler: %v. Continuing to listen.", r)
+					slog.Warn("Panic in TCP handler. Continuing to listen.", "err", r)
 				}
 			}()
 			handle(ctx, clientConn)
@@ -256,9 +256,9 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamConn) {
 	clientInfo, err := ipinfo.GetIPInfoFromAddr(h.m, clientConn.RemoteAddr())
 	if err != nil {
-		logger.Warningf("Failed client info lookup: %v", err)
+		slog.Warn("Failed client info lookup", "err", err)
 	}
-	logger.Debugf("Got info \"%#v\" for IP %v", clientInfo, clientConn.RemoteAddr().String())
+	slog.LogAttrs(nil, slog.LevelDebug, "Got info for IP.", slog.Any("info", clientInfo), slog.String("IP", clientConn.RemoteAddr().String()))
 	h.m.AddOpenTCPConnection(clientInfo)
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
@@ -270,11 +270,11 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 	status := "OK"
 	if connError != nil {
 		status = connError.Status
-		logger.Debugf("TCP Error: %v: %v", connError.Message, connError.Cause)
+		slog.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 	}
 	h.m.AddClosedTCPConnection(clientInfo, clientConn.RemoteAddr(), id, status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
-	logger.Debugf("Done with status %v, duration %v", status, connDuration)
+	slog.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
 }
 
 func getProxyRequest(clientConn transport.StreamConn) (string, error) {
@@ -296,7 +296,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 		return ensureConnectionError(dialErr, "ERR_CONNECT", "Failed to connect to target")
 	}
 	defer tgtConn.Close()
-	logger.Debugf("proxy %s <-> %s", clientConn.RemoteAddr().String(), tgtConn.RemoteAddr().String())
+	slog.LogAttrs(nil, slog.LevelDebug, "Proxy connection.", slog.String("client", clientConn.RemoteAddr().String()), slog.String("target", tgtConn.RemoteAddr().String()))
 
 	fromClientErrCh := make(chan error)
 	go func() {
@@ -373,7 +373,7 @@ func (h *streamHandler) absorbProbe(clientConn io.ReadCloser, addr, status strin
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
-	logger.Debugf("Drain error: %v, drain result: %v", drainErr, drainResult)
+	slog.LogAttrs(nil, slog.LevelDebug, "Drain error.", slog.Any("err", drainErr), slog.String("result", drainResult))
 	h.m.AddTCPProbe(status, drainResult, addr, proxyMetrics.ClientProxy)
 }
 

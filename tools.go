@@ -22,6 +22,7 @@ package tools
 
 import (
 	_ "github.com/go-task/task/v3/cmd/task"
+	_ "github.com/google/addlicense"
 	_ "github.com/google/go-licenses"
 	_ "github.com/goreleaser/goreleaser"
 )

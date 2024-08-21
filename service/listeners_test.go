@@ -141,3 +141,27 @@ func TestListenerManagerPacketListenerCreatesListenerOnDemand(t *testing.T) {
 	require.NoError(t, err)
 	<-done
 }
+
+func BenchmarkMultiStreamListener_Acquire(b *testing.B) {
+	lm := NewListenerManager()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := lm.ListenStream("localhost:0")
+		if err != nil {
+			b.Fatalf("Failed to acquire stream listener: %v", err)
+		}
+	}
+}
+
+func BenchmarkMultiPacketListener_Acquire(b *testing.B) {
+	lm := NewListenerManager()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := lm.ListenPacket("localhost:0")
+		if err != nil {
+			b.Fatalf("Failed to acquire packet listener: %v", err)
+		}
+	}
+}

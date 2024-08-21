@@ -18,12 +18,12 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -31,13 +31,14 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
-	"github.com/op/go-logging"
+	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
 )
 
-var logger *logging.Logger
+var logLevel = new(slog.LevelVar) // Info by default
+var logHandler slog.Handler
 
 // Set by goreleaser default ldflags. See https://goreleaser.com/customization/build/
 var version = "dev"
@@ -49,14 +50,10 @@ const tcpReadTimeout time.Duration = 59 * time.Second
 const defaultNatTimeout time.Duration = 5 * time.Minute
 
 func init() {
-	var prefix = "%{level:.1s}%{time:2006-01-02T15:04:05.000Z07:00} %{pid} %{shortfile}]"
-	if term.IsTerminal(int(os.Stderr.Fd())) {
-		// Add color only if the output is the terminal
-		prefix = strings.Join([]string{"%{color}", prefix, "%{color:reset}"}, "")
-	}
-	logging.SetFormatter(logging.MustStringFormatter(strings.Join([]string{prefix, " %{message}"}, "")))
-	logging.SetBackend(logging.NewLogBackend(os.Stderr, "", 0))
-	logger = logging.MustGetLogger("")
+	logHandler = tint.NewHandler(
+		os.Stderr,
+		&tint.Options{NoColor: !term.IsTerminal(int(os.Stderr.Fd())), Level: logLevel},
+	)
 }
 
 type SSServer struct {
@@ -88,7 +85,7 @@ func (s *SSServer) loadConfig(filename string) error {
 		return err
 	}
 	if err := s.Stop(); err != nil {
-		logger.Warningf("Failed to stop old config: %v", err)
+		slog.Warn("Failed to stop old config.", "err", err)
 	}
 	s.stopConfig = stopConfig
 	return nil
@@ -104,7 +101,7 @@ func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
 	for _, keyConfig := range config.Keys {
 		key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
 		if _, exists := existingCiphers[key]; exists {
-			logger.Debugf("encryption key already exists for ID=`%v`. Skipping.", keyConfig.ID)
+			slog.Debug("Encryption key already exists. Skipping.", "id", keyConfig.ID)
 			continue
 		}
 		cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
@@ -249,14 +246,14 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 				if err != nil {
 					return err
 				}
-				logger.Infof("TCP service listening on %v", ln.Addr().String())
+				slog.Info("TCP service started.", "address", ln.Addr().String())
 				go service.StreamServe(ln.AcceptStream, sh.Handle)
 
 				pc, err := lnSet.ListenPacket(addr)
 				if err != nil {
 					return err
 				}
-				logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
+				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
 				ph := s.NewShadowsocksPacketHandler(ciphers)
 				go ph.Handle(pc)
 			}
@@ -273,7 +270,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 						if err != nil {
 							return err
 						}
-						logger.Infof("TCP service listening on %s", ln.Addr().String())
+						slog.Info("TCP service started.", "address", ln.Addr().String())
 						if sh == nil {
 							sh, err = s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
 							if err != nil {
@@ -286,7 +283,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 						if err != nil {
 							return err
 						}
-						logger.Infof("UDP service listening on %v", pc.LocalAddr().String())
+						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
 						if ph == nil {
 							ph, err = s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
 							if err != nil {
@@ -299,7 +296,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 				totalCipherCount += len(serviceConfig.Keys)
 			}
 
-			logger.Infof("Loaded %d access keys over %d listeners", totalCipherCount, lnSet.Len())
+			slog.Info("Loaded config.", "access_keys", totalCipherCount, "listeners", lnSet.Len())
 			s.m.SetNumAccessKeys(totalCipherCount, lnSet.Len())
 			return nil
 		}()
@@ -312,7 +309,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 		return nil, err
 	}
 	return func() error {
-		logger.Infof("Stopping running config.")
+		slog.Info("Stopping running config.")
 		// TODO(sbruens): Actually wait for all handlers to be stopped, e.g. by
 		// using a https://pkg.go.dev/sync#WaitGroup.
 		stopCh <- struct{}{}
@@ -328,10 +325,10 @@ func (s *SSServer) Stop() error {
 		return nil
 	}
 	if err := stopFunc(); err != nil {
-		logger.Errorf("Error stopping config: %v", err)
+		slog.Error("Error stopping config.", "err", err)
 		return err
 	}
-	logger.Info("Stopped all listeners for running config")
+	slog.Info("Stopped all listeners for running config.")
 	return nil
 }
 
@@ -351,9 +348,9 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 	signal.Notify(sigHup, syscall.SIGHUP)
 	go func() {
 		for range sigHup {
-			logger.Infof("SIGHUP received. Loading config from %v", filename)
+			slog.Info("SIGHUP received. Loading config.", "config", filename)
 			if err := server.loadConfig(filename); err != nil {
-				logger.Errorf("Failed to update server: %v. Server state may be invalid. Fix the error and try the update again", err)
+				slog.Error("Failed to update server. Server state may be invalid. Fix the error and try the update again", "err", err)
 			}
 		}
 	}()
@@ -361,6 +358,8 @@ func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, 
 }
 
 func main() {
+	slog.SetDefault(slog.New(logHandler))
+
 	var flags struct {
 		ConfigFile    string
 		MetricsAddr   string
@@ -383,9 +382,7 @@ func main() {
 	flag.Parse()
 
 	if flags.Verbose {
-		logging.SetLevel(logging.DEBUG, "")
-	} else {
-		logging.SetLevel(logging.INFO, "")
+		logLevel.Set(slog.LevelDebug)
 	}
 
 	if flags.Version {
@@ -401,21 +398,21 @@ func main() {
 	if flags.MetricsAddr != "" {
 		http.Handle("/metrics", promhttp.Handler())
 		go func() {
-			logger.Fatalf("Failed to run metrics server: %v. Aborting.", http.ListenAndServe(flags.MetricsAddr, nil))
+			slog.Error("Failed to run metrics server. Aborting.", "err", http.ListenAndServe(flags.MetricsAddr, nil))
 		}()
-		logger.Infof("Prometheus metrics available at http://%v/metrics", flags.MetricsAddr)
+		slog.Info(fmt.Sprintf("Prometheus metrics available at http://%v/metrics.", flags.MetricsAddr))
 	}
 
 	var err error
 	if flags.IPCountryDB != "" {
-		logger.Infof("Using IP-Country database at %v", flags.IPCountryDB)
+		slog.Info("Using IP-Country database.", "db", flags.IPCountryDB)
 	}
 	if flags.IPASNDB != "" {
-		logger.Infof("Using IP-ASN database at %v", flags.IPASNDB)
+		slog.Info("Using IP-ASN database.", "db", flags.IPASNDB)
 	}
 	ip2info, err := ipinfo.NewMMDBIPInfoMap(flags.IPCountryDB, flags.IPASNDB)
 	if err != nil {
-		logger.Fatalf("Could create IP info map: %v. Aborting", err)
+		slog.Error("Failed to create IP info map. Aborting.", "err", err)
 	}
 	defer ip2info.Close()
 
@@ -423,7 +420,7 @@ func main() {
 	m.SetBuildInfo(version)
 	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
 	if err != nil {
-		logger.Fatalf("Server failed to start: %v. Aborting", err)
+		slog.Error("Server failed to start. Aborting.", "err", err)
 	}
 
 	sigCh := make(chan os.Signal, 1)

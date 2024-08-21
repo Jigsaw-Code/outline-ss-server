@@ -106,7 +106,9 @@ func (sl *virtualStreamListener) Close() error {
 	sl.acceptCh = nil
 	close(sl.closeCh)
 	if sl.onCloseFunc != nil {
-		return sl.onCloseFunc()
+		onCloseFunc := sl.onCloseFunc
+		sl.onCloseFunc = nil
+		return onCloseFunc()
 	}
 	return nil
 }
@@ -163,7 +165,9 @@ func (pc *virtualPacketConn) Close() error {
 	pc.readCh = nil
 
 	if pc.onCloseFunc != nil {
-		return pc.onCloseFunc()
+		onCloseFunc := pc.onCloseFunc
+		pc.onCloseFunc = nil
+		return onCloseFunc()
 	}
 	return nil
 }
@@ -212,7 +216,14 @@ func (m *multiStreamListener) Acquire() (StreamListener, error) {
 		m.acceptCh = make(chan acceptResponse)
 		go func() {
 			for {
-				conn, err := m.ln.AcceptStream()
+				m.mu.Lock()
+				ln := m.ln
+				m.mu.Unlock()
+
+				if ln == nil {
+					return
+				}
+				conn, err := ln.AcceptStream()
 				if errors.Is(err, net.ErrClosed) {
 					close(m.acceptCh)
 					return
@@ -233,8 +244,11 @@ func (m *multiStreamListener) Acquire() (StreamListener, error) {
 			m.count--
 			if m.count == 0 {
 				m.ln.Close()
+				m.ln = nil
 				if m.onCloseFunc != nil {
-					return m.onCloseFunc()
+					onCloseFunc := m.onCloseFunc
+					m.onCloseFunc = nil
+					return onCloseFunc()
 				}
 			}
 			return nil
@@ -300,8 +314,11 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			if m.count == 0 {
 				close(m.doneCh)
 				m.pc.Close()
+				m.pc = nil
 				if m.onCloseFunc != nil {
-					return m.onCloseFunc()
+					onCloseFunc := m.onCloseFunc
+					m.onCloseFunc = nil
+					return onCloseFunc()
 				}
 			}
 			return nil
