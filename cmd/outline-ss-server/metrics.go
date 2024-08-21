@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"sync"
@@ -112,7 +113,7 @@ func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
 // Calculates and reports the tunnel time for a given active client.
 func (c *tunnelTimeCollector) reportTunnelTime(ipKey IPKey, client *activeClient, tNow time.Time) {
 	tunnelTime := tNow.Sub(client.startTime)
-	logger.Debugf("Reporting tunnel time for key `%v`, duration: %v", ipKey.accessKey, tunnelTime)
+	slog.Debug("Reporting tunnel time.", "key", ipKey.accessKey, "duration", tunnelTime)
 	c.tunnelTimePerKey.WithLabelValues(ipKey.accessKey).Add(tunnelTime.Seconds())
 	c.tunnelTimePerLocation.WithLabelValues(client.info.CountryCode.String(), asnLabel(client.info.ASN)).Add(tunnelTime.Seconds())
 	// Reset the start time now that the tunnel time has been reported.
@@ -138,7 +139,7 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 	defer c.mu.Unlock()
 	client, exists := c.activeClients[ipKey]
 	if !exists {
-		logger.Warningf("Failed to find active client")
+		slog.Warn("Failed to find active client.")
 		return
 	}
 	client.connCount--
