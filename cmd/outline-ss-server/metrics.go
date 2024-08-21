@@ -32,6 +32,8 @@ import (
 var now = time.Now
 
 type tcpCollector struct {
+	// NOTE: New metrics need to be added to `newTCPCollector()`, `Describe()` and
+	// `Collect()`.
 	probes               *prometheus.HistogramVec
 	openConnections      *prometheus.CounterVec
 	closedConnections    *prometheus.CounterVec
@@ -40,7 +42,7 @@ type tcpCollector struct {
 
 var _ prometheus.Collector = (*tcpCollector)(nil)
 
-func newTcpCollector() *tcpCollector {
+func newTCPCollector() *tcpCollector {
 	namespace := "tcp"
 	return &tcpCollector{
 		probes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -104,6 +106,8 @@ func (c *tcpCollector) addProbe(listenerId, status, drainResult string, clientPr
 }
 
 type udpCollector struct {
+	// NOTE: New metrics need to be added to `newUDPCollector()`, `Describe()`
+	// and `Collect()`.
 	packetsFromClientPerLocation *prometheus.CounterVec
 	addedNatEntries              prometheus.Counter
 	removedNatEntries            prometheus.Counter
@@ -111,7 +115,7 @@ type udpCollector struct {
 
 var _ prometheus.Collector = (*udpCollector)(nil)
 
-func newUdpCollector() *udpCollector {
+func newUDPCollector() *udpCollector {
 	namespace := "udp"
 	return &udpCollector{
 		packetsFromClientPerLocation: prometheus.NewCounterVec(
@@ -191,6 +195,8 @@ type tunnelTimeCollector struct {
 	mu            sync.Mutex // Protects the activeClients map.
 	activeClients map[IPKey]*activeClient
 
+	// NOTE: New metrics need to be added to `newTunnelTimeCollector()`,
+	// `Describe()` and `Collect()`.
 	tunnelTimePerKey      *prometheus.CounterVec
 	tunnelTimePerLocation *prometheus.CounterVec
 }
@@ -274,10 +280,12 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 type outlineMetricsCollector struct {
 	ipinfo.IPInfoMap
 
-	*tcpCollector
-	*udpCollector
-	*tunnelTimeCollector
+	tcpCollector        *tcpCollector
+	udpCollector        *udpCollector
+	tunnelTimeCollector *tunnelTimeCollector
 
+	// NOTE: New metrics need to be added to `newPrometheusOutlineMetrics()` and
+	// `collectors()`.
 	buildInfo            *prometheus.GaugeVec
 	accessKeys           prometheus.Gauge
 	ports                prometheus.Gauge
@@ -294,8 +302,8 @@ var _ service.UDPMetrics = (*outlineMetricsCollector)(nil)
 // newPrometheusOutlineMetrics constructs a Prometheus metrics collector that uses
 // `ip2info` to convert IP addresses to countries. `ip2info` may be nil.
 func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) *outlineMetricsCollector {
-	tcpCollector := newTcpCollector()
-	udpCollector := newUdpCollector()
+	tcpCollector := newTCPCollector()
+	udpCollector := newUDPCollector()
 	tunnelTimeCollector := newTunnelTimeCollector(ip2info)
 
 	return &outlineMetricsCollector{
