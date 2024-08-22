@@ -16,6 +16,7 @@ package main
 
 import (
 	"container/list"
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -26,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
@@ -74,7 +76,7 @@ func (s *SSServer) startPort(portNum int) error {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
 		return fmt.Errorf("Shadowsocks TCP service failed to start on port %v: %w", portNum, err)
 	}
-	slog.Info("Shadowsocks TCP service started.", "address", listener.Addr().String())
+	slog.Info("Shadowsocks TCP service stamed.", "address", listener.Addr().String())
 	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{Port: portNum})
 	if err != nil {
 		//lint:ignore ST1005 Shadowsocks is capitalized.
@@ -82,12 +84,15 @@ func (s *SSServer) startPort(portNum int) error {
 	}
 	slog.Info("Shadowsocks UDP service started.", "address", packetConn.LocalAddr().String())
 	port := &ssPort{tcpListener: listener, packetConn: packetConn, cipherList: service.NewCipherList()}
-	authFunc := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m)
+	authFunc := service.NewShadowsocksStreamAuthenticator(port.cipherList, &s.replayCache, s.m.tcpCollector)
 	// TODO: Register initial data metrics at zero.
-	tcpHandler := service.NewTCPHandler(authFunc, s.m, tcpReadTimeout)
-	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m)
+	tcpHandler := service.NewTCPHandler(authFunc, tcpReadTimeout)
+	packetHandler := service.NewPacketHandler(s.natTimeout, port.cipherList, s.m, s.m.udpCollector)
 	s.ports[portNum] = port
-	go service.StreamServe(service.WrapStreamListener(listener.AcceptTCP), tcpHandler.Handle)
+	go service.StreamServe(service.WrapStreamListener(listener.AcceptTCP), func(ctx context.Context, conn transport.StreamConn) {
+		connMetrics := s.m.AddOpenTCPConnection(conn)
+		tcpHandler.Handle(ctx, conn, connMetrics)
+	})
 	go packetHandler.Handle(port.packetConn)
 	return nil
 }
@@ -273,7 +278,10 @@ func main() {
 	}
 	defer ip2info.Close()
 
-	metrics := newPrometheusOutlineMetrics(ip2info)
+	metrics, err := newPrometheusOutlineMetrics(ip2info)
+	if err != nil {
+		slog.Error("Failed to create Outline Prometheus metrics. Aborting.", "err", err)
+	}
 	metrics.SetBuildInfo(version)
 	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 	r.MustRegister(metrics)
