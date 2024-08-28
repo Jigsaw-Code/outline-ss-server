@@ -386,14 +386,14 @@ type tunnelTimeMetrics struct {
 	mu            sync.Mutex // Protects the activeClients map.
 	activeClients map[IPKey]*activeClient
 
-	// NOTE: New metrics need to be added to `newTunnelTimeCollector()`, `Describe()` and `Collect()`.
+	// NOTE: New metrics need to be added to `newTunnelTimeMetrics()`, `Describe()` and `Collect()`.
 	tunnelTimePerKey      *prometheus.CounterVec
 	tunnelTimePerLocation *prometheus.CounterVec
 }
 
 var _ prometheus.Collector = (*tunnelTimeMetrics)(nil)
 
-func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap) *tunnelTimeMetrics {
+func newTunnelTimeMetrics(ip2info ipinfo.IPInfoMap) *tunnelTimeMetrics {
 	namespace := "tunnel_time"
 	return &tunnelTimeMetrics{
 		ip2info:       ip2info,
@@ -495,7 +495,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetricsColle
 	if err != nil {
 		return nil, err
 	}
-	tunnelTimeMetrics := newTunnelTimeCollector(ip2info)
+	tunnelTimeMetrics := newTunnelTimeMetrics(ip2info)
 
 	return &outlineMetricsCollector{
 		ip2info: ip2info,
