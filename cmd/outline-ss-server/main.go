@@ -87,13 +87,13 @@ func (s *SSServer) loadConfig(filename string) error {
 }
 
 func (s *SSServer) NewShadowsocksStreamHandler(ciphers service.CipherList) service.StreamHandler {
-	authFunc := service.NewShadowsocksStreamAuthenticator(ciphers, &s.replayCache, s.m.tcpCollector)
+	authFunc := service.NewShadowsocksStreamAuthenticator(ciphers, &s.replayCache, s.m.tcpServiceMetrics)
 	// TODO: Register initial data metrics at zero.
 	return service.NewStreamHandler(authFunc, tcpReadTimeout)
 }
 
 func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList) service.PacketHandler {
-	return service.NewPacketHandler(s.natTimeout, ciphers, s.m, s.m.udpCollector)
+	return service.NewPacketHandler(s.natTimeout, ciphers, s.m, s.m.udpServiceMetrics)
 }
 
 type listenerSet struct {

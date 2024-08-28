@@ -197,7 +197,7 @@ type statusMetrics struct {
 	statuses []string
 }
 
-func (m *statusMetrics) AddClosed(accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *statusMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.Lock()
 	m.statuses = append(m.statuses, status)
 	m.Unlock()

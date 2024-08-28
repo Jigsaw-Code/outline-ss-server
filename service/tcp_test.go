@@ -234,7 +234,7 @@ type probeTestMetrics struct {
 var _ TCPConnMetrics = (*probeTestMetrics)(nil)
 var _ ShadowsocksConnMetrics = (*fakeShadowsocksMetrics)(nil)
 
-func (m *probeTestMetrics) AddClosed(accessKey, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *probeTestMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()

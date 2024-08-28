@@ -80,14 +80,14 @@ func (c *proxyCollector) Collect(ch chan<- prometheus.Metric) {
 	c.dataBytesPerLocation.Collect(ch)
 }
 
-func (c *proxyCollector) addOutbound(clientProxyBytes, proxyTargetBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
+func (c *proxyCollector) addClientTarget(clientProxyBytes, proxyTargetBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
 	addIfNonZero(clientProxyBytes, c.dataBytesPerKey, "c>p", accessKey)
 	addIfNonZero(clientProxyBytes, c.dataBytesPerLocation, "c>p", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 	addIfNonZero(proxyTargetBytes, c.dataBytesPerKey, "p>t", accessKey)
 	addIfNonZero(proxyTargetBytes, c.dataBytesPerLocation, "p>t", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 }
 
-func (c *proxyCollector) addInbound(targetProxyBytes, proxyClientBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
+func (c *proxyCollector) addTargetClient(targetProxyBytes, proxyClientBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
 	addIfNonZero(targetProxyBytes, c.dataBytesPerKey, "p<t", accessKey)
 	addIfNonZero(targetProxyBytes, c.dataBytesPerLocation, "p<t", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
 	addIfNonZero(proxyClientBytes, c.dataBytesPerKey, "c<p", accessKey)
@@ -95,49 +95,51 @@ func (c *proxyCollector) addInbound(targetProxyBytes, proxyClientBytes int64, ac
 }
 
 type tcpConnMetrics struct {
-	tcpCollector        *tcpCollector
-	tunnelTimeCollector *tunnelTimeCollector
+	tcpServiceMetrics *tcpServiceMetrics
+	tunnelTimeMetrics *tunnelTimeMetrics
 
 	localAddr  net.Addr
 	clientAddr net.Addr
 	clientInfo ipinfo.IPInfo
+	accessKey  string
 }
 
 var _ service.TCPConnMetrics = (*tcpConnMetrics)(nil)
 
-func newTCPConnMetrics(tcpCollector *tcpCollector, tunnelTimeCollector *tunnelTimeCollector, clientConn net.Conn, clientInfo ipinfo.IPInfo) *tcpConnMetrics {
-	tcpCollector.openConnection(clientInfo)
+func newTCPConnMetrics(tcpServiceMetrics *tcpServiceMetrics, tunnelTimeMetrics *tunnelTimeMetrics, clientConn net.Conn, clientInfo ipinfo.IPInfo) *tcpConnMetrics {
+	tcpServiceMetrics.openConnection(clientInfo)
 	return &tcpConnMetrics{
-		tcpCollector:        tcpCollector,
-		tunnelTimeCollector: tunnelTimeCollector,
-		localAddr:           clientConn.LocalAddr(),
-		clientAddr:          clientConn.RemoteAddr(),
-		clientInfo:          clientInfo,
+		tcpServiceMetrics: tcpServiceMetrics,
+		tunnelTimeMetrics: tunnelTimeMetrics,
+		localAddr:         clientConn.LocalAddr(),
+		clientAddr:        clientConn.RemoteAddr(),
+		clientInfo:        clientInfo,
 	}
 }
 
 func (cm *tcpConnMetrics) AddAuthenticated(accessKey string) {
+	cm.accessKey = accessKey
 	ipKey, err := toIPKey(cm.clientAddr, accessKey)
 	if err == nil {
-		cm.tunnelTimeCollector.startConnection(*ipKey)
+		cm.tunnelTimeMetrics.startConnection(*ipKey)
 	}
 }
 
-func (cm *tcpConnMetrics) AddClosed(accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
-	cm.tcpCollector.proxyCollector.addOutbound(data.ClientProxy, data.ProxyTarget, accessKey, cm.clientInfo)
-	cm.tcpCollector.proxyCollector.addInbound(data.TargetProxy, data.ProxyClient, accessKey, cm.clientInfo)
-	cm.tcpCollector.closeConnection(status, duration, accessKey, cm.clientInfo)
-	ipKey, err := toIPKey(cm.clientAddr, accessKey)
+func (cm *tcpConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
+	cm.tcpServiceMetrics.proxyCollector.addClientTarget(data.ClientProxy, data.ProxyTarget, cm.accessKey, cm.clientInfo)
+	cm.tcpServiceMetrics.proxyCollector.addTargetClient(data.TargetProxy, data.ProxyClient, cm.accessKey, cm.clientInfo)
+	cm.tcpServiceMetrics.closeConnection(status, duration, cm.accessKey, cm.clientInfo)
+	ipKey, err := toIPKey(cm.clientAddr, cm.accessKey)
 	if err == nil {
-		cm.tunnelTimeCollector.stopConnection(*ipKey)
+		cm.tunnelTimeMetrics.stopConnection(*ipKey)
 	}
 }
 
 func (cm *tcpConnMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {
-	cm.tcpCollector.addProbe(cm.localAddr.String(), status, drainResult, clientProxyBytes)
+	cm.tcpServiceMetrics.addProbe(cm.localAddr.String(), status, drainResult, clientProxyBytes)
 }
 
-type tcpCollector struct {
+type tcpServiceMetrics struct {
 	proxyCollector *proxyCollector
 	// NOTE: New metrics need to be added to `newTCPCollector()`, `Describe()` and `Collect()`.
 	probes               *prometheus.HistogramVec
@@ -147,10 +149,10 @@ type tcpCollector struct {
 	timeToCipherMs       prometheus.ObserverVec
 }
 
-var _ prometheus.Collector = (*tcpCollector)(nil)
-var _ service.ShadowsocksConnMetrics = (*tcpCollector)(nil)
+var _ prometheus.Collector = (*tcpServiceMetrics)(nil)
+var _ service.ShadowsocksConnMetrics = (*tcpServiceMetrics)(nil)
 
-func newTCPCollector() (*tcpCollector, error) {
+func newTCPCollector() (*tcpServiceMetrics, error) {
 	namespace := "tcp"
 	proxyCollector, err := newProxyCollector(namespace)
 	if err != nil {
@@ -160,7 +162,7 @@ func newTCPCollector() (*tcpCollector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tcpCollector{
+	return &tcpServiceMetrics{
 		proxyCollector: proxyCollector,
 		timeToCipherMs: timeToCipherVec,
 		probes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -196,7 +198,7 @@ func newTCPCollector() (*tcpCollector, error) {
 	}, nil
 }
 
-func (c *tcpCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *tcpServiceMetrics) Describe(ch chan<- *prometheus.Desc) {
 	c.proxyCollector.Describe(ch)
 	c.timeToCipherMs.Describe(ch)
 	c.probes.Describe(ch)
@@ -205,7 +207,7 @@ func (c *tcpCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.connectionDurationMs.Describe(ch)
 }
 
-func (c *tcpCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *tcpServiceMetrics) Collect(ch chan<- prometheus.Metric) {
 	c.proxyCollector.Collect(ch)
 	c.timeToCipherMs.Collect(ch)
 	c.probes.Collect(ch)
@@ -214,20 +216,20 @@ func (c *tcpCollector) Collect(ch chan<- prometheus.Metric) {
 	c.connectionDurationMs.Collect(ch)
 }
 
-func (c *tcpCollector) openConnection(clientInfo ipinfo.IPInfo) {
+func (c *tcpServiceMetrics) openConnection(clientInfo ipinfo.IPInfo) {
 	c.openConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
 }
 
-func (c *tcpCollector) closeConnection(status string, duration time.Duration, accessKey string, clientInfo ipinfo.IPInfo) {
+func (c *tcpServiceMetrics) closeConnection(status string, duration time.Duration, accessKey string, clientInfo ipinfo.IPInfo) {
 	c.closedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
 	c.connectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 }
 
-func (c *tcpCollector) addProbe(listenerId, status, drainResult string, clientProxyBytes int64) {
+func (c *tcpServiceMetrics) addProbe(listenerId, status, drainResult string, clientProxyBytes int64) {
 	c.probes.WithLabelValues(listenerId, status, drainResult).Observe(float64(clientProxyBytes))
 }
 
-func (c *tcpCollector) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (c *tcpServiceMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 	foundStr := "false"
 	if accessKeyFound {
 		foundStr = "true"
@@ -236,8 +238,8 @@ func (c *tcpCollector) AddCipherSearch(accessKeyFound bool, timeToCipher time.Du
 }
 
 type udpConnMetrics struct {
-	udpCollector        *udpCollector
-	tunnelTimeCollector *tunnelTimeCollector
+	udpServiceMetrics *udpServiceMetrics
+	tunnelTimeMetrics *tunnelTimeMetrics
 
 	clientAddr net.Addr
 	clientInfo ipinfo.IPInfo
@@ -246,39 +248,39 @@ type udpConnMetrics struct {
 
 var _ service.UDPConnMetrics = (*udpConnMetrics)(nil)
 
-func newUDPConnMetrics(udpCollector *udpCollector, tunnelTimeCollector *tunnelTimeCollector, accessKey string, clientAddr net.Addr, clientInfo ipinfo.IPInfo) *udpConnMetrics {
-	udpCollector.addNatEntry()
+func newUDPConnMetrics(udpServiceMetrics *udpServiceMetrics, tunnelTimeMetrics *tunnelTimeMetrics, accessKey string, clientAddr net.Addr, clientInfo ipinfo.IPInfo) *udpConnMetrics {
+	udpServiceMetrics.addNatEntry()
 	ipKey, err := toIPKey(clientAddr, accessKey)
 	if err == nil {
-		tunnelTimeCollector.startConnection(*ipKey)
+		tunnelTimeMetrics.startConnection(*ipKey)
 	}
 	return &udpConnMetrics{
-		udpCollector:        udpCollector,
-		tunnelTimeCollector: tunnelTimeCollector,
-		accessKey:           accessKey,
-		clientAddr:          clientAddr,
-		clientInfo:          clientInfo,
+		udpServiceMetrics: udpServiceMetrics,
+		tunnelTimeMetrics: tunnelTimeMetrics,
+		accessKey:         accessKey,
+		clientAddr:        clientAddr,
+		clientInfo:        clientInfo,
 	}
 }
 
 func (cm *udpConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int) {
-	cm.udpCollector.addPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes), cm.accessKey, cm.clientInfo)
+	cm.udpServiceMetrics.addPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes), cm.accessKey, cm.clientInfo)
 }
 
 func (cm *udpConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int) {
-	cm.udpCollector.addPacketFromTarget(status, int64(targetProxyBytes), int64(proxyClientBytes), cm.accessKey, cm.clientInfo)
+	cm.udpServiceMetrics.addPacketFromTarget(status, int64(targetProxyBytes), int64(proxyClientBytes), cm.accessKey, cm.clientInfo)
 }
 
 func (cm *udpConnMetrics) RemoveNatEntry() {
-	cm.udpCollector.removeNatEntry()
+	cm.udpServiceMetrics.removeNatEntry()
 
 	ipKey, err := toIPKey(cm.clientAddr, cm.accessKey)
 	if err == nil {
-		cm.tunnelTimeCollector.stopConnection(*ipKey)
+		cm.tunnelTimeMetrics.stopConnection(*ipKey)
 	}
 }
 
-type udpCollector struct {
+type udpServiceMetrics struct {
 	proxyCollector *proxyCollector
 	// NOTE: New metrics need to be added to `newUDPCollector()`, `Describe()` and `Collect()`.
 	packetsFromClientPerLocation *prometheus.CounterVec
@@ -287,10 +289,10 @@ type udpCollector struct {
 	timeToCipherMs               prometheus.ObserverVec
 }
 
-var _ prometheus.Collector = (*udpCollector)(nil)
-var _ service.ShadowsocksConnMetrics = (*tcpCollector)(nil)
+var _ prometheus.Collector = (*udpServiceMetrics)(nil)
+var _ service.ShadowsocksConnMetrics = (*tcpServiceMetrics)(nil)
 
-func newUDPCollector() (*udpCollector, error) {
+func newUDPCollector() (*udpServiceMetrics, error) {
 	namespace := "udp"
 	proxyCollector, err := newProxyCollector(namespace)
 	if err != nil {
@@ -300,7 +302,7 @@ func newUDPCollector() (*udpCollector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &udpCollector{
+	return &udpServiceMetrics{
 		proxyCollector: proxyCollector,
 		timeToCipherMs: timeToCipherVec,
 		packetsFromClientPerLocation: prometheus.NewCounterVec(
@@ -324,7 +326,7 @@ func newUDPCollector() (*udpCollector, error) {
 	}, nil
 }
 
-func (c *udpCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *udpServiceMetrics) Describe(ch chan<- *prometheus.Desc) {
 	c.proxyCollector.Describe(ch)
 	c.timeToCipherMs.Describe(ch)
 	c.packetsFromClientPerLocation.Describe(ch)
@@ -332,7 +334,7 @@ func (c *udpCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.removedNatEntries.Describe(ch)
 }
 
-func (c *udpCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *udpServiceMetrics) Collect(ch chan<- prometheus.Metric) {
 	c.proxyCollector.Collect(ch)
 	c.timeToCipherMs.Collect(ch)
 	c.packetsFromClientPerLocation.Collect(ch)
@@ -340,24 +342,24 @@ func (c *udpCollector) Collect(ch chan<- prometheus.Metric) {
 	c.removedNatEntries.Collect(ch)
 }
 
-func (c *udpCollector) addNatEntry() {
+func (c *udpServiceMetrics) addNatEntry() {
 	c.addedNatEntries.Inc()
 }
 
-func (c *udpCollector) removeNatEntry() {
+func (c *udpServiceMetrics) removeNatEntry() {
 	c.removedNatEntries.Inc()
 }
 
-func (c *udpCollector) addPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
+func (c *udpServiceMetrics) addPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
 	c.packetsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status).Inc()
-	c.proxyCollector.addOutbound(clientProxyBytes, proxyTargetBytes, accessKey, clientInfo)
+	c.proxyCollector.addClientTarget(clientProxyBytes, proxyTargetBytes, accessKey, clientInfo)
 }
 
-func (c *udpCollector) addPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
-	c.proxyCollector.addInbound(targetProxyBytes, proxyClientBytes, accessKey, clientInfo)
+func (c *udpServiceMetrics) addPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
+	c.proxyCollector.addTargetClient(targetProxyBytes, proxyClientBytes, accessKey, clientInfo)
 }
 
-func (c *udpCollector) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+func (c *udpServiceMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 	foundStr := "false"
 	if accessKeyFound {
 		foundStr = "true"
@@ -379,7 +381,7 @@ type IPKey struct {
 	accessKey string
 }
 
-type tunnelTimeCollector struct {
+type tunnelTimeMetrics struct {
 	ip2info       ipinfo.IPInfoMap
 	mu            sync.Mutex // Protects the activeClients map.
 	activeClients map[IPKey]*activeClient
@@ -389,11 +391,11 @@ type tunnelTimeCollector struct {
 	tunnelTimePerLocation *prometheus.CounterVec
 }
 
-var _ prometheus.Collector = (*tunnelTimeCollector)(nil)
+var _ prometheus.Collector = (*tunnelTimeMetrics)(nil)
 
-func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap) *tunnelTimeCollector {
+func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap) *tunnelTimeMetrics {
 	namespace := "tunnel_time"
-	return &tunnelTimeCollector{
+	return &tunnelTimeMetrics{
 		ip2info:       ip2info,
 		activeClients: make(map[IPKey]*activeClient),
 
@@ -410,12 +412,12 @@ func newTunnelTimeCollector(ip2info ipinfo.IPInfoMap) *tunnelTimeCollector {
 	}
 }
 
-func (c *tunnelTimeCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *tunnelTimeMetrics) Describe(ch chan<- *prometheus.Desc) {
 	c.tunnelTimePerKey.Describe(ch)
 	c.tunnelTimePerLocation.Describe(ch)
 }
 
-func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *tunnelTimeMetrics) Collect(ch chan<- prometheus.Metric) {
 	tNow := now()
 	c.mu.Lock()
 	for ipKey, client := range c.activeClients {
@@ -427,7 +429,7 @@ func (c *tunnelTimeCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 // Calculates and reports the tunnel time for a given active client.
-func (c *tunnelTimeCollector) reportTunnelTime(ipKey IPKey, client *activeClient, tNow time.Time) {
+func (c *tunnelTimeMetrics) reportTunnelTime(ipKey IPKey, client *activeClient, tNow time.Time) {
 	tunnelTime := tNow.Sub(client.startTime)
 	slog.LogAttrs(nil, slog.LevelDebug, "Reporting tunnel time.", slog.String("key", ipKey.accessKey), slog.Duration("duration", tunnelTime))
 	c.tunnelTimePerKey.WithLabelValues(ipKey.accessKey).Add(tunnelTime.Seconds())
@@ -437,7 +439,7 @@ func (c *tunnelTimeCollector) reportTunnelTime(ipKey IPKey, client *activeClient
 }
 
 // Registers a new active connection for a client [net.Addr] and access key.
-func (c *tunnelTimeCollector) startConnection(ipKey IPKey) {
+func (c *tunnelTimeMetrics) startConnection(ipKey IPKey) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	client, exists := c.activeClients[ipKey]
@@ -450,7 +452,7 @@ func (c *tunnelTimeCollector) startConnection(ipKey IPKey) {
 }
 
 // Removes an active connection for a client [net.Addr] and access key.
-func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
+func (c *tunnelTimeMetrics) stopConnection(ipKey IPKey) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	client, exists := c.activeClients[ipKey]
@@ -468,9 +470,9 @@ func (c *tunnelTimeCollector) stopConnection(ipKey IPKey) {
 type outlineMetricsCollector struct {
 	ip2info ipinfo.IPInfoMap
 
-	tcpCollector        *tcpCollector
-	udpCollector        *udpCollector
-	tunnelTimeCollector *tunnelTimeCollector
+	tcpServiceMetrics *tcpServiceMetrics
+	udpServiceMetrics *udpServiceMetrics
+	tunnelTimeMetrics *tunnelTimeMetrics
 
 	// NOTE: New metrics need to be added to `newPrometheusOutlineMetrics()`, `Describe()` and `Collect()`.
 	buildInfo  *prometheus.GaugeVec
@@ -485,22 +487,22 @@ var _ service.UDPMetrics = (*outlineMetricsCollector)(nil)
 // newPrometheusOutlineMetrics constructs a Prometheus metrics collector that uses
 // `ip2info` to convert IP addresses to countries. `ip2info` may be nil.
 func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetricsCollector, error) {
-	tcpCollector, err := newTCPCollector()
+	tcpServiceMetrics, err := newTCPCollector()
 	if err != nil {
 		return nil, err
 	}
-	udpCollector, err := newUDPCollector()
+	udpServiceMetrics, err := newUDPCollector()
 	if err != nil {
 		return nil, err
 	}
-	tunnelTimeCollector := newTunnelTimeCollector(ip2info)
+	tunnelTimeMetrics := newTunnelTimeCollector(ip2info)
 
 	return &outlineMetricsCollector{
 		ip2info: ip2info,
 
-		tcpCollector:        tcpCollector,
-		udpCollector:        udpCollector,
-		tunnelTimeCollector: tunnelTimeCollector,
+		tcpServiceMetrics: tcpServiceMetrics,
+		udpServiceMetrics: udpServiceMetrics,
+		tunnelTimeMetrics: tunnelTimeMetrics,
 
 		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "build_info",
@@ -518,18 +520,18 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetricsColle
 }
 
 func (m *outlineMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
-	m.tcpCollector.Describe(ch)
-	m.udpCollector.Describe(ch)
-	m.tunnelTimeCollector.Describe(ch)
+	m.tcpServiceMetrics.Describe(ch)
+	m.udpServiceMetrics.Describe(ch)
+	m.tunnelTimeMetrics.Describe(ch)
 	m.buildInfo.Describe(ch)
 	m.accessKeys.Describe(ch)
 	m.ports.Describe(ch)
 }
 
 func (m *outlineMetricsCollector) Collect(ch chan<- prometheus.Metric) {
-	m.tcpCollector.Collect(ch)
-	m.udpCollector.Collect(ch)
-	m.tunnelTimeCollector.Collect(ch)
+	m.tcpServiceMetrics.Collect(ch)
+	m.udpServiceMetrics.Collect(ch)
+	m.tunnelTimeMetrics.Collect(ch)
 	m.buildInfo.Collect(ch)
 	m.accessKeys.Collect(ch)
 	m.ports.Collect(ch)
@@ -559,12 +561,12 @@ func (m *outlineMetricsCollector) SetNumAccessKeys(numKeys int, ports int) {
 func (m *outlineMetricsCollector) AddOpenTCPConnection(clientConn net.Conn) *tcpConnMetrics {
 	clientAddr := clientConn.RemoteAddr()
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
-	return newTCPConnMetrics(m.tcpCollector, m.tunnelTimeCollector, clientConn, clientInfo)
+	return newTCPConnMetrics(m.tcpServiceMetrics, m.tunnelTimeMetrics, clientConn, clientInfo)
 }
 
 func (m *outlineMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) service.UDPConnMetrics {
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
-	return newUDPConnMetrics(m.udpCollector, m.tunnelTimeCollector, accessKey, clientAddr, clientInfo)
+	return newUDPConnMetrics(m.udpServiceMetrics, m.tunnelTimeMetrics, accessKey, clientAddr, clientInfo)
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.

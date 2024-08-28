@@ -38,7 +38,7 @@ import (
 // TCPConnMetrics is used to report metrics on TCP connections.
 type TCPConnMetrics interface {
 	AddAuthenticated(accessKey string)
-	AddClosed(accessKey, status string, data metrics.ProxyMetrics, duration time.Duration)
+	AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration)
 	AddProbe(status, drainResult string, clientProxyBytes int64)
 }
 
@@ -245,7 +245,7 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()
 
-	id, connError := h.handleConnection(ctx, measuredClientConn, connMetrics, &proxyMetrics)
+	connError := h.handleConnection(ctx, measuredClientConn, connMetrics, &proxyMetrics)
 
 	connDuration := time.Since(connStart)
 	status := "OK"
@@ -253,7 +253,7 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 		status = connError.Status
 		slog.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 	}
-	connMetrics.AddClosed(id, status, proxyMetrics, connDuration)
+	connMetrics.AddClosed(status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	slog.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
 }
@@ -308,7 +308,7 @@ func proxyConnection(ctx context.Context, dialer transport.StreamDialer, tgtAddr
 	return nil
 }
 
-func (h *streamHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, connMetrics TCPConnMetrics, proxyMetrics *metrics.ProxyMetrics) (string, *onet.ConnectionError) {
+func (h *streamHandler) handleConnection(ctx context.Context, outerConn transport.StreamConn, connMetrics TCPConnMetrics, proxyMetrics *metrics.ProxyMetrics) *onet.ConnectionError {
 	// Set a deadline to receive the address to the target.
 	readDeadline := time.Now().Add(h.readTimeout)
 	if deadline, ok := ctx.Deadline(); ok {
@@ -323,7 +323,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 	if authErr != nil {
 		// Drain to protect against probing attacks.
 		h.absorbProbe(outerConn, connMetrics, authErr.Status, proxyMetrics)
-		return id, authErr
+		return authErr
 	}
 	connMetrics.AddAuthenticated(id)
 
@@ -334,7 +334,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 	if err != nil {
 		// Drain to prevent a close on cipher error.
 		io.Copy(io.Discard, outerConn)
-		return id, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
+		return onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", err)
 	}
 
 	dialer := transport.FuncStreamDialer(func(ctx context.Context, addr string) (transport.StreamConn, error) {
@@ -345,7 +345,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 		tgtConn = metrics.MeasureConn(tgtConn, &proxyMetrics.ProxyTarget, &proxyMetrics.TargetProxy)
 		return tgtConn, nil
 	})
-	return id, proxyConnection(ctx, dialer, tgtAddr, innerConn)
+	return proxyConnection(ctx, dialer, tgtAddr, innerConn)
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
@@ -377,6 +377,6 @@ type NoOpTCPConnMetrics struct{}
 var _ TCPConnMetrics = (*NoOpTCPConnMetrics)(nil)
 
 func (m *NoOpTCPConnMetrics) AddAuthenticated(accessKey string) {}
-func (m *NoOpTCPConnMetrics) AddClosed(accessKey string, status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *NoOpTCPConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
 func (m *NoOpTCPConnMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {}

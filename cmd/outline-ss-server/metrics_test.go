@@ -76,7 +76,7 @@ func TestMethodsDontPanic(t *testing.T) {
 
 	tcpMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
 	tcpMetrics.AddAuthenticated("0")
-	tcpMetrics.AddClosed("1", "OK", proxyMetrics, 10*time.Millisecond)
+	tcpMetrics.AddClosed("OK", proxyMetrics, 10*time.Millisecond)
 	tcpMetrics.AddProbe("ERR_CIPHER", "eof", proxyMetrics.ClientProxy)
 
 	udpMetrics := ssMetrics.AddUDPNatEntry(addr, "key-1")
@@ -84,8 +84,8 @@ func TestMethodsDontPanic(t *testing.T) {
 	udpMetrics.AddPacketFromTarget("OK", 10, 20)
 	udpMetrics.RemoveNatEntry()
 
-	ssMetrics.tcpCollector.AddCipherSearch(true, 10*time.Millisecond)
-	ssMetrics.udpCollector.AddCipherSearch(true, 10*time.Millisecond)
+	ssMetrics.tcpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
+	ssMetrics.udpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
 }
 
 func TestASNLabel(t *testing.T) {
@@ -146,7 +146,7 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
 
 	connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
-	connMetrics.AddClosed("key-1", "OK", metrics.ProxyMetrics{}, time.Minute)
+	connMetrics.AddClosed("OK", metrics.ProxyMetrics{}, time.Minute)
 
 	err := promtest.GatherAndCompare(
 		reg,
@@ -175,7 +175,7 @@ func BenchmarkCloseTCP(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		connMetrics.AddAuthenticated(accessKey)
-		connMetrics.AddClosed(accessKey, status, data, duration)
+		connMetrics.AddClosed(status, data, duration)
 	}
 }
 
