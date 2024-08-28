@@ -60,7 +60,7 @@ type SSServer struct {
 	stopConfig  func() error
 	lnManager   service.ListenerManager
 	natTimeout  time.Duration
-	m           *outlineMetrics
+	m           *outlineMetricsCollector
 	replayCache service.ReplayCache
 }
 
@@ -333,7 +333,7 @@ func (s *SSServer) Stop() error {
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
-func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
+func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetricsCollector, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
 		lnManager:   service.NewListenerManager(),
 		natTimeout:  natTimeout,
@@ -416,9 +416,11 @@ func main() {
 	}
 	defer ip2info.Close()
 
-	m := newPrometheusOutlineMetrics(ip2info, prometheus.DefaultRegisterer)
-	m.SetBuildInfo(version)
-	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, m, flags.replayHistory)
+	metrics := newPrometheusOutlineMetrics(ip2info)
+	metrics.SetBuildInfo(version)
+	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
+	r.MustRegister(metrics)
+	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, metrics, flags.replayHistory)
 	if err != nil {
 		slog.Error("Server failed to start. Aborting.", "err", err)
 	}
