@@ -94,7 +94,7 @@ func (conn *fakePacketConn) Close() error {
 type udpReport struct {
 	clientAddr                         net.Addr
 	accessKey, status                  string
-	clientProxyBytes, proxyTargetBytes int
+	clientProxyBytes, proxyTargetBytes int64
 }
 
 // Stub metrics implementation for testing NAT behaviors.
@@ -106,10 +106,10 @@ type fakeUDPConnMetrics struct {
 
 var _ UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
 
-func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int) {
+func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
 func (m *fakeUDPConnMetrics) RemoveNatEntry() {
 }
@@ -191,7 +191,7 @@ func TestUpstreamMetrics(t *testing.T) {
 
 	assert.Equal(t, N, len(metrics.connMetrics[0].upstreamPackets), "Expected %d reports, not %v", N, metrics.connMetrics[0].upstreamPackets)
 	for i, report := range metrics.connMetrics[0].upstreamPackets {
-		assert.Equal(t, i+1, report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
+		assert.Equal(t, int64(i+1), report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
 		assert.Greater(t, report.clientProxyBytes, report.proxyTargetBytes, "Expected nonzero input overhead (%d > %d)", report.clientProxyBytes, report.proxyTargetBytes)
 		assert.Equal(t, "id-0", report.accessKey, "Unexpected access key name: %s", report.accessKey)
 		assert.Equal(t, "OK", report.status, "Wrong status: %s", report.status)

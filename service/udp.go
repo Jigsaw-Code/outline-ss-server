@@ -31,8 +31,8 @@ import (
 
 // UDPConnMetrics is used to report metrics on UDP connections.
 type UDPConnMetrics interface {
-	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int)
-	AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int)
+	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64)
+	AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64)
 	RemoveNatEntry()
 }
 
@@ -199,7 +199,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			status = connError.Status
 		}
 		if targetConn != nil {
-			targetConn.metrics.AddPacketFromClient(status, clientProxyBytes, proxyTargetBytes)
+			targetConn.metrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
 		}
 	}
 }
@@ -443,7 +443,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		if expired {
 			break
 		}
-		targetConn.metrics.AddPacketFromTarget(status, bodyLen, proxyClientBytes)
+		targetConn.metrics.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
 	}
 }
 
@@ -453,9 +453,9 @@ type NoOpUDPConnMetrics struct{}
 
 var _ UDPConnMetrics = (*NoOpUDPConnMetrics)(nil)
 
-func (m *NoOpUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *NoOpUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 }
-func (m *NoOpUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int) {
+func (m *NoOpUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
 func (m *NoOpUDPConnMetrics) RemoveNatEntry() {}
 

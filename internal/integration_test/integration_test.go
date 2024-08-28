@@ -261,7 +261,7 @@ func TestRestrictedAddresses(t *testing.T) {
 type udpRecord struct {
 	clientAddr        net.Addr
 	accessKey, status string
-	in, out           int
+	in, out           int64
 }
 
 type fakeUDPConnMetrics struct {
@@ -272,10 +272,10 @@ type fakeUDPConnMetrics struct {
 
 var _ service.UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
 
-func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int) {
+func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.up = append(m.up, udpRecord{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int) {
+func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 	m.down = append(m.down, udpRecord{m.clientAddr, m.accessKey, status, targetProxyBytes, proxyClientBytes})
 }
 func (m *fakeUDPConnMetrics) RemoveNatEntry() {
@@ -372,7 +372,7 @@ func TestUDPEcho(t *testing.T) {
 		require.Equal(t, keyID, record.accessKey, "Bad upstream metrics")
 		require.Equal(t, "OK", record.status, "Bad upstream metrics")
 		require.Greater(t, record.in, record.out, "Bad upstream metrics")
-		require.Equal(t, N, record.out, "Bad upstream metrics")
+		require.Equal(t, int64(N), record.out, "Bad upstream metrics")
 	}
 	if len(testMetrics.connMetrics[0].down) != 1 {
 		t.Errorf("Wrong number of packets received: %v", testMetrics.connMetrics[0].down)
@@ -382,7 +382,7 @@ func TestUDPEcho(t *testing.T) {
 		require.Equal(t, keyID, record.accessKey, "Bad downstream metrics")
 		require.Equal(t, "OK", record.status, "Bad downstream metrics")
 		require.Greater(t, record.out, record.in, "Bad downstream metrics")
-		require.Equal(t, N, record.in, "Bad downstream metrics")
+		require.Equal(t, int64(N), record.in, "Bad downstream metrics")
 	}
 }
 

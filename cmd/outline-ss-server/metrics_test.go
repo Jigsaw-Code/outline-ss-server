@@ -197,7 +197,7 @@ func BenchmarkClientUDP(b *testing.B) {
 	accessKey := "key 1"
 	udpMetrics := ssMetrics.AddUDPNatEntry(addr, accessKey)
 	status := "OK"
-	size := 1000
+	size := int64(1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		udpMetrics.AddPacketFromClient(status, size, size)
@@ -210,7 +210,7 @@ func BenchmarkTargetUDP(b *testing.B) {
 	accessKey := "key 1"
 	udpMetrics := ssMetrics.AddUDPNatEntry(addr, accessKey)
 	status := "OK"
-	size := 1000
+	size := int64(1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		udpMetrics.AddPacketFromTarget(status, size, size)

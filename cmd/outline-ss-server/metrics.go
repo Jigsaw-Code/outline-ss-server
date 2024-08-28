@@ -263,12 +263,12 @@ func newUDPConnMetrics(udpServiceMetrics *udpServiceMetrics, tunnelTimeMetrics *
 	}
 }
 
-func (cm *udpConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int) {
-	cm.udpServiceMetrics.addPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes), cm.accessKey, cm.clientInfo)
+func (cm *udpConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+	cm.udpServiceMetrics.addPacketFromClient(status, clientProxyBytes, proxyTargetBytes, cm.accessKey, cm.clientInfo)
 }
 
-func (cm *udpConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int) {
-	cm.udpServiceMetrics.addPacketFromTarget(status, int64(targetProxyBytes), int64(proxyClientBytes), cm.accessKey, cm.clientInfo)
+func (cm *udpConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+	cm.udpServiceMetrics.addPacketFromTarget(status, targetProxyBytes, proxyClientBytes, cm.accessKey, cm.clientInfo)
 }
 
 func (cm *udpConnMetrics) RemoveNatEntry() {
