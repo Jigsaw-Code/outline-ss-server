@@ -63,7 +63,7 @@ type SSServer struct {
 	stopConfig  func() error
 	lnManager   service.ListenerManager
 	natTimeout  time.Duration
-	m           *outlineMetricsCollector
+	m           *outlineMetrics
 	replayCache service.ReplayCache
 }
 
@@ -248,7 +248,7 @@ func (s *SSServer) Stop() error {
 }
 
 // RunSSServer starts a shadowsocks server running, and returns the server or an error.
-func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetricsCollector, replayHistory int) (*SSServer, error) {
+func RunSSServer(filename string, natTimeout time.Duration, sm *outlineMetrics, replayHistory int) (*SSServer, error) {
 	server := &SSServer{
 		lnManager:   service.NewListenerManager(),
 		natTimeout:  natTimeout,
