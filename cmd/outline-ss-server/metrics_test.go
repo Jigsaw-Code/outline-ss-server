@@ -58,7 +58,7 @@ func TestMethodsDontPanic(t *testing.T) {
 		TargetProxy: 3,
 		ProxyClient: 4,
 	}
-	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
+	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: ipinfo.ASN{Number: 100}}
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
 	ssMetrics.AddOpenTCPConnection(ipInfo)
@@ -74,8 +74,8 @@ func TestMethodsDontPanic(t *testing.T) {
 }
 
 func TestASNLabel(t *testing.T) {
-	require.Equal(t, "", asnLabel(0))
-	require.Equal(t, "100", asnLabel(100))
+	require.Equal(t, "", asnLabel(ipinfo.ASN{Number: 0}))
+	require.Equal(t, "100", asnLabel(ipinfo.ASN{Number: 100}))
 }
 
 func TestTunnelTime(t *testing.T) {
@@ -113,7 +113,7 @@ func TestTunnelTime(t *testing.T) {
 		expected := strings.NewReader(`
 		# HELP tunnel_time_seconds_per_location Tunnel time, per location.
 		# TYPE tunnel_time_seconds_per_location counter
-		tunnel_time_seconds_per_location{asn="",location="XL"} 5
+		tunnel_time_seconds_per_location{asn="",asorg="",location="XL"} 5
 	`)
 		err := promtest.GatherAndCompare(
 			reg,
@@ -140,7 +140,7 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 
 func BenchmarkOpenTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil)
-	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
+	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: ipinfo.ASN{Number: 100}}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ssMetrics.AddOpenTCPConnection(ipinfo)
@@ -149,7 +149,7 @@ func BenchmarkOpenTCP(b *testing.B) {
 
 func BenchmarkCloseTCP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil)
-	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: 100}
+	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: ipinfo.ASN{Number: 100}}
 	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
 	status := "OK"
@@ -177,7 +177,7 @@ func BenchmarkProbe(b *testing.B) {
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil)
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: ipinfo.ASN{Number: 100}}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000
@@ -191,7 +191,7 @@ func BenchmarkClientUDP(b *testing.B) {
 
 func BenchmarkTargetUDP(b *testing.B) {
 	ssMetrics := newPrometheusOutlineMetrics(nil)
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: 100}
+	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: ipinfo.ASN{Number: 100}}
 	accessKey := "key 1"
 	status := "OK"
 	size := 1000

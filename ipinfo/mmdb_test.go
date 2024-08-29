@@ -78,11 +78,11 @@ func TestIPInfoMapASNOnly(t *testing.T) {
 	// For examples, see https://github.com/maxmind/MaxMind-DB/blob/main/source-data/GeoLite2-ASN-Test.json
 	info, err := ip2info.GetIPInfo(net.ParseIP("38.108.80.24"))
 	require.NoError(t, err)
-	assert.Equal(t, IPInfo{ASN: 174}, info)
+	assert.Equal(t, IPInfo{ASN: ASN{Number: 174, Organization: "Cogent Communications"}}, info)
 
 	info, err = ip2info.GetIPInfo(net.ParseIP("2400::1"))
 	require.NoError(t, err)
-	assert.Equal(t, IPInfo{ASN: 4766}, info)
+	assert.Equal(t, IPInfo{ASN: ASN{Number: 4766, Organization: "Korea Telecom"}}, info)
 
 	info, err = ip2info.GetIPInfo(net.ParseIP("10.0.0.1"))
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestIPInfoMap(t *testing.T) {
 
 	info, err := ip2info.GetIPInfo(net.ParseIP("67.43.156.0"))
 	require.NoError(t, err)
-	assert.Equal(t, IPInfo{CountryCode: "BT", ASN: 35908}, info)
+	assert.Equal(t, IPInfo{CountryCode: "BT", ASN: ASN{Number: 35908, Organization: ""}}, info)
 
 	info, err = ip2info.GetIPInfo(net.ParseIP("2a02:d280::"))
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestIPInfoMap(t *testing.T) {
 
 	info, err = ip2info.GetIPInfo(net.ParseIP("2400::1"))
 	require.NoError(t, err)
-	assert.Equal(t, IPInfo{ASN: 4766}, info)
+	assert.Equal(t, IPInfo{ASN: ASN{Number: 4766, Organization: "Korea Telecom"}}, info)
 
 	info, err = ip2info.GetIPInfo(net.ParseIP("10.0.0.1"))
 	require.NoError(t, err)

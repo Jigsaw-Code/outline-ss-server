@@ -79,7 +79,10 @@ func (ip2info *MMDBIPInfoMap) GetIPInfo(ip net.IP) (IPInfo, error) {
 		if asnErr != nil {
 			asnErr = fmt.Errorf("asn lookup failed: %w", asnErr)
 		} else if record != nil {
-			info.ASN = int(record.AutonomousSystemNumber)
+			info.ASN = ASN{
+				Number:       int(record.AutonomousSystemNumber),
+				Organization: record.AutonomousSystemOrganization,
+			}
 		}
 	}
 	return info, errors.Join(countryErr, asnErr)
