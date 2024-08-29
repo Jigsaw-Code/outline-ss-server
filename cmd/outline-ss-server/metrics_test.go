@@ -50,27 +50,42 @@ func init() {
 	logging.SetLevel(logging.INFO, "")
 }
 
+type fakeConn struct {
+	net.Conn
+}
+
+func (c *fakeConn) LocalAddr() net.Addr {
+	return fakeAddr("127.0.0.1:9")
+}
+
+func (c *fakeConn) RemoteAddr() net.Addr {
+	return fakeAddr("127.0.0.1:10")
+}
+
 func TestMethodsDontPanic(t *testing.T) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
 	proxyMetrics := metrics.ProxyMetrics{
 		ClientProxy: 1,
 		ProxyTarget: 2,
 		TargetProxy: 3,
 		ProxyClient: 4,
 	}
-	ipInfo := ipinfo.IPInfo{CountryCode: "US", ASN: ipinfo.ASN{Number: 100}}
+	addr := fakeAddr("127.0.0.1:9")
 	ssMetrics.SetBuildInfo("0.0.0-test")
 	ssMetrics.SetNumAccessKeys(20, 2)
-	ssMetrics.AddOpenTCPConnection(ipInfo)
-	ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "0")
-	ssMetrics.AddClosedTCPConnection(ipInfo, fakeAddr("127.0.0.1:9"), "1", "OK", proxyMetrics, 10*time.Millisecond)
-	ssMetrics.AddUDPPacketFromClient(ipInfo, "2", "OK", 10, 20)
-	ssMetrics.AddUDPPacketFromTarget(ipInfo, "3", "OK", 10, 20)
-	ssMetrics.AddUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
-	ssMetrics.RemoveUDPNatEntry(fakeAddr("127.0.0.1:9"), "key-1")
-	ssMetrics.AddTCPProbe("ERR_CIPHER", "eof", "127.0.0.1:443", proxyMetrics.ClientProxy)
-	ssMetrics.AddTCPCipherSearch(true, 10*time.Millisecond)
-	ssMetrics.AddUDPCipherSearch(true, 10*time.Millisecond)
+
+	tcpMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
+	tcpMetrics.AddAuthenticated("0")
+	tcpMetrics.AddClosed("OK", proxyMetrics, 10*time.Millisecond)
+	tcpMetrics.AddProbe("ERR_CIPHER", "eof", proxyMetrics.ClientProxy)
+
+	udpMetrics := ssMetrics.AddUDPNatEntry(addr, "key-1")
+	udpMetrics.AddPacketFromClient("OK", 10, 20)
+	udpMetrics.AddPacketFromTarget("OK", 10, 20)
+	udpMetrics.RemoveNatEntry()
+
+	ssMetrics.tcpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
+	ssMetrics.udpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
 }
 
 func TestASNLabel(t *testing.T) {
@@ -81,11 +96,12 @@ func TestASNLabel(t *testing.T) {
 func TestTunnelTime(t *testing.T) {
 	t.Run("PerKey", func(t *testing.T) {
 		setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
-		ssMetrics := newPrometheusOutlineMetrics(nil)
+		ssMetrics, _ := newPrometheusOutlineMetrics(nil)
 		reg := prometheus.NewPedanticRegistry()
 		reg.MustRegister(ssMetrics)
 
-		ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
+		connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
+		connMetrics.AddAuthenticated("key-1")
 		setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 
 		expected := strings.NewReader(`
@@ -103,11 +119,12 @@ func TestTunnelTime(t *testing.T) {
 
 	t.Run("PerLocation", func(t *testing.T) {
 		setNow(time.Date(2010, 1, 2, 3, 4, 5, .0, time.Local))
-		ssMetrics := newPrometheusOutlineMetrics(&noopMap{})
+		ssMetrics, _ := newPrometheusOutlineMetrics(&noopMap{})
 		reg := prometheus.NewPedanticRegistry()
 		reg.MustRegister(ssMetrics)
 
-		ssMetrics.AddAuthenticatedTCPConnection(fakeAddr("127.0.0.1:9"), "key-1")
+		connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
+		connMetrics.AddAuthenticated("key-1")
 		setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 
 		expected := strings.NewReader(`
@@ -126,9 +143,10 @@ func TestTunnelTime(t *testing.T) {
 
 func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
-	ssMetrics := newPrometheusOutlineMetrics(nil)
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
 
-	ssMetrics.AddClosedTCPConnection(ipinfo.IPInfo{}, fakeAddr("127.0.0.1:9"), "key-1", "OK", metrics.ProxyMetrics{}, time.Minute)
+	connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
+	connMetrics.AddClosed("OK", metrics.ProxyMetrics{}, time.Minute)
 
 	err := promtest.GatherAndCompare(
 		reg,
@@ -139,74 +157,72 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 }
 
 func BenchmarkOpenTCP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
-	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: ipinfo.ASN{Number: 100}}
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
+	conn := &fakeConn{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddOpenTCPConnection(ipinfo)
+		ssMetrics.AddOpenTCPConnection(conn)
 	}
 }
 
 func BenchmarkCloseTCP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
-	ipinfo := ipinfo.IPInfo{CountryCode: "US", ASN: ipinfo.ASN{Number: 100}}
-	addr := fakeAddr("127.0.0.1:9")
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
+	connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
 	accessKey := "key 1"
 	status := "OK"
 	data := metrics.ProxyMetrics{}
-	timeToCipher := time.Microsecond
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddAuthenticatedTCPConnection(addr, accessKey)
-		ssMetrics.AddClosedTCPConnection(ipinfo, addr, accessKey, status, data, duration)
-		ssMetrics.AddTCPCipherSearch(true, timeToCipher)
+		connMetrics.AddAuthenticated(accessKey)
+		connMetrics.AddClosed(status, data, duration)
 	}
 }
 
 func BenchmarkProbe(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
+	connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
 	status := "ERR_REPLAY"
 	drainResult := "other"
 	data := metrics.ProxyMetrics{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddTCPProbe(status, drainResult, "127.0.0.1:12345", data.ClientProxy)
+		connMetrics.AddProbe(status, drainResult, data.ClientProxy)
 	}
 }
 
 func BenchmarkClientUDP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: ipinfo.ASN{Number: 100}}
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
+	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
+	udpMetrics := ssMetrics.AddUDPNatEntry(addr, accessKey)
 	status := "OK"
-	size := 1000
-	timeToCipher := time.Microsecond
+	size := int64(1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPPacketFromClient(clientInfo, accessKey, status, size, size)
-		ssMetrics.AddUDPCipherSearch(true, timeToCipher)
+		udpMetrics.AddPacketFromClient(status, size, size)
 	}
 }
 
 func BenchmarkTargetUDP(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
-	clientInfo := ipinfo.IPInfo{CountryCode: "ZZ", ASN: ipinfo.ASN{Number: 100}}
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
+	addr := fakeAddr("127.0.0.1:9")
 	accessKey := "key 1"
+	udpMetrics := ssMetrics.AddUDPNatEntry(addr, accessKey)
 	status := "OK"
-	size := 1000
+	size := int64(1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPPacketFromTarget(clientInfo, accessKey, status, size, size)
+		udpMetrics.AddPacketFromTarget(status, size, size)
 	}
 }
 
 func BenchmarkNAT(b *testing.B) {
-	ssMetrics := newPrometheusOutlineMetrics(nil)
+	ssMetrics, _ := newPrometheusOutlineMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ssMetrics.AddUDPNatEntry(addr, "key-0")
-		ssMetrics.RemoveUDPNatEntry(addr, "key-0")
+		udpMetrics := ssMetrics.AddUDPNatEntry(addr, "key-0")
+		udpMetrics.RemoveNatEntry()
 	}
 }
