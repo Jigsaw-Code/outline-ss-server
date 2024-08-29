@@ -467,7 +467,7 @@ func (c *tunnelTimeMetrics) stopConnection(ipKey IPKey) {
 	}
 }
 
-type outlineMetricsCollector struct {
+type outlineMetrics struct {
 	ip2info ipinfo.IPInfoMap
 
 	tcpServiceMetrics *tcpServiceMetrics
@@ -481,12 +481,12 @@ type outlineMetricsCollector struct {
 	// TODO: Add time to first byte.
 }
 
-var _ prometheus.Collector = (*outlineMetricsCollector)(nil)
-var _ service.UDPMetrics = (*outlineMetricsCollector)(nil)
+var _ prometheus.Collector = (*outlineMetrics)(nil)
+var _ service.UDPMetrics = (*outlineMetrics)(nil)
 
 // newPrometheusOutlineMetrics constructs a Prometheus metrics collector that uses
 // `ip2info` to convert IP addresses to countries. `ip2info` may be nil.
-func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetricsCollector, error) {
+func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetrics, error) {
 	tcpServiceMetrics, err := newTCPCollector()
 	if err != nil {
 		return nil, err
@@ -497,7 +497,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetricsColle
 	}
 	tunnelTimeMetrics := newTunnelTimeMetrics(ip2info)
 
-	return &outlineMetricsCollector{
+	return &outlineMetrics{
 		ip2info: ip2info,
 
 		tcpServiceMetrics: tcpServiceMetrics,
@@ -519,7 +519,7 @@ func newPrometheusOutlineMetrics(ip2info ipinfo.IPInfoMap) (*outlineMetricsColle
 	}, nil
 }
 
-func (m *outlineMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+func (m *outlineMetrics) Describe(ch chan<- *prometheus.Desc) {
 	m.tcpServiceMetrics.Describe(ch)
 	m.udpServiceMetrics.Describe(ch)
 	m.tunnelTimeMetrics.Describe(ch)
@@ -528,7 +528,7 @@ func (m *outlineMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	m.ports.Describe(ch)
 }
 
-func (m *outlineMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+func (m *outlineMetrics) Collect(ch chan<- prometheus.Metric) {
 	m.tcpServiceMetrics.Collect(ch)
 	m.udpServiceMetrics.Collect(ch)
 	m.tunnelTimeMetrics.Collect(ch)
@@ -537,7 +537,7 @@ func (m *outlineMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	m.ports.Collect(ch)
 }
 
-func (m *outlineMetricsCollector) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo {
+func (m *outlineMetrics) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo {
 	ipInfo, err := ipinfo.GetIPInfoFromAddr(m.ip2info, addr)
 	if err != nil {
 		slog.LogAttrs(nil, slog.LevelWarn, "Failed client info lookup.", slog.Any("err", err))
@@ -549,22 +549,22 @@ func (m *outlineMetricsCollector) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo
 	return ipInfo
 }
 
-func (m *outlineMetricsCollector) SetBuildInfo(version string) {
+func (m *outlineMetrics) SetBuildInfo(version string) {
 	m.buildInfo.WithLabelValues(version).Set(1)
 }
 
-func (m *outlineMetricsCollector) SetNumAccessKeys(numKeys int, ports int) {
+func (m *outlineMetrics) SetNumAccessKeys(numKeys int, ports int) {
 	m.accessKeys.Set(float64(numKeys))
 	m.ports.Set(float64(ports))
 }
 
-func (m *outlineMetricsCollector) AddOpenTCPConnection(clientConn net.Conn) *tcpConnMetrics {
+func (m *outlineMetrics) AddOpenTCPConnection(clientConn net.Conn) *tcpConnMetrics {
 	clientAddr := clientConn.RemoteAddr()
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
 	return newTCPConnMetrics(m.tcpServiceMetrics, m.tunnelTimeMetrics, clientConn, clientInfo)
 }
 
-func (m *outlineMetricsCollector) AddUDPNatEntry(clientAddr net.Addr, accessKey string) service.UDPConnMetrics {
+func (m *outlineMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) service.UDPConnMetrics {
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
 	return newUDPConnMetrics(m.udpServiceMetrics, m.tunnelTimeMetrics, accessKey, clientAddr, clientInfo)
 }
