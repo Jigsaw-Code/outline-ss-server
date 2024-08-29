@@ -74,8 +74,8 @@ func TestMethodsDontPanic(t *testing.T) {
 }
 
 func TestASNLabel(t *testing.T) {
-	require.Equal(t, "", asnLabel(ipinfo.ASN{Number: 0}))
-	require.Equal(t, "100", asnLabel(ipinfo.ASN{Number: 100}))
+	require.Equal(t, "", asnLabel(0))
+	require.Equal(t, "100", asnLabel(100))
 }
 
 func TestTunnelTime(t *testing.T) {
