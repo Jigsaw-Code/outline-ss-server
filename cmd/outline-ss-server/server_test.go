@@ -20,7 +20,10 @@ import (
 )
 
 func TestRunSSServer(t *testing.T) {
-	m := newPrometheusOutlineMetrics(nil)
+	m, err := newPrometheusOutlineMetrics(nil)
+	if err != nil {
+		t.Fatalf("Failed to create Prometheus metrics: %v", err)
+	}
 	server, err := RunSSServer("config_example.yml", 30*time.Second, m, 10000)
 	if err != nil {
 		t.Fatalf("RunSSServer() error = %v", err)

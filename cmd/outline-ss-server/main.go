@@ -16,6 +16,7 @@ package main
 
 import (
 	"container/list"
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
@@ -119,13 +121,13 @@ func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
 }
 
 func (s *SSServer) NewShadowsocksStreamHandler(ciphers service.CipherList) service.StreamHandler {
-	authFunc := service.NewShadowsocksStreamAuthenticator(ciphers, &s.replayCache, s.m)
+	authFunc := service.NewShadowsocksStreamAuthenticator(ciphers, &s.replayCache, s.m.tcpServiceMetrics)
 	// TODO: Register initial data metrics at zero.
-	return service.NewStreamHandler(authFunc, s.m, tcpReadTimeout)
+	return service.NewStreamHandler(authFunc, tcpReadTimeout)
 }
 
 func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList) service.PacketHandler {
-	return service.NewPacketHandler(s.natTimeout, ciphers, s.m)
+	return service.NewPacketHandler(s.natTimeout, ciphers, s.m, s.m.udpServiceMetrics)
 }
 
 func (s *SSServer) NewShadowsocksStreamHandlerFromConfig(config ServiceConfig) (service.StreamHandler, error) {
@@ -247,7 +249,10 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 					return err
 				}
 				slog.Info("TCP service started.", "address", ln.Addr().String())
-				go service.StreamServe(ln.AcceptStream, sh.Handle)
+				go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
+					connMetrics := s.m.AddOpenTCPConnection(conn)
+					sh.Handle(ctx, conn, connMetrics)
+				})
 
 				pc, err := lnSet.ListenPacket(addr)
 				if err != nil {
@@ -416,7 +421,10 @@ func main() {
 	}
 	defer ip2info.Close()
 
-	metrics := newPrometheusOutlineMetrics(ip2info)
+	metrics, err := newPrometheusOutlineMetrics(ip2info)
+	if err != nil {
+		slog.Error("Failed to create Outline Prometheus metrics. Aborting.", "err", err)
+	}
 	metrics.SetBuildInfo(version)
 	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 	r.MustRegister(metrics)
