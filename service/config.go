@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package service
 
 import (
 	"fmt"
@@ -22,14 +22,15 @@ import (
 )
 
 type ServiceConfig struct {
-	Listeners []ListenerConfig
-	Keys      []KeyConfig
+	Listeners     []ListenerConfig
+	Keys          []KeyConfig
+	NatTimeoutSec int
 }
 
 type ListenerType string
 
-const listenerTypeTCP ListenerType = "tcp"
-const listenerTypeUDP ListenerType = "udp"
+const ListenerTypeTCP ListenerType = "tcp"
+const ListenerTypeUDP ListenerType = "udp"
 
 type ListenerConfig struct {
 	Type    ListenerType
@@ -55,13 +56,21 @@ type Config struct {
 	Keys []LegacyKeyServiceConfig
 }
 
+// LoadFrom attempts to load and parse config yaml bytes as a [Config].
+func (c *Config) LoadFrom(configData []byte) error {
+	if err := yaml.Unmarshal(configData, &c); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+	return nil
+}
+
 // Validate checks that the config is valid.
 func (c *Config) Validate() error {
 	existingListeners := make(map[string]bool)
 	for _, serviceConfig := range c.Services {
 		for _, lnConfig := range serviceConfig.Listeners {
 			// TODO: Support more listener types.
-			if lnConfig.Type != listenerTypeTCP && lnConfig.Type != listenerTypeUDP {
+			if lnConfig.Type != ListenerTypeTCP && lnConfig.Type != ListenerTypeUDP {
 				return fmt.Errorf("unsupported listener type: %s", lnConfig.Type)
 			}
 			host, _, err := net.SplitHostPort(lnConfig.Address)
@@ -79,13 +88,4 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-// readConfig attempts to read a config from a filename and parses it as a [Config].
-func readConfig(configData []byte) (*Config, error) {
-	config := Config{}
-	if err := yaml.Unmarshal(configData, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
-	}
-	return &config, nil
 }
