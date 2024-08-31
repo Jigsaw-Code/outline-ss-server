@@ -282,7 +282,10 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 								return err
 							}
 						}
-						go service.StreamServe(ln.AcceptStream, sh.Handle)
+						go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
+							connMetrics := s.m.AddOpenTCPConnection(conn)
+							sh.Handle(ctx, conn, connMetrics)
+						})
 					case listenerTypeUDP:
 						pc, err := lnSet.ListenPacket(lnConfig.Address)
 						if err != nil {

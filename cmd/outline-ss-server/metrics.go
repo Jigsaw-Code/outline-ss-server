@@ -60,7 +60,7 @@ func newProxyCollector(proto string) (*proxyCollector, error) {
 		prometheus.CounterOpts{
 			Name: "data_bytes_per_location",
 			Help: "Bytes transferred by the proxy, per location",
-		}, []string{"proto", "dir", "location", "asn"}).CurryWith(map[string]string{"proto": proto})
+		}, []string{"proto", "dir", "location", "asn", "asorg"}).CurryWith(map[string]string{"proto": proto})
 	if err != nil {
 		return nil, err
 	}
@@ -82,16 +82,16 @@ func (c *proxyCollector) Collect(ch chan<- prometheus.Metric) {
 
 func (c *proxyCollector) addClientTarget(clientProxyBytes, proxyTargetBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
 	addIfNonZero(clientProxyBytes, c.dataBytesPerKey, "c>p", accessKey)
-	addIfNonZero(clientProxyBytes, c.dataBytesPerLocation, "c>p", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
+	addIfNonZero(clientProxyBytes, c.dataBytesPerLocation, "c>p", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization)
 	addIfNonZero(proxyTargetBytes, c.dataBytesPerKey, "p>t", accessKey)
-	addIfNonZero(proxyTargetBytes, c.dataBytesPerLocation, "p>t", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
+	addIfNonZero(proxyTargetBytes, c.dataBytesPerLocation, "p>t", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization)
 }
 
 func (c *proxyCollector) addTargetClient(targetProxyBytes, proxyClientBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
 	addIfNonZero(targetProxyBytes, c.dataBytesPerKey, "p<t", accessKey)
-	addIfNonZero(targetProxyBytes, c.dataBytesPerLocation, "p<t", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
+	addIfNonZero(targetProxyBytes, c.dataBytesPerLocation, "p<t", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization)
 	addIfNonZero(proxyClientBytes, c.dataBytesPerKey, "c<p", accessKey)
-	addIfNonZero(proxyClientBytes, c.dataBytesPerLocation, "c<p", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN))
+	addIfNonZero(proxyClientBytes, c.dataBytesPerLocation, "c<p", clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization)
 }
 
 type tcpConnMetrics struct {
@@ -175,12 +175,12 @@ func newTCPCollector() (*tcpServiceMetrics, error) {
 			Namespace: namespace,
 			Name:      "connections_opened",
 			Help:      "Count of open TCP connections",
-		}, []string{"location", "asn"}),
+		}, []string{"location", "asn", "asorg"}),
 		closedConnections: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "connections_closed",
 			Help:      "Count of closed TCP connections",
-		}, []string{"location", "asn", "status", "access_key"}),
+		}, []string{"location", "asn", "asorg", "status", "access_key"}),
 		connectionDurationMs: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: namespace,
@@ -217,11 +217,11 @@ func (c *tcpServiceMetrics) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (c *tcpServiceMetrics) openConnection(clientInfo ipinfo.IPInfo) {
-	c.openConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN)).Inc()
+	c.openConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization).Inc()
 }
 
 func (c *tcpServiceMetrics) closeConnection(status string, duration time.Duration, accessKey string, clientInfo ipinfo.IPInfo) {
-	c.closedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status, accessKey).Inc()
+	c.closedConnections.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization, status, accessKey).Inc()
 	c.connectionDurationMs.WithLabelValues(status).Observe(duration.Seconds() * 1000)
 }
 
@@ -310,7 +310,7 @@ func newUDPCollector() (*udpServiceMetrics, error) {
 				Namespace: namespace,
 				Name:      "packets_from_client_per_location",
 				Help:      "Packets received from the client, per location and status",
-			}, []string{"location", "asn", "status"}),
+			}, []string{"location", "asn", "asorg", "status"}),
 		addedNatEntries: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -351,7 +351,7 @@ func (c *udpServiceMetrics) removeNatEntry() {
 }
 
 func (c *udpServiceMetrics) addPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64, accessKey string, clientInfo ipinfo.IPInfo) {
-	c.packetsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN), status).Inc()
+	c.packetsFromClientPerLocation.WithLabelValues(clientInfo.CountryCode.String(), asnLabel(clientInfo.ASN.Number), clientInfo.ASN.Organization, status).Inc()
 	c.proxyCollector.addClientTarget(clientProxyBytes, proxyTargetBytes, accessKey, clientInfo)
 }
 
@@ -408,7 +408,7 @@ func newTunnelTimeMetrics(ip2info ipinfo.IPInfoMap) *tunnelTimeMetrics {
 			Namespace: namespace,
 			Name:      "seconds_per_location",
 			Help:      "Tunnel time, per location.",
-		}, []string{"location", "asn"}),
+		}, []string{"location", "asn", "asorg"}),
 	}
 }
 
@@ -433,7 +433,7 @@ func (c *tunnelTimeMetrics) reportTunnelTime(ipKey IPKey, client *activeClient, 
 	tunnelTime := tNow.Sub(client.startTime)
 	slog.LogAttrs(nil, slog.LevelDebug, "Reporting tunnel time.", slog.String("key", ipKey.accessKey), slog.Duration("duration", tunnelTime))
 	c.tunnelTimePerKey.WithLabelValues(ipKey.accessKey).Add(tunnelTime.Seconds())
-	c.tunnelTimePerLocation.WithLabelValues(client.info.CountryCode.String(), asnLabel(client.info.ASN)).Add(tunnelTime.Seconds())
+	c.tunnelTimePerLocation.WithLabelValues(client.info.CountryCode.String(), asnLabel(client.info.ASN.Number), client.info.ASN.Organization).Add(tunnelTime.Seconds())
 	// Reset the start time now that the tunnel time has been reported.
 	client.startTime = tNow
 }

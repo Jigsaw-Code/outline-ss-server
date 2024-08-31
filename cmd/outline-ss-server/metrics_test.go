@@ -130,7 +130,7 @@ func TestTunnelTime(t *testing.T) {
 		expected := strings.NewReader(`
 		# HELP tunnel_time_seconds_per_location Tunnel time, per location.
 		# TYPE tunnel_time_seconds_per_location counter
-		tunnel_time_seconds_per_location{asn="",location="XL"} 5
+		tunnel_time_seconds_per_location{asn="",asorg="",location="XL"} 5
 	`)
 		err := promtest.GatherAndCompare(
 			reg,
