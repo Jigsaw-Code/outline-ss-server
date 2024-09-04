@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
@@ -93,33 +92,42 @@ func (conn *fakePacketConn) Close() error {
 }
 
 type udpReport struct {
-	clientInfo                         ipinfo.IPInfo
+	clientAddr                         net.Addr
 	accessKey, status                  string
-	clientProxyBytes, proxyTargetBytes int
+	clientProxyBytes, proxyTargetBytes int64
 }
 
 // Stub metrics implementation for testing NAT behaviors.
-type natTestMetrics struct {
-	natEntriesAdded int
+type fakeUDPConnMetrics struct {
+	clientAddr      net.Addr
+	accessKey       string
 	upstreamPackets []udpReport
+}
+
+var _ UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
+
+func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+	m.upstreamPackets = append(m.upstreamPackets, udpReport{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
+}
+func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+}
+func (m *fakeUDPConnMetrics) RemoveNatEntry() {
+}
+
+type natTestMetrics struct {
+	connMetrics []fakeUDPConnMetrics
 }
 
 var _ UDPMetrics = (*natTestMetrics)(nil)
 
-func (m *natTestMetrics) GetIPInfo(net.IP) (ipinfo.IPInfo, error) {
-	return ipinfo.IPInfo{}, nil
+func (m *natTestMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) UDPConnMetrics {
+	cm := fakeUDPConnMetrics{
+		clientAddr: clientAddr,
+		accessKey:  accessKey,
+	}
+	m.connMetrics = append(m.connMetrics, cm)
+	return &m.connMetrics[len(m.connMetrics)-1]
 }
-func (m *natTestMetrics) AddUDPPacketFromClient(clientInfo ipinfo.IPInfo, accessKey, status string, clientProxyBytes, proxyTargetBytes int) {
-	m.upstreamPackets = append(m.upstreamPackets, udpReport{clientInfo, accessKey, status, clientProxyBytes, proxyTargetBytes})
-}
-func (m *natTestMetrics) AddUDPPacketFromTarget(clientInfo ipinfo.IPInfo, accessKey, status string, targetProxyBytes, proxyClientBytes int) {
-}
-func (m *natTestMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) {
-	m.natEntriesAdded++
-}
-func (m *natTestMetrics) RemoveUDPNatEntry(clientAddr net.Addr, accessKey string) {
-}
-func (m *natTestMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {}
 
 // Takes a validation policy, and returns the metrics it
 // generates when localhost access is attempted
@@ -128,7 +136,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	handler := NewPacketHandler(timeout, ciphers, metrics)
+	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
@@ -162,18 +170,12 @@ func TestIPFilter(t *testing.T) {
 
 	t.Run("Localhost allowed", func(t *testing.T) {
 		metrics := sendToDiscard(payloads, allowAll)
-		assert.Equal(t, metrics.natEntriesAdded, 1, "Expected 1 NAT entry, not %d", metrics.natEntriesAdded)
+		assert.Equal(t, len(metrics.connMetrics), 1, "Expected 1 NAT entry, not %d", len(metrics.connMetrics))
 	})
 
 	t.Run("Localhost not allowed", func(t *testing.T) {
 		metrics := sendToDiscard(payloads, onet.RequirePublicIP)
-		assert.Equal(t, 0, metrics.natEntriesAdded, "Unexpected NAT entry on rejected packet")
-		assert.Equal(t, 2, len(metrics.upstreamPackets), "Expected 2 reports, not %v", metrics.upstreamPackets)
-		for _, report := range metrics.upstreamPackets {
-			assert.Greater(t, report.clientProxyBytes, 0, "Expected nonzero input packet size")
-			assert.Equal(t, 0, report.proxyTargetBytes, "No bytes should be sent due to a disallowed packet")
-			assert.Equal(t, report.accessKey, "id-0", "Unexpected access key: %s", report.accessKey)
-		}
+		assert.Equal(t, 0, len(metrics.connMetrics), "Unexpected NAT entry on rejected packet")
 	})
 }
 
@@ -187,9 +189,9 @@ func TestUpstreamMetrics(t *testing.T) {
 
 	metrics := sendToDiscard(payloads, allowAll)
 
-	assert.Equal(t, N, len(metrics.upstreamPackets), "Expected %d reports, not %v", N, metrics.upstreamPackets)
-	for i, report := range metrics.upstreamPackets {
-		assert.Equal(t, i+1, report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
+	assert.Equal(t, N, len(metrics.connMetrics[0].upstreamPackets), "Expected %d reports, not %v", N, metrics.connMetrics[0].upstreamPackets)
+	for i, report := range metrics.connMetrics[0].upstreamPackets {
+		assert.Equal(t, int64(i+1), report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
 		assert.Greater(t, report.clientProxyBytes, report.proxyTargetBytes, "Expected nonzero input overhead (%d > %d)", report.clientProxyBytes, report.proxyTargetBytes)
 		assert.Equal(t, "id-0", report.accessKey, "Unexpected access key name: %s", report.accessKey)
 		assert.Equal(t, "OK", report.status, "Wrong status: %s", report.status)
@@ -215,7 +217,7 @@ func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
 	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, ipinfo.IPInfo{CountryCode: "ZZ"}, "key id")
+	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }
@@ -480,7 +482,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(testTimeout, cipherList, testMetrics)
+	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {

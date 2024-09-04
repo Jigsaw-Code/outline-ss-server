@@ -26,13 +26,18 @@ type IPInfoMap interface {
 
 type IPInfo struct {
 	CountryCode CountryCode
-	ASN         int
+	ASN         ASN
 }
 
 type CountryCode string
 
 func (cc CountryCode) String() string {
 	return string(cc)
+}
+
+type ASN struct {
+	Number       int
+	Organization string
 }
 
 const (
