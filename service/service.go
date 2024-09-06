@@ -16,7 +16,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"time"
 
@@ -43,7 +42,7 @@ type Service interface {
 }
 
 // Option user's option.
-type Option func(s *ssService) error
+type Option func(s *ssService)
 
 type ssService struct {
 	m           ServiceMetrics
@@ -59,9 +58,7 @@ func NewService(opts ...Option) (Service, error) {
 	s := &ssService{}
 
 	for _, opt := range opts {
-		if err := opt(s); err != nil {
-			return nil, fmt.Errorf("failed to create new service: %v", err)
-		}
+		opt(s)
 	}
 
 	if s.natTimeout == 0 {
@@ -72,32 +69,28 @@ func NewService(opts ...Option) (Service, error) {
 
 // WithCiphers option function.
 func WithCiphers(ciphers CipherList) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.ciphers = ciphers
-		return nil
 	}
 }
 
 // WithMetrics option function.
 func WithMetrics(metrics ServiceMetrics) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.m = metrics
-		return nil
 	}
 }
 
 // WithReplayCache option function.
 func WithReplayCache(replayCache *ReplayCache) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.replayCache = replayCache
-		return nil
 	}
 }
 
 func WithNatTimeout(natTimeout time.Duration) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.natTimeout = natTimeout
-		return nil
 	}
 }
 
