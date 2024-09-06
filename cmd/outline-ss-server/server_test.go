@@ -17,14 +17,17 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/Jigsaw-Code/outline-ss-server/prometheus"
 )
 
 func TestRunSSServer(t *testing.T) {
-	m, err := newPrometheusOutlineMetrics(nil)
+	serverMetrics := newPrometheusServerMetrics()
+	serviceMetrics, err := prometheus.NewServiceMetrics(nil)
 	if err != nil {
-		t.Fatalf("Failed to create Prometheus metrics: %v", err)
+		t.Fatalf("Failed to create Prometheus service metrics: %v", err)
 	}
-	server, err := RunSSServer("config_example.yml", 30*time.Second, m, 10000)
+	server, err := RunSSServer("config_example.yml", 30*time.Second, serverMetrics, serviceMetrics, 10000)
 	if err != nil {
 		t.Fatalf("RunSSServer() error = %v", err)
 	}

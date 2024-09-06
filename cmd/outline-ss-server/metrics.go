@@ -24,7 +24,7 @@ import (
 var now = time.Now
 
 type serverMetrics struct {
-	// NOTE: New metrics need to be added to `newPrometheusOutlineMetrics()`, `Describe()` and `Collect()`.
+	// NOTE: New metrics need to be added to `newPrometheusServerMetrics()`, `Describe()` and `Collect()`.
 	buildInfo  *prometheus.GaugeVec
 	accessKeys prometheus.Gauge
 	ports      prometheus.Gauge
@@ -46,17 +46,19 @@ func newPrometheusServerMetrics() *serverMetrics {
 		}),
 		ports: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "ports",
-			Help: "Count of open Shadowsocks ports",
+			Help: "Count of open ports",
 		}),
 	}
 }
 
 func (m *serverMetrics) Describe(ch chan<- *prometheus.Desc) {
+	m.buildInfo.Describe(ch)
 	m.accessKeys.Describe(ch)
 	m.ports.Describe(ch)
 }
 
 func (m *serverMetrics) Collect(ch chan<- prometheus.Metric) {
+	m.buildInfo.Collect(ch)
 	m.accessKeys.Collect(ch)
 	m.ports.Collect(ch)
 }
