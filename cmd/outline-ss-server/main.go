@@ -217,7 +217,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 				ciphers := service.NewCipherList()
 				ciphers.Update(cipherList)
 
-				ssService, err := service.NewService(
+				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
@@ -243,7 +243,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 				if err != nil {
 					return fmt.Errorf("failed to create cipher list from config: %v", err)
 				}
-				ssService, err := service.NewService(
+				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
