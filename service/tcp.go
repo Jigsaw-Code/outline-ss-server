@@ -24,15 +24,17 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/shadowsocks/go-shadowsocks2/socks"
+
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 // TCPConnMetrics is used to report metrics on TCP connections.
@@ -158,18 +160,27 @@ type streamHandler struct {
 }
 
 // NewStreamHandler creates a StreamHandler
-func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration) StreamHandler {
+func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration, dialer transport.StreamDialer) StreamHandler {
 	return &streamHandler{
 		readTimeout:  timeout,
 		authenticate: authenticate,
-		dialer:       defaultDialer,
+		dialer:       dialer,
 	}
 }
 
-var defaultDialer = makeValidatingTCPStreamDialer(onet.RequirePublicIP)
-
-func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) transport.StreamDialer {
+func MakeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator, fwmark uint) transport.StreamDialer {
 	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
+		if fwmark > 0 {
+			err := c.Control(func(fd uintptr) {
+				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
+				if err != nil {
+					slog.Error("Set fwmark failed.", "err", os.NewSyscallError("failed to set mark for TCP socket", err))
+				}
+			})
+			if err != nil {
+				slog.Error("Set TCPDialer Control func failed.", "err", err)
+			}
+		}
 		ip, _, _ := net.SplitHostPort(address)
 		return targetIPValidator(net.ParseIP(ip))
 	}}}
@@ -377,6 +388,8 @@ type NoOpTCPConnMetrics struct{}
 var _ TCPConnMetrics = (*NoOpTCPConnMetrics)(nil)
 
 func (m *NoOpTCPConnMetrics) AddAuthenticated(accessKey string) {}
+
 func (m *NoOpTCPConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
+
 func (m *NoOpTCPConnMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {}

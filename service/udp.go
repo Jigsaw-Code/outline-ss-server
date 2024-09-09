@@ -20,14 +20,19 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"runtime/debug"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
+
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
+
+type UDPDialer = func() (net.PacketConn, *onet.ConnectionError)
 
 // UDPConnMetrics is used to report metrics on UDP connections.
 type UDPConnMetrics interface {
@@ -85,11 +90,37 @@ type packetHandler struct {
 	m                 UDPMetrics
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
+	dialer            UDPDialer
 }
 
 // NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
-	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, ssm: ssMetrics, targetIPValidator: onet.RequirePublicIP}
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics, dialer UDPDialer) PacketHandler {
+	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, ssm: ssMetrics, targetIPValidator: onet.RequirePublicIP, dialer: dialer}
+}
+
+// fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
+// Value of 0 disables fwmark (SO_MARK)
+func MakeTargetPacketListener(fwmark uint) UDPDialer {
+	return func() (net.PacketConn, *onet.ConnectionError) {
+		udpConn, err := net.ListenPacket("udp", "")
+		if err != nil {
+			return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
+		}
+
+		if fwmark > 0 {
+			file, err := udpConn.(*net.UDPConn).File()
+			if err != nil {
+				return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to get UDP socket file", err)
+			}
+			defer file.Close()
+
+			err = syscall.SetsockoptInt(int(file.Fd()), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
+			if err != nil {
+				slog.Error("Set fwmark failed.", "err", os.NewSyscallError("failed to set mark for UDP socket", err))
+			}
+		}
+		return udpConn, nil
+	}
 }
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
@@ -161,10 +192,11 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 					return onetErr
 				}
 
-				udpConn, err := net.ListenPacket("udp", "")
+				udpConn, err := h.dialer()
 				if err != nil {
-					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
+					return nil
 				}
+
 				targetConn = nm.Add(clientAddr, clientConn, cryptoKey, udpConn, keyID)
 			} else {
 				unpackStart := time.Now()
@@ -455,8 +487,10 @@ var _ UDPConnMetrics = (*NoOpUDPConnMetrics)(nil)
 
 func (m *NoOpUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 }
+
 func (m *NoOpUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
+
 func (m *NoOpUDPConnMetrics) RemoveNatEntry() {}
 
 // NoOpUDPMetrics is a [UDPMetrics] that doesn't do anything. Useful in tests
