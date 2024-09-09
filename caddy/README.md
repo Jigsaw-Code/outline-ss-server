@@ -13,7 +13,7 @@ Shadowsocks backend.
 From this directory, build and run a custom binary with `xcaddy`:
 
 ```sh
-xcaddy run --config config_example.json
+xcaddy run --config config_example.json --watch
 ```
 
 In a separate window, confirm you can fetch a page using this server:
