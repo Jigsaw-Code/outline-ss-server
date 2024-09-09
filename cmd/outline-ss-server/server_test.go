@@ -22,7 +22,7 @@ import (
 )
 
 func TestRunSSServer(t *testing.T) {
-	serverMetrics := newPrometheusServerMetrics()
+	serverMetrics := prometheus.NewServerMetrics()
 	serviceMetrics, err := prometheus.NewServiceMetrics(nil)
 	if err != nil {
 		t.Fatalf("Failed to create Prometheus service metrics: %v", err)

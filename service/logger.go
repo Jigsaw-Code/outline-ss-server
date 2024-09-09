@@ -14,6 +14,24 @@
 
 package service
 
-import logging "github.com/op/go-logging"
+import (
+	"context"
+	"log/slog"
+)
 
-var logger = logging.MustGetLogger("shadowsocks")
+type logger interface {
+	Enabled(ctx context.Context, level slog.Level) bool
+	LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr)
+}
+
+type noopLogger struct {
+}
+
+var _ logger = (*noopLogger)(nil)
+
+func (l *noopLogger) Enabled(ctx context.Context, level slog.Level) bool {
+	return false
+}
+
+func (l *noopLogger) LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+}

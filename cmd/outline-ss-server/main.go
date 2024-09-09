@@ -30,6 +30,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
+	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
@@ -70,8 +71,8 @@ func (s *SSServer) loadConfig(filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read config file %s: %w", filename, err)
 	}
-	config := &service.Config{}
-	if err := config.LoadFrom(configData); err != nil {
+	config, err := readConfig(configData)
+	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
 	if err := config.Validate(); err != nil {
@@ -90,6 +91,33 @@ func (s *SSServer) loadConfig(filename string) error {
 	}
 	s.stopConfig = stopConfig
 	return nil
+}
+
+func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
+	type cipherKey struct {
+		cipher string
+		secret string
+	}
+	cipherList := list.New()
+	existingCiphers := make(map[cipherKey]bool)
+	for _, keyConfig := range config.Keys {
+		key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
+		if _, exists := existingCiphers[key]; exists {
+			slog.Debug("Encryption key already exists. Skipping.", "id", keyConfig.ID)
+			continue
+		}
+		cryptoKey, err := shadowsocks.NewEncryptionKey(keyConfig.Cipher, keyConfig.Secret)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
+		}
+		entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
+		cipherList.PushBack(&entry)
+		existingCiphers[key] = true
+	}
+	ciphers := service.NewCipherList()
+	ciphers.Update(cipherList)
+
+	return ciphers, nil
 }
 
 type listenerSet struct {
@@ -153,7 +181,7 @@ func (ls *listenerSet) Len() int {
 	return len(ls.listenerCloseFuncs)
 }
 
-func (s *SSServer) runConfig(config service.Config) (func() error, error) {
+func (s *SSServer) runConfig(config Config) (func() error, error) {
 	startErrCh := make(chan error)
 	stopErrCh := make(chan error)
 	stopCh := make(chan struct{})
@@ -189,7 +217,8 @@ func (s *SSServer) runConfig(config service.Config) (func() error, error) {
 				ciphers := service.NewCipherList()
 				ciphers.Update(cipherList)
 
-				ssService, err := service.NewService(
+				ssService, err := service.NewShadowsocksService(
+					service.WithLogger(slog.Default()),
 					service.WithCiphers(ciphers),
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
@@ -211,8 +240,14 @@ func (s *SSServer) runConfig(config service.Config) (func() error, error) {
 			}
 
 			for _, serviceConfig := range config.Services {
-				ssService, err := service.NewService(
-					service.WithConfig(serviceConfig),
+				ciphers, err := newCipherListFromConfig(serviceConfig)
+				if err != nil {
+					return fmt.Errorf("failed to create cipher list from config: %v", err)
+				}
+				ssService, err := service.NewShadowsocksService(
+					service.WithLogger(slog.Default()),
+					service.WithCiphers(ciphers),
+					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
 				)
@@ -221,14 +256,14 @@ func (s *SSServer) runConfig(config service.Config) (func() error, error) {
 				}
 				for _, lnConfig := range serviceConfig.Listeners {
 					switch lnConfig.Type {
-					case service.ListenerTypeTCP:
+					case listenerTypeTCP:
 						ln, err := lnSet.ListenStream(lnConfig.Address)
 						if err != nil {
 							return err
 						}
 						slog.Info("TCP service started.", "address", ln.Addr().String())
 						go service.StreamServe(ln.AcceptStream, ssService.HandleStream)
-					case service.ListenerTypeUDP:
+					case listenerTypeUDP:
 						pc, err := lnSet.ListenPacket(lnConfig.Address)
 						if err != nil {
 							return err
@@ -361,9 +396,9 @@ func main() {
 	}
 	defer ip2info.Close()
 
-	serverMetrics := newPrometheusServerMetrics()
+	serverMetrics := outline_prometheus.NewServerMetrics()
 	serverMetrics.SetVersion(version)
-	serviceMetrics, err := service.NewPrometheusServiceMetrics(ip2info)
+	serviceMetrics, err := outline_prometheus.NewServiceMetrics(ip2info)
 	if err != nil {
 		slog.Error("Failed to create Outline Prometheus service metrics. Aborting.", "err", err)
 	}
