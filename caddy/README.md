@@ -22,4 +22,4 @@ In a separate window, confirm you can fetch a page using this server:
 go run github.com/Jigsaw-Code/outline-sdk/x/examples/fetch -transport "ss://chacha20-ietf-poly1305:Secret1@:9000" http://ipinfo.io
 ```
 
-Prometheus metrics are exposed on http://localhost:2019/metrics.
+Prometheus metrics are available on http://localhost:9091/metrics.

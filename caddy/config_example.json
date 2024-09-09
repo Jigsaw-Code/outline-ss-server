@@ -1,4 +1,7 @@
 {
+    "admin": {
+        "disabled": true
+    },
     "logging": {
       "logs": {
         "default": {"level":"DEBUG", "encoder": {"format":"console"}}
@@ -6,10 +9,30 @@
     },
     "apps": {
         "http": {
+            "http_port": 9091,
             "servers": {
-                "": {
-                    "metrics": {}
-                }
+				"": {
+					"listen": [
+						":9091"
+					],
+					"routes": [
+						{
+							"match": [
+								{
+									"path": [
+										"/metrics"
+									]
+								}
+							],
+							"handle": [
+								{
+									"disable_openmetrics": true,
+									"handler": "metrics"
+								}
+							]
+						}
+					]
+				}
             }
         },
         "layer4": {
