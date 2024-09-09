@@ -18,7 +18,7 @@
 package caddy
 
 import (
-	"sync"
+	"errors"
 
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
@@ -45,7 +45,6 @@ type OutlineApp struct {
 	logger      *zap.Logger
 	Metrics     outline.ServiceMetrics
 	buildInfo   *prometheus.GaugeVec
-	once        sync.Once
 }
 
 func (OutlineApp) CaddyModule() caddy.ModuleInfo {
@@ -77,26 +76,35 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 }
 
 func (app *OutlineApp) defineMetrics() {
-	app.once.Do(func() {
-		// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
-		r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
+	// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
+	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 
-		app.buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "build_info",
-			Help: "Information on the outline-ss-server build",
-		}, []string{"version"})
+	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "build_info",
+		Help: "Information on the outline-ss-server build",
+	}, []string{"version"})
+	app.buildInfo = registerCollector(r, buildInfo)
 
-		// TODO: Allow the configuration of ip2info.
-		metrics, err := outline_prometheus.NewServiceMetrics(nil)
-		if err != nil {
-			app.logger.Error("failed to define Prometheus metrics", zap.Error(err))
-			return
+	// TODO: Allow the configuration of ip2info.
+	metrics, err := outline_prometheus.NewServiceMetrics(nil)
+	if err != nil {
+		app.logger.Error("failed to define Prometheus metrics", zap.Error(err))
+		return
+	}
+	app.Metrics = registerCollector(r, metrics)
+}
+
+func registerCollector[T prometheus.Collector](registerer prometheus.Registerer, coll T) T {
+	if err := registerer.Register(coll); err != nil {
+		are := &prometheus.AlreadyRegisteredError{}
+		if errors.As(err, are) {
+			// This collector has been registered before. This is expected during a config reload.
+			coll = are.ExistingCollector.(T)
+		} else {
+			panic(err)
 		}
-		app.Metrics = metrics
-
-		r.MustRegister(app.buildInfo)
-		r.MustRegister(metrics)
-	})
+	}
+	return coll
 }
 
 // Start starts the App.

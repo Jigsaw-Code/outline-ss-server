@@ -9,7 +9,6 @@
     },
     "apps": {
         "http": {
-            "http_port": 9091,
             "servers": {
 				"": {
 					"listen": [
