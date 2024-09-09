@@ -46,7 +46,7 @@ jobs:
         git submodule update --init
 
     - name: Build
-      run: GOWORK=off go build -v ./...
+      run: go build -v ./...
 
     - name: Test
       run: go test -race -benchmem -bench=. ./... -benchtime=100ms

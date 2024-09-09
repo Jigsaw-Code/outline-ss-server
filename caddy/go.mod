@@ -4,14 +4,12 @@ go 1.23
 
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.16
-	github.com/Jigsaw-Code/outline-ss-server v1.5.0
+	github.com/Jigsaw-Code/outline-ss-server v1.6.0
 	github.com/caddyserver/caddy/v2 v2.8.4
 	github.com/mholt/caddy-l4 v0.0.0-20240812213304-afa78d72257b
 	github.com/prometheus/client_golang v1.20.0
 	go.uber.org/zap v1.27.0
 )
-
-replace github.com/mholt/caddy-l4 v0.0.0-20240812213304-afa78d72257b => ../../caddy-l4
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -71,7 +69,6 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/onsi/ginkgo/v2 v2.15.0 // indirect
-	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7 // indirect
 	github.com/oschwald/geoip2-golang v1.8.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.10.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

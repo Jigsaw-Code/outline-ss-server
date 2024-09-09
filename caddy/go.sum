@@ -20,8 +20,6 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/toml v1.3.2/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
 github.com/Jigsaw-Code/outline-sdk v0.0.16 h1:WbHmv80FKDIpzEmR3GehTbq5CibYTLvcxIIpMMILiEs=
 github.com/Jigsaw-Code/outline-sdk v0.0.16/go.mod h1:e1oQZbSdLJBBuHgfeQsgEkvkuyIePPwstUeZRGq0KO8=
-github.com/Jigsaw-Code/outline-ss-server v1.5.0 h1:Vz+iS0xR7i3PrLD82pzFFwZ9fsh6zrNawMeYERR8VTc=
-github.com/Jigsaw-Code/outline-ss-server v1.5.0/go.mod h1:KaebwBiCWDSkgsJrJIbGH0szON8CZq4LgQaFV8v3RM4=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.1.1/go.mod h1:VPu/7SZ7ePZ3QOrcuXROw5FAcLl4a0cBrbBpGY/8hQs=
