@@ -18,7 +18,7 @@
 package caddy
 
 import (
-	"errors"
+	"sync"
 
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
@@ -41,9 +41,11 @@ type OutlineApp struct {
 	Version           string             `json:"version,omitempty"`
 	ShadowsocksConfig *ShadowsocksConfig `json:"shadowsocks,omitempty"`
 
-	Metrics     outline.ServiceMetrics
 	ReplayCache outline.ReplayCache
 	logger      *zap.Logger
+	Metrics     outline.ServiceMetrics
+	buildInfo   *prometheus.GaugeVec
+	once        sync.Once
 }
 
 func (OutlineApp) CaddyModule() caddy.ModuleInfo {
@@ -67,45 +69,34 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 		app.ReplayCache = outline.NewReplayCache(app.ShadowsocksConfig.ReplayHistory)
 	}
 
-	if err := app.defineMetrics(); err != nil {
-		app.logger.Error("failed to create Prometheus metrics", zap.Error(err))
-	}
+	app.defineMetrics()
+	app.buildInfo.WithLabelValues(app.Version).Set(1)
+	// TODO: Add replacement metrics for `shadowsocks_keys` and `shadowsocks_ports`.
 
 	return nil
 }
 
-func (app *OutlineApp) defineMetrics() error {
-	// TODO: Use `once.Do()` instead of catching already registered collectors?
-	// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
-	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
+func (app *OutlineApp) defineMetrics() {
+	app.once.Do(func() {
+		// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
+		r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 
-	serverMetrics := outline_prometheus.NewServerMetrics()
-	registeredServerMetrics := registerCollector(r, serverMetrics)
-	registeredServerMetrics.SetVersion(app.Version)
-	// TODO: Call `registeredServerMetrics.SetNumAccessKeys()`.
+		app.buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "build_info",
+			Help: "Information on the outline-ss-server build",
+		}, []string{"version"})
 
-	// TODO: Allow the configuration of ip2info.
-	serviceMetrics, err := outline_prometheus.NewServiceMetrics(nil)
-	if err != nil {
-		return err
-	}
-	registeredServiceMetrics := registerCollector(r, serviceMetrics)
-	app.Metrics = registeredServiceMetrics
-
-	return nil
-}
-
-func registerCollector[T prometheus.Collector](registerer prometheus.Registerer, coll T) T {
-	if err := registerer.Register(coll); err != nil {
-		are := &prometheus.AlreadyRegisteredError{}
-		if errors.As(err, are) {
-			// This collector has been registered before. This is expected during a config reload.
-			coll = are.ExistingCollector.(T)
-		} else {
-			panic(err)
+		// TODO: Allow the configuration of ip2info.
+		metrics, err := outline_prometheus.NewServiceMetrics(nil)
+		if err != nil {
+			app.logger.Error("failed to define Prometheus metrics", zap.Error(err))
+			return
 		}
-	}
-	return coll
+		app.Metrics = metrics
+
+		r.MustRegister(app.buildInfo)
+		r.MustRegister(metrics)
+	})
 }
 
 // Start starts the App.

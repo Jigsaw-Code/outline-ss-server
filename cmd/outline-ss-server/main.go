@@ -396,7 +396,7 @@ func main() {
 	}
 	defer ip2info.Close()
 
-	serverMetrics := outline_prometheus.NewServerMetrics()
+	serverMetrics := newPrometheusServerMetrics()
 	serverMetrics.SetVersion(version)
 	serviceMetrics, err := outline_prometheus.NewServiceMetrics(ip2info)
 	if err != nil {
