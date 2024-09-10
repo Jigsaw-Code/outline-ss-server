@@ -65,7 +65,10 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	if err != nil {
 		return err
 	}
-	app := mod.(*OutlineApp)
+	app, ok := mod.(*OutlineApp)
+	if !ok {
+		return fmt.Errorf("module `%s` is not an OutlineApp", moduleName)
+	}
 
 	if len(h.Keys) == 0 {
 		h.logger.Warn("no keys configured")
