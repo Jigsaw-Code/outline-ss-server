@@ -80,32 +80,40 @@ func (app *OutlineApp) defineMetrics() error {
 	// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
 	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 
+	var err error
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "build_info",
 		Help: "Information on the outline-ss-server build",
 	}, []string{"version"})
-	app.buildInfo = registerCollector(r, buildInfo)
+	app.buildInfo, err = registerCollector(r, buildInfo)
+	if err != nil {
+		return err
+	}
 
 	// TODO: Allow the configuration of ip2info.
 	metrics, err := outline_prometheus.NewServiceMetrics(nil)
 	if err != nil {
 		return err
 	}
-	app.Metrics = registerCollector(r, metrics)
+	app.Metrics, err = registerCollector(r, metrics)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func registerCollector[T prometheus.Collector](registerer prometheus.Registerer, coll T) T {
+func registerCollector[T prometheus.Collector](registerer prometheus.Registerer, coll T) (T, error) {
 	if err := registerer.Register(coll); err != nil {
 		are := &prometheus.AlreadyRegisteredError{}
-		if errors.As(err, are) {
+		if !errors.As(err, are) {
 			// This collector has been registered before. This is expected during a config reload.
 			coll = are.ExistingCollector.(T)
 		} else {
-			panic(err)
+			// Something else went wrong.
+			return coll, err
 		}
 	}
-	return coll
+	return coll, nil
 }
 
 // Start starts the App.
