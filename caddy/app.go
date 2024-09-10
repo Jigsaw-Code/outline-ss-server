@@ -67,14 +67,16 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 		app.ReplayCache = outline.NewReplayCache(app.ShadowsocksConfig.ReplayHistory)
 	}
 
-	app.defineMetrics()
+	if err := app.defineMetrics(); err != nil {
+		app.logger.Error("failed to define Prometheus metrics", "err", err)
+	}
 	app.buildInfo.WithLabelValues(app.Version).Set(1)
 	// TODO: Add replacement metrics for `shadowsocks_keys` and `shadowsocks_ports`.
 
 	return nil
 }
 
-func (app *OutlineApp) defineMetrics() {
+func (app *OutlineApp) defineMetrics() error {
 	// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
 	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 
@@ -87,10 +89,10 @@ func (app *OutlineApp) defineMetrics() {
 	// TODO: Allow the configuration of ip2info.
 	metrics, err := outline_prometheus.NewServiceMetrics(nil)
 	if err != nil {
-		app.logger.Error("failed to define Prometheus metrics", "err", err)
-		return
+		return err
 	}
 	app.Metrics = registerCollector(r, metrics)
+	return nil
 }
 
 func registerCollector[T prometheus.Collector](registerer prometheus.Registerer, coll T) T {
