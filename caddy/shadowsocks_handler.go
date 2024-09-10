@@ -54,7 +54,7 @@ func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 
 // Provision implements caddy.Provisioner.
 func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
-	h.logger = ctx.Logger(h)
+	h.logger = ctx.Logger()
 	defer h.logger.Sync()
 
 	ctx.App(moduleName)

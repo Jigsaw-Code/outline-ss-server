@@ -56,7 +56,7 @@ func (OutlineApp) CaddyModule() caddy.ModuleInfo {
 
 // Provision sets up Outline.
 func (app *OutlineApp) Provision(ctx caddy.Context) error {
-	app.logger = ctx.Logger(app)
+	app.logger = ctx.Logger()
 	defer app.logger.Sync()
 
 	app.logger.Info("provisioning app instance")
