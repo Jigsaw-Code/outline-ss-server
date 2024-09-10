@@ -40,7 +40,6 @@ type KeyConfig struct {
 
 type ShadowsocksHandler struct {
 	Keys          []KeyConfig `json:"keys,omitempty"`
-	NatTimeoutSec int         `json:"nat_timeout_sec,omitempty"`
 
 	service outline.Service
 	logger  *slog.Logger
