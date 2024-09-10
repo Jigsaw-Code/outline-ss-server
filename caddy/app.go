@@ -19,12 +19,12 @@ package caddy
 
 import (
 	"errors"
+	"log/slog"
 
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
 )
 
 func init() {
@@ -42,7 +42,7 @@ type OutlineApp struct {
 	ShadowsocksConfig *ShadowsocksConfig `json:"shadowsocks,omitempty"`
 
 	ReplayCache outline.ReplayCache
-	logger      *zap.Logger
+	logger      *slog.Logger
 	Metrics     outline.ServiceMetrics
 	buildInfo   *prometheus.GaugeVec
 }
@@ -56,8 +56,7 @@ func (OutlineApp) CaddyModule() caddy.ModuleInfo {
 
 // Provision sets up Outline.
 func (app *OutlineApp) Provision(ctx caddy.Context) error {
-	app.logger = ctx.Logger()
-	defer app.logger.Sync()
+	app.logger = ctx.Slogger()
 
 	app.logger.Info("provisioning app instance")
 
@@ -88,7 +87,7 @@ func (app *OutlineApp) defineMetrics() {
 	// TODO: Allow the configuration of ip2info.
 	metrics, err := outline_prometheus.NewServiceMetrics(nil)
 	if err != nil {
-		app.logger.Error("failed to define Prometheus metrics", zap.Error(err))
+		app.logger.Error("failed to define Prometheus metrics", "err", err)
 		return
 	}
 	app.Metrics = registerCollector(r, metrics)

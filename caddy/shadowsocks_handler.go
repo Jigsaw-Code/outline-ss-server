@@ -17,6 +17,7 @@ package caddy
 import (
 	"container/list"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
@@ -42,7 +43,7 @@ type ShadowsocksHandler struct {
 	NatTimeoutSec int         `json:"nat_timeout_sec,omitempty"`
 
 	service outline.Service
-	logger  *zap.Logger
+	logger  *slog.Logger
 }
 
 func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
@@ -54,8 +55,7 @@ func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 
 // Provision implements caddy.Provisioner.
 func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
-	h.logger = ctx.Logger()
-	defer h.logger.Sync()
+	h.logger = ctx.Slogger()
 
 	ctx.App(moduleName)
 	if _, err := ctx.AppIfConfigured(moduleName); err != nil {
@@ -94,7 +94,7 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	ciphers.Update(cipherList)
 
 	service, err := outline.NewShadowsocksService(
-		outline.WithLogger(&logger{app.logger}),
+		outline.WithLogger(h.logger),
 		outline.WithCiphers(ciphers),
 		outline.WithMetrics(app.Metrics),
 		outline.WithReplayCache(&app.ReplayCache),
