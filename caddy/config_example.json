@@ -89,7 +89,6 @@
             }
         },
         "outline": {
-            "version": "0.0.0",
             "shadowsocks": {
                 "replay_history": 10000
             }

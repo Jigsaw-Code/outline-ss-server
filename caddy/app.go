@@ -38,7 +38,6 @@ type ShadowsocksConfig struct {
 }
 
 type OutlineApp struct {
-	Version           string             `json:"version,omitempty"`
 	ShadowsocksConfig *ShadowsocksConfig `json:"shadowsocks,omitempty"`
 
 	ReplayCache outline.ReplayCache
@@ -60,9 +59,6 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 
 	app.logger.Info("provisioning app instance")
 
-	if app.Version == "" {
-		app.Version = "dev"
-	}
 	if app.ShadowsocksConfig != nil {
 		app.ReplayCache = outline.NewReplayCache(app.ShadowsocksConfig.ReplayHistory)
 	}
@@ -70,7 +66,8 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	if err := app.defineMetrics(); err != nil {
 		app.logger.Error("failed to define Prometheus metrics", "err", err)
 	}
-	app.buildInfo.WithLabelValues(app.Version).Set(1)
+	// TODO: Set version at build time.
+	app.buildInfo.WithLabelValues("dev").Set(1)
 	// TODO: Add replacement metrics for `shadowsocks_keys` and `shadowsocks_ports`.
 
 	return nil
