@@ -74,8 +74,7 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 }
 
 func (app *OutlineApp) defineMetrics() error {
-	// TODO: Decide on what to do about namespace. Can we change to "outline" for Caddy servers?
-	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
+	r := prometheus.WrapRegistererWithPrefix("outline_", prometheus.DefaultRegisterer)
 
 	var err error
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
