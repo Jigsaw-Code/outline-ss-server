@@ -93,12 +93,12 @@ func (s *SSServer) loadConfig(filename string) error {
 	return nil
 }
 
-func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
+func newCipherListFromConfig(config ServiceConfig) (*list.List, error) {
 	type cipherKey struct {
 		cipher string
 		secret string
 	}
-	cipherList := list.New()
+	ciphers := list.New()
 	existingCiphers := make(map[cipherKey]bool)
 	for _, keyConfig := range config.Keys {
 		key := cipherKey{keyConfig.Cipher, keyConfig.Secret}
@@ -111,12 +111,9 @@ func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
 			return nil, fmt.Errorf("failed to create encyption key for key %v: %w", keyConfig.ID, err)
 		}
 		entry := service.MakeCipherEntry(keyConfig.ID, cryptoKey, keyConfig.Secret)
-		cipherList.PushBack(&entry)
+		ciphers.PushBack(&entry)
 		existingCiphers[key] = true
 	}
-	ciphers := service.NewCipherList()
-	ciphers.Update(cipherList)
-
 	return ciphers, nil
 }
 
@@ -214,11 +211,8 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 			for portNum, cipherList := range portCiphers {
 				addr := net.JoinHostPort("::", strconv.Itoa(portNum))
 
-				ciphers := service.NewCipherList()
-				ciphers.Update(cipherList)
-
 				ssService, err := service.NewShadowsocksService(
-					service.WithCiphers(ciphers),
+					service.WithCiphers(cipherList),
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
