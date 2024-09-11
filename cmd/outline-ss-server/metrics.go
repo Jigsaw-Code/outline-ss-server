@@ -129,9 +129,13 @@ func (cm *tcpConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, du
 	cm.tcpServiceMetrics.proxyCollector.addClientTarget(data.ClientProxy, data.ProxyTarget, cm.accessKey, cm.clientInfo)
 	cm.tcpServiceMetrics.proxyCollector.addTargetClient(data.TargetProxy, data.ProxyClient, cm.accessKey, cm.clientInfo)
 	cm.tcpServiceMetrics.closeConnection(status, duration, cm.accessKey, cm.clientInfo)
-	ipKey, err := toIPKey(cm.clientAddr, cm.accessKey)
-	if err == nil {
-		cm.tunnelTimeMetrics.stopConnection(*ipKey)
+	// We only track authenticated TCP connections, so ignore unauthenticated closed connections
+	// when calculating tunneltime. See https://github.com/Jigsaw-Code/outline-server/issues/1590.
+	if cm.accessKey != "" {
+		ipKey, err := toIPKey(cm.clientAddr, cm.accessKey)
+		if err == nil {
+			cm.tunnelTimeMetrics.stopConnection(*ipKey)
+		}
 	}
 }
 
