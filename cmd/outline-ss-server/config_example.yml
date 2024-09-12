@@ -29,7 +29,7 @@ services:
         secret: Secret1
     dialer:
       # fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
-      # Value of 0 disables fwmark (SO_MARK)
+      # Value of 0 disables fwmark (SO_MARK) (Linux Only)
       fwmark: 0
   - listeners:
       - type: tcp

@@ -24,9 +24,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
-	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
@@ -166,24 +164,6 @@ func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration
 		authenticate: authenticate,
 		dialer:       dialer,
 	}
-}
-
-func MakeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator, fwmark uint) transport.StreamDialer {
-	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
-		if fwmark > 0 {
-			err := c.Control(func(fd uintptr) {
-				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
-				if err != nil {
-					slog.Error("Set fwmark failed.", "err", os.NewSyscallError("failed to set mark for TCP socket", err))
-				}
-			})
-			if err != nil {
-				slog.Error("Set TCPDialer Control func failed.", "err", err)
-			}
-		}
-		ip, _, _ := net.SplitHostPort(address)
-		return targetIPValidator(net.ParseIP(ip))
-	}}}
 }
 
 // StreamHandler is a handler that handles stream connections.
