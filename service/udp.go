@@ -198,7 +198,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
-		if targetConn != nil {
+		if targetConn != nil && targetConn.metrics != nil {
 			targetConn.metrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
 		}
 	}
@@ -299,11 +299,13 @@ type natmap struct {
 	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup) *natmap {
-	m := &natmap{metrics: sm, running: running}
-	m.keyConn = make(map[string]*natconn)
-	m.timeout = timeout
-	return m
+func newNATmap(timeout time.Duration, metrics UDPMetrics, running *sync.WaitGroup) *natmap {
+	return &natmap{
+		metrics: metrics,
+		running: running,
+		keyConn: make(map[string]*natconn),
+		timeout: timeout,
+	}
 }
 
 func (m *natmap) Get(key string) *natconn {
@@ -341,13 +343,18 @@ func (m *natmap) del(key string) net.PacketConn {
 }
 
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, keyID string) *natconn {
-	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
+	var connMetrics UDPConnMetrics
+	if m.metrics != nil {
+		connMetrics = m.metrics.AddUDPNatEntry(clientAddr, keyID)
+	}
 	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, connMetrics)
 
 	m.running.Add(1)
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID)
-		connMetrics.RemoveNatEntry()
+		if connMetrics != nil {
+			connMetrics.RemoveNatEntry()
+		}
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
 		}
@@ -443,7 +450,9 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		if expired {
 			break
 		}
-		targetConn.metrics.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
+		if targetConn.metrics != nil {
+			targetConn.metrics.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
+		}
 	}
 }
 

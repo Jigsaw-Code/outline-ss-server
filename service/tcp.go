@@ -253,7 +253,9 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 		status = connError.Status
 		slog.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 	}
-	connMetrics.AddClosed(status, proxyMetrics, connDuration)
+	if connMetrics != nil {
+		connMetrics.AddClosed(status, proxyMetrics, connDuration)
+	}
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	slog.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
 }
@@ -325,7 +327,9 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 		h.absorbProbe(outerConn, connMetrics, authErr.Status, proxyMetrics)
 		return authErr
 	}
-	connMetrics.AddAuthenticated(id)
+	if connMetrics != nil {
+		connMetrics.AddAuthenticated(id)
+	}
 
 	// Read target address and dial it.
 	tgtAddr, err := getProxyRequest(innerConn)
@@ -355,7 +359,9 @@ func (h *streamHandler) absorbProbe(clientConn io.ReadCloser, connMetrics TCPCon
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
 	slog.LogAttrs(nil, slog.LevelDebug, "Drain error.", slog.Any("err", drainErr), slog.String("result", drainResult))
-	connMetrics.AddProbe(status, drainResult, proxyMetrics.ClientProxy)
+	if connMetrics != nil {
+		connMetrics.AddProbe(status, drainResult, proxyMetrics.ClientProxy)
+	}
 }
 
 func drainErrToString(drainErr error) string {
@@ -369,14 +375,3 @@ func drainErrToString(drainErr error) string {
 		return "other"
 	}
 }
-
-// NoOpTCPConnMetrics is a [TCPConnMetrics] that doesn't do anything. Useful in tests
-// or if you don't want to track metrics.
-type NoOpTCPConnMetrics struct{}
-
-var _ TCPConnMetrics = (*NoOpTCPConnMetrics)(nil)
-
-func (m *NoOpTCPConnMetrics) AddAuthenticated(accessKey string) {}
-func (m *NoOpTCPConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
-}
-func (m *NoOpTCPConnMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {}
