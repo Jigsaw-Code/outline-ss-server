@@ -24,19 +24,25 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
 const timeout = 5 * time.Minute
 
 var clientAddr = net.UDPAddr{IP: []byte{192, 0, 2, 1}, Port: 12345}
+
 var targetAddr = net.UDPAddr{IP: []byte{192, 0, 2, 2}, Port: 54321}
+
 var dnsAddr = net.UDPAddr{IP: []byte{192, 0, 2, 3}, Port: 53}
+
 var natCryptoKey *shadowsocks.EncryptionKey
+
+var udpDefaultDialer = MakeTargetPacketListener(0)
 
 func init() {
 	logging.SetLevel(logging.INFO, "")
@@ -109,8 +115,10 @@ var _ UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
 func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
+
 func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
+
 func (m *fakeUDPConnMetrics) RemoveNatEntry() {
 }
 
@@ -136,7 +144,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
+	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{}, udpDefaultDialer)
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
@@ -482,7 +490,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{}, udpDefaultDialer)
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {

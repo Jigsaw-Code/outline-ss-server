@@ -31,16 +31,20 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
-	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
+
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 )
 
-var logLevel = new(slog.LevelVar) // Info by default
-var logHandler slog.Handler
+var (
+	logLevel   = new(slog.LevelVar) // Info by default
+	logHandler slog.Handler
+)
 
 // Set by goreleaser default ldflags. See https://goreleaser.com/customization/build/
 var version = "dev"
@@ -120,14 +124,14 @@ func newCipherListFromConfig(config ServiceConfig) (service.CipherList, error) {
 	return ciphers, nil
 }
 
-func (s *SSServer) NewShadowsocksStreamHandler(ciphers service.CipherList) service.StreamHandler {
+func (s *SSServer) NewShadowsocksStreamHandler(ciphers service.CipherList, dialer transport.StreamDialer) service.StreamHandler {
 	authFunc := service.NewShadowsocksStreamAuthenticator(ciphers, &s.replayCache, s.m.tcpServiceMetrics)
 	// TODO: Register initial data metrics at zero.
-	return service.NewStreamHandler(authFunc, tcpReadTimeout)
+	return service.NewStreamHandler(authFunc, tcpReadTimeout, dialer)
 }
 
-func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList) service.PacketHandler {
-	return service.NewPacketHandler(s.natTimeout, ciphers, s.m, s.m.udpServiceMetrics)
+func (s *SSServer) NewShadowsocksPacketHandler(ciphers service.CipherList, dialer service.UDPDialer) service.PacketHandler {
+	return service.NewPacketHandler(s.natTimeout, ciphers, s.m, s.m.udpServiceMetrics, dialer)
 }
 
 func (s *SSServer) NewShadowsocksStreamHandlerFromConfig(config ServiceConfig) (service.StreamHandler, error) {
@@ -135,7 +139,8 @@ func (s *SSServer) NewShadowsocksStreamHandlerFromConfig(config ServiceConfig) (
 	if err != nil {
 		return nil, err
 	}
-	return s.NewShadowsocksStreamHandler(ciphers), nil
+	dialer := service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, config.Dialer.Fwmark)
+	return s.NewShadowsocksStreamHandler(ciphers, dialer), nil
 }
 
 func (s *SSServer) NewShadowsocksPacketHandlerFromConfig(config ServiceConfig) (service.PacketHandler, error) {
@@ -143,7 +148,8 @@ func (s *SSServer) NewShadowsocksPacketHandlerFromConfig(config ServiceConfig) (
 	if err != nil {
 		return nil, err
 	}
-	return s.NewShadowsocksPacketHandler(ciphers), nil
+	dialer := service.MakeTargetPacketListener(config.Dialer.Fwmark)
+	return s.NewShadowsocksPacketHandler(ciphers, dialer), nil
 }
 
 type listenerSet struct {
@@ -243,7 +249,8 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 				ciphers := service.NewCipherList()
 				ciphers.Update(cipherList)
 
-				sh := s.NewShadowsocksStreamHandler(ciphers)
+				tcpDialer := service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0)
+				sh := s.NewShadowsocksStreamHandler(ciphers, tcpDialer)
 				ln, err := lnSet.ListenStream(addr)
 				if err != nil {
 					return err
@@ -259,7 +266,8 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 					return err
 				}
 				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
-				ph := s.NewShadowsocksPacketHandler(ciphers)
+				udpDialer := service.MakeTargetPacketListener(0)
+				ph := s.NewShadowsocksPacketHandler(ciphers, udpDialer)
 				go ph.Handle(pc)
 			}
 
@@ -275,7 +283,12 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 						if err != nil {
 							return err
 						}
-						slog.Info("TCP service started.", "address", ln.Addr().String())
+						slog.Info("TCP service started.", "address", ln.Addr().String(), "fwmark", func() any {
+							if serviceConfig.Dialer.Fwmark == 0 {
+								return "disabled"
+							}
+							return serviceConfig.Dialer.Fwmark
+						}())
 						if sh == nil {
 							sh, err = s.NewShadowsocksStreamHandlerFromConfig(serviceConfig)
 							if err != nil {
@@ -291,7 +304,12 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 						if err != nil {
 							return err
 						}
-						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
+						slog.Info("UDP service started.", "address", pc.LocalAddr().String(), "fwmark", func() any {
+							if serviceConfig.Dialer.Fwmark == 0 {
+								return "disabled"
+							}
+							return serviceConfig.Dialer.Fwmark
+						}())
 						if ph == nil {
 							ph, err = s.NewShadowsocksPacketHandlerFromConfig(serviceConfig)
 							if err != nil {
