@@ -28,6 +28,9 @@ import (
 // fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
 // Value of 0 disables fwmark (SO_MARK) (Linux Only)
 func MakeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator, fwmark uint) transport.StreamDialer {
+	if fwmark != 0 {
+		panic("fwmark is linux-specific feature and should be 0")
+	}
 	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		ip, _, _ := net.SplitHostPort(address)
 		return targetIPValidator(net.ParseIP(ip))

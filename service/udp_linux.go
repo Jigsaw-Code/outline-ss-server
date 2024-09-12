@@ -17,10 +17,7 @@
 package service
 
 import (
-	"log/slog"
 	"net"
-	"os"
-	"syscall"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
@@ -29,26 +26,31 @@ import (
 // Value of 0 disables fwmark (SO_MARK) (Linux Only)
 func MakeTargetPacketListener(fwmark uint) UDPDialer {
 	return func() (net.PacketConn, *onet.ConnectionError) {
-		udpConn, err := net.ListenPacket("udp", "")
+		udpConn, err := net.ListenUDP("udp", nil)
 		if err != nil {
 			return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
 		}
 
 		if fwmark > 0 {
-			rawConn, err := udpConn.(*net.UDPConn).SyscallConn()
+			rawConn, err := udpConn.SyscallConn()
 			if err != nil {
 				udpConn.Close()
 				return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to get UDP raw connection", err)
 			}
+			var fwErr error
 			err = rawConn.Control(func(fd uintptr) {
-				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
+				err := SetFwmark(fd, fwmark)
 				if err != nil {
-					slog.Error("Set fwmark failed.", "err", os.NewSyscallError("failed to set fwmark for UDP socket", err))
+					fwErr = err
 				}
 			})
 			if err != nil {
 				udpConn.Close()
 				return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Set UDPDialer Control func failed.", err)
+			}
+			if fwErr != nil {
+				udpConn.Close()
+				return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Set fwmark failed.", fwErr)
 			}
 		}
 		return udpConn, nil

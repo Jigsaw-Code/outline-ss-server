@@ -17,9 +17,7 @@
 package service
 
 import (
-	"log/slog"
 	"net"
-	"os"
 	"syscall"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
@@ -32,15 +30,18 @@ import (
 func MakeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator, fwmark uint) transport.StreamDialer {
 	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		if fwmark > 0 {
+			var fwErr error
 			err := c.Control(func(fd uintptr) {
-				err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
+				err := SetFwmark(fd, fwmark)
 				if err != nil {
-					slog.Error("Set fwmark failed.", "err", os.NewSyscallError("failed to set mark for TCP socket", err))
+					fwErr = err
 				}
 			})
 			if err != nil {
-				slog.Error("Set TCPDialer Control func failed.", "err", err)
 				return err
+			}
+			if fwErr != nil {
+				return fwErr
 			}
 		}
 		ip, _, _ := net.SplitHostPort(address)
