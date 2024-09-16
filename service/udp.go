@@ -123,7 +123,7 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 func (h *packetHandler) Handle(clientConn net.PacketConn) {
 	var running sync.WaitGroup
 
-	nm := newNATmap(h.l, h.natTimeout, h.m, &running)
+	nm := newNATmap(h.natTimeout, h.m, &running, h.l)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
@@ -314,7 +314,7 @@ type natmap struct {
 	running *sync.WaitGroup
 }
 
-func newNATmap(l Logger, timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup) *natmap {
+func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup, l Logger) *natmap {
 	m := &natmap{l: l, metrics: sm, running: running}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
@@ -361,7 +361,7 @@ func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *
 
 	m.running.Add(1)
 	go func() {
-		timedCopy(m.l, clientAddr, clientConn, entry, keyID)
+		timedCopy(clientAddr, clientConn, entry, keyID, m.l)
 		connMetrics.RemoveNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
@@ -390,7 +390,7 @@ func (m *natmap) Close() error {
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
-func timedCopy(l Logger, clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, keyID string) {
+func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, keyID string, l Logger) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
