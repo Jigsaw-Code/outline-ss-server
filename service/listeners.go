@@ -128,9 +128,9 @@ type readRequest struct {
 
 type virtualPacketConn struct {
 	net.PacketConn
-	mu          sync.Mutex // Mutex to protect access to the channels
-	readCh      chan readRequest
-	onCloseFunc OnCloseFunc
+	mu      sync.Mutex // Mutex to protect access to the channels
+	readCh  chan readRequest
+	closeCh chan struct{}
 }
 
 func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
@@ -162,13 +162,9 @@ func (pc *virtualPacketConn) Close() error {
 	if pc.readCh == nil {
 		return nil
 	}
-	pc.readCh = nil
 
-	if pc.onCloseFunc != nil {
-		onCloseFunc := pc.onCloseFunc
-		pc.onCloseFunc = nil
-		return onCloseFunc()
-	}
+	close(pc.closeCh)
+	pc.readCh = nil
 	return nil
 }
 
@@ -286,44 +282,51 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 		m.pc = pc
 		m.readCh = make(chan readRequest)
 		m.doneCh = make(chan struct{})
-		go func() {
-			for {
-				select {
-				case req := <-m.readCh:
-					n, addr, err := pc.ReadFrom(req.buffer)
-					req.respCh <- struct {
-						n    int
-						addr net.Addr
-						err  error
-					}{n, addr, err}
-				case <-m.doneCh:
-					return
-				}
-			}
-		}()
 	}
 
 	m.count++
-	return &virtualPacketConn{
+	vpc := &virtualPacketConn{
 		PacketConn: m.pc,
 		readCh:     m.readCh,
-		onCloseFunc: func() error {
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			m.count--
-			if m.count == 0 {
-				close(m.doneCh)
-				m.pc.Close()
-				m.pc = nil
-				if m.onCloseFunc != nil {
-					onCloseFunc := m.onCloseFunc
-					m.onCloseFunc = nil
-					return onCloseFunc()
+		closeCh:    make(chan struct{}),
+	}
+
+	go func() {
+		for {
+			select {
+			case req, ok := <-m.readCh:
+				if !ok {
+					// The read channel is closed.
+					return
 				}
+				n, addr, err := m.pc.ReadFrom(req.buffer)
+				req.respCh <- struct {
+					n    int
+					addr net.Addr
+					err  error
+				}{n, addr, err}
+			case <-vpc.closeCh:
+				m.mu.Lock()
+				defer m.mu.Unlock()
+				m.count--
+				if m.count == 0 {
+					close(m.doneCh)
+					m.pc.Close()
+					m.pc = nil
+					if m.onCloseFunc != nil {
+						onCloseFunc := m.onCloseFunc
+						m.onCloseFunc = nil
+						onCloseFunc()
+					}
+				}
+				return
+			case <-m.doneCh:
+				return
 			}
-			return nil
-		},
-	}, nil
+		}
+	}()
+
+	return vpc, nil
 }
 
 // ListenerManager holds the state of shared listeners.
