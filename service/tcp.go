@@ -61,7 +61,7 @@ func remoteIP(conn net.Conn) netip.Addr {
 func debugTCP(l Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
-	if l.Enabled(nil, slog.LevelDebug) {
+	if l != nil && l.Enabled(nil, slog.LevelDebug) {
 		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("TCP: %s", template), slog.String("ID", cipherID), attr)
 	}
 }
@@ -72,7 +72,7 @@ func debugTCP(l Logger, template string, cipherID string, attr slog.Attr) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(l Logger, clientReader io.Reader, clientIP netip.Addr, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
+func findAccessKey(clientReader io.Reader, clientIP netip.Addr, cipherList CipherList, l Logger) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
 	firstBytes := make([]byte, bytesForKeyFinding)
@@ -81,7 +81,7 @@ func findAccessKey(l Logger, clientReader io.Reader, clientIP netip.Addr, cipher
 	}
 
 	findStartTime := time.Now()
-	entry, elt := findEntry(l, firstBytes, ciphers)
+	entry, elt := findEntry(firstBytes, ciphers, l)
 	timeToCipher := time.Since(findStartTime)
 	if entry == nil {
 		// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
@@ -95,7 +95,7 @@ func findAccessKey(l Logger, clientReader io.Reader, clientIP netip.Addr, cipher
 }
 
 // Implements a trial decryption search.  This assumes that all ciphers are AEAD.
-func findEntry(l Logger, firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.Element) {
+func findEntry(firstBytes []byte, ciphers []*list.Element, l Logger) (*CipherEntry, *list.Element) {
 	// To hold the decrypted chunk length.
 	chunkLenBuf := [2]byte{}
 	for ci, elt := range ciphers {
@@ -112,14 +112,14 @@ func findEntry(l Logger, firstBytes []byte, ciphers []*list.Element) (*CipherEnt
 	return nil, nil
 }
 
-type StreamAuthenticateFunc func(l Logger, clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
+type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
 
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
 // TODO(fortuna): Offer alternative transports.
-func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksConnMetrics) StreamAuthenticateFunc {
-	return func(l Logger, clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksConnMetrics, l Logger) StreamAuthenticateFunc {
+	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
 		// Find the cipher and acess key id.
-		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(l, clientConn, remoteIP(clientConn), ciphers)
+		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers, l)
 		metrics.AddCipherSearch(keyErr == nil, timeToCipher)
 		if keyErr != nil {
 			const status = "ERR_CIPHER"
@@ -327,7 +327,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 	}
 	outerConn.SetReadDeadline(readDeadline)
 
-	id, innerConn, authErr := h.authenticate(h.l, outerConn)
+	id, innerConn, authErr := h.authenticate(outerConn)
 	if authErr != nil {
 		// Drain to protect against probing attacks.
 		h.absorbProbe(outerConn, connMetrics, authErr.Status, proxyMetrics)

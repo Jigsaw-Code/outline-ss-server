@@ -16,7 +16,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"time"
 
@@ -47,8 +46,8 @@ type Service interface {
 	HandlePacket(conn net.PacketConn)
 }
 
-// Option user's option.
-type Option func(s *ssService) error
+// Option is a Shadowsocks service constructor option.
+type Option func(s *ssService)
 
 type ssService struct {
 	logger      Logger
@@ -65,88 +64,70 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	s := &ssService{}
 
 	for _, opt := range opts {
-		if err := opt(s); err != nil {
-			return nil, fmt.Errorf("failed to create new service: %v", err)
-		}
+		opt(s)
 	}
 
 	if s.natTimeout == 0 {
 		s.natTimeout = defaultNatTimeout
 	}
+
+	// TODO: Register initial data metrics at zero.
+	s.sh = NewStreamHandler(
+		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.m, proto: "tcp"}, s.logger),
+		tcpReadTimeout,
+	)
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.m, &ssConnMetrics{ServiceMetrics: s.m, proto: "udp"})
+	if s.logger != nil {
+		s.sh.SetLogger(s.logger)
+		s.ph.SetLogger(s.logger)
+	}
+
 	return s, nil
 }
 
 // WithLogger can be used to provide a custom log target.
 func WithLogger(l Logger) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.logger = l
-		return nil
 	}
 }
 
 // WithCiphers option function.
 func WithCiphers(ciphers CipherList) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.ciphers = ciphers
-		return nil
 	}
 }
 
 // WithMetrics option function.
 func WithMetrics(metrics ServiceMetrics) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.m = metrics
-		return nil
 	}
 }
 
 // WithReplayCache option function.
 func WithReplayCache(replayCache *ReplayCache) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.replayCache = replayCache
-		return nil
 	}
 }
 
 // WithNatTimeout option function.
 func WithNatTimeout(natTimeout time.Duration) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.natTimeout = natTimeout
-		return nil
 	}
 }
 
 // HandleStream handles a Shadowsocks stream-based connection.
 func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	if s.sh == nil {
-		authFunc := NewShadowsocksStreamAuthenticator(
-			s.ciphers,
-			s.replayCache,
-			&ssConnMetrics{ServiceMetrics: s.m, proto: "tcp"},
-		)
-		// TODO: Register initial data metrics at zero.
-		s.sh = NewStreamHandler(authFunc, tcpReadTimeout)
-		if s.logger != nil {
-			s.sh.SetLogger(s.logger)
-		}
-	}
 	connMetrics := s.m.AddOpenTCPConnection(conn)
 	s.sh.Handle(ctx, conn, connMetrics)
 }
 
 // HandlePacket handles a Shadowsocks packet connection.
 func (s *ssService) HandlePacket(conn net.PacketConn) {
-	if s.ph == nil {
-		s.ph = NewPacketHandler(
-			s.natTimeout,
-			s.ciphers,
-			s.m,
-			&ssConnMetrics{ServiceMetrics: s.m, proto: "udp"},
-		)
-		if s.logger != nil {
-			s.ph.SetLogger(s.logger)
-		}
-	}
 	s.ph.Handle(conn)
 }
 

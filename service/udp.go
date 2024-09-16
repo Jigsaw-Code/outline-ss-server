@@ -60,7 +60,7 @@ func debugUDPAddr(l Logger, template string, addr net.Addr, attr slog.Attr) {
 
 // Decrypts src into dst. It tries each cipher until it finds one that authenticates
 // correctly. dst and src must not overlap.
-func findAccessKeyUDP(l Logger, clientIP netip.Addr, dst, src []byte, cipherList CipherList) ([]byte, string, *shadowsocks.EncryptionKey, error) {
+func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherList, l Logger) ([]byte, string, *shadowsocks.EncryptionKey, error) {
 	// Try each cipher until we find one that authenticates successfully. This assumes that all ciphers are AEAD.
 	// We snapshot the list because it may be modified while we use it.
 	snapshot := cipherList.SnapshotForClientIP(clientIP)
@@ -162,7 +162,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				var textData []byte
 				var cryptoKey *shadowsocks.EncryptionKey
 				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err = findAccessKeyUDP(h.l, ip, textBuf, cipherData, h.ciphers)
+				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.l)
 				timeToCipher := time.Since(unpackStart)
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 

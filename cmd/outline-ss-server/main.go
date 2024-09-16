@@ -57,7 +57,7 @@ func init() {
 	)
 }
 
-type SSServer struct {
+type OutlineServer struct {
 	stopConfig     func() error
 	lnManager      service.ListenerManager
 	natTimeout     time.Duration
@@ -66,7 +66,7 @@ type SSServer struct {
 	replayCache    service.ReplayCache
 }
 
-func (s *SSServer) loadConfig(filename string) error {
+func (s *OutlineServer) loadConfig(filename string) error {
 	configData, err := os.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("failed to read config file %s: %w", filename, err)
@@ -181,7 +181,7 @@ func (ls *listenerSet) Len() int {
 	return len(ls.listenerCloseFuncs)
 }
 
-func (s *SSServer) runConfig(config Config) (func() error, error) {
+func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 	startErrCh := make(chan error)
 	stopErrCh := make(chan error)
 	stopCh := make(chan struct{})
@@ -298,7 +298,7 @@ func (s *SSServer) runConfig(config Config) (func() error, error) {
 }
 
 // Stop stops serving the current config.
-func (s *SSServer) Stop() error {
+func (s *OutlineServer) Stop() error {
 	stopFunc := s.stopConfig
 	if stopFunc == nil {
 		return nil
@@ -311,9 +311,9 @@ func (s *SSServer) Stop() error {
 	return nil
 }
 
-// RunSSServer starts a shadowsocks server running, and returns the server or an error.
-func RunSSServer(filename string, natTimeout time.Duration, serverMetrics *serverMetrics, serviceMetrics service.ServiceMetrics, replayHistory int) (*SSServer, error) {
-	server := &SSServer{
+// RunOutlineServer starts an Outline server running, and returns the server or an error.
+func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *serverMetrics, serviceMetrics service.ServiceMetrics, replayHistory int) (*OutlineServer, error) {
+	server := &OutlineServer{
 		lnManager:      service.NewListenerManager(),
 		natTimeout:     natTimeout,
 		serverMetrics:  serverMetrics,
@@ -405,7 +405,7 @@ func main() {
 	r := prometheus.WrapRegistererWithPrefix("shadowsocks_", prometheus.DefaultRegisterer)
 	r.MustRegister(serverMetrics, serviceMetrics)
 
-	_, err = RunSSServer(flags.ConfigFile, flags.natTimeout, serverMetrics, serviceMetrics, flags.replayHistory)
+	_, err = RunOutlineServer(flags.ConfigFile, flags.natTimeout, serverMetrics, serviceMetrics, flags.replayHistory)
 	if err != nil {
 		slog.Error("Server failed to start. Aborting.", "err", err)
 	}
