@@ -130,6 +130,7 @@ func TestTCPEcho(t *testing.T) {
 	}
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
+	testMetrics := &statusMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -137,7 +138,7 @@ func TestTCPEcho(t *testing.T) {
 	go func() {
 		service.StreamServe(
 			func() (transport.StreamConn, error) { return proxyListener.AcceptTCP() },
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, nil) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -191,14 +192,11 @@ func (m *fakeShadowsocksMetrics) AddCipherSearch(accessKeyFound bool, timeToCiph
 }
 
 type statusMetrics struct {
+	service.NoOpTCPConnMetrics
 	sync.Mutex
 	statuses []string
 }
 
-var _ service.TCPConnMetrics = (*statusMetrics)(nil)
-
-func (m *statusMetrics) AddAuthenticated(accessKey string) {}
-func (m *statusMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {}
 func (m *statusMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.Lock()
 	m.statuses = append(m.statuses, status)
@@ -401,6 +399,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 		b.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
+	testMetrics := &service.NoOpTCPConnMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -408,7 +407,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, nil) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -467,6 +466,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	}
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
+	testMetrics := &service.NoOpTCPConnMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
@@ -474,7 +474,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, nil) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()

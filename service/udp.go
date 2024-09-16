@@ -308,13 +308,11 @@ type natmap struct {
 	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, metrics UDPMetrics, running *sync.WaitGroup) *natmap {
-	return &natmap{
-		metrics: metrics,
-		running: running,
-		keyConn: make(map[string]*natconn),
-		timeout: timeout,
-	}
+func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup) *natmap {
+	m := &natmap{metrics: sm, running: running}
+	m.keyConn = make(map[string]*natconn)
+	m.timeout = timeout
+	return m
 }
 
 func (m *natmap) Get(key string) *natconn {
