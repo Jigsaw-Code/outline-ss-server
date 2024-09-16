@@ -15,7 +15,6 @@
 package service
 
 import (
-	"container/list"
 	"context"
 	"net"
 	"time"
@@ -62,9 +61,7 @@ type ssService struct {
 
 // NewShadowsocksService creates a new service
 func NewShadowsocksService(opts ...Option) (Service, error) {
-	s := &ssService{
-		ciphers: NewCipherList(),
-	}
+	s := &ssService{}
 
 	for _, opt := range opts {
 		opt(s)
@@ -85,9 +82,9 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 }
 
 // WithCiphers option function.
-func WithCiphers(ciphers *list.List) Option {
+func WithCiphers(ciphers CipherList) Option {
 	return func(s *ssService) {
-		s.ciphers.Update(ciphers)
+		s.ciphers = ciphers
 	}
 }
 
