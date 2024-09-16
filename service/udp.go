@@ -89,7 +89,16 @@ type packetHandler struct {
 
 // NewPacketHandler creates a UDPService
 func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
-	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, ssm: ssMetrics, targetIPValidator: onet.RequirePublicIP}
+	if m == nil {
+		m = &NoOpUDPMetrics{}
+	}
+	return &packetHandler{
+		natTimeout: natTimeout,
+		ciphers: cipherList,
+		m: m,
+		ssm: ssMetrics,
+		targetIPValidator: onet.RequirePublicIP,
+	}
 }
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
@@ -198,7 +207,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
-		if targetConn != nil && targetConn.metrics != nil {
+		if targetConn != nil {
 			targetConn.metrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
 		}
 	}
@@ -343,18 +352,13 @@ func (m *natmap) del(key string) net.PacketConn {
 }
 
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, keyID string) *natconn {
-	var connMetrics UDPConnMetrics
-	if m.metrics != nil {
-		connMetrics = m.metrics.AddUDPNatEntry(clientAddr, keyID)
-	}
+	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
 	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, connMetrics)
 
 	m.running.Add(1)
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID)
-		if connMetrics != nil {
-			connMetrics.RemoveNatEntry()
-		}
+		connMetrics.RemoveNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
 		}
@@ -450,9 +454,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		if expired {
 			break
 		}
-		if targetConn.metrics != nil {
-			targetConn.metrics.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
-		}
+		targetConn.metrics.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
 	}
 }
 
