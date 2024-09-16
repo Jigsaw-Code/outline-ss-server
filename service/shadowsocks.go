@@ -50,7 +50,7 @@ type Service interface {
 type Option func(s *ssService)
 
 type ssService struct {
-	m           ServiceMetrics
+	metrics     ServiceMetrics
 	ciphers     CipherList
 	natTimeout  time.Duration
 	replayCache *ReplayCache
@@ -70,13 +70,16 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	if s.natTimeout == 0 {
 		s.natTimeout = defaultNatTimeout
 	}
+	if s.metrics == nil {
+		s.metrics = &NoOpShadowsocksMetrics{}
+	}
 
 	// TODO: Register initial data metrics at zero.
 	s.sh = NewStreamHandler(
-		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.m, proto: "tcp"}),
+		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "tcp"}),
 		tcpReadTimeout,
 	)
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.m, &ssConnMetrics{ServiceMetrics: s.m, proto: "udp"})
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
 
 	return s, nil
 }
@@ -91,7 +94,7 @@ func WithCiphers(ciphers CipherList) Option {
 // WithMetrics option function.
 func WithMetrics(metrics ServiceMetrics) Option {
 	return func(s *ssService) {
-		s.m = metrics
+		s.metrics = metrics
 	}
 }
 
@@ -111,7 +114,7 @@ func WithNatTimeout(natTimeout time.Duration) Option {
 
 // HandleStream handles a Shadowsocks stream-based connection.
 func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	connMetrics := s.m.AddOpenTCPConnection(conn)
+	connMetrics := s.metrics.AddOpenTCPConnection(conn)
 	s.sh.Handle(ctx, conn, connMetrics)
 }
 
@@ -129,4 +132,17 @@ var _ ShadowsocksConnMetrics = (*ssConnMetrics)(nil)
 
 func (cm *ssConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 	cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
+}
+
+type NoOpShadowsocksMetrics struct {
+	NoOpUDPMetrics
+}
+
+var _ ServiceMetrics = (*NoOpShadowsocksMetrics)(nil)
+
+func (m *NoOpShadowsocksMetrics) AddOpenTCPConnection(conn net.Conn) TCPConnMetrics {
+	return &NoOpTCPConnMetrics{}
+}
+
+func (m *NoOpShadowsocksMetrics) AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration) {
 }
