@@ -89,7 +89,19 @@ type packetHandler struct {
 
 // NewPacketHandler creates a UDPService
 func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
-	return &packetHandler{natTimeout: natTimeout, ciphers: cipherList, m: m, ssm: ssMetrics, targetIPValidator: onet.RequirePublicIP}
+	if m == nil {
+		m = &NoOpUDPMetrics{}
+	}
+	if ssMetrics == nil {
+		ssMetrics = &NoOpShadowsocksConnMetrics{}
+	}
+	return &packetHandler{
+		natTimeout:        natTimeout,
+		ciphers:           cipherList,
+		m:                 m,
+		ssm:               ssMetrics,
+		targetIPValidator: onet.RequirePublicIP,
+	}
 }
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.

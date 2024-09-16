@@ -135,3 +135,12 @@ func (cm *ssConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.
 		cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
 	}
 }
+
+// NoOpShadowsocksConnMetrics is a [ShadowsocksConnMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpShadowsocksConnMetrics struct{}
+
+var _ ShadowsocksConnMetrics = (*NoOpShadowsocksConnMetrics)(nil)
+
+func (m *NoOpShadowsocksConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+}
