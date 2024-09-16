@@ -70,9 +70,6 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	if s.natTimeout == 0 {
 		s.natTimeout = defaultNatTimeout
 	}
-	if s.metrics == nil {
-		s.metrics = &NoOpShadowsocksMetrics{}
-	}
 
 	// TODO: Register initial data metrics at zero.
 	s.sh = NewStreamHandler(
@@ -125,7 +122,10 @@ func WithNatTimeout(natTimeout time.Duration) Option {
 
 // HandleStream handles a Shadowsocks stream-based connection.
 func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	connMetrics := s.metrics.AddOpenTCPConnection(conn)
+	var connMetrics TCPConnMetrics
+	if s.metrics != nil {
+		connMetrics = s.metrics.AddOpenTCPConnection(conn)
+	}
 	s.sh.Handle(ctx, conn, connMetrics)
 }
 
@@ -142,18 +142,16 @@ type ssConnMetrics struct {
 var _ ShadowsocksConnMetrics = (*ssConnMetrics)(nil)
 
 func (cm *ssConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
-	cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
+	if cm.ServiceMetrics != nil {
+		cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
+	}
 }
 
-type NoOpShadowsocksMetrics struct {
-	NoOpUDPMetrics
-}
+// NoOpShadowsocksConnMetrics is a [ShadowsocksConnMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpShadowsocksConnMetrics struct{}
 
-var _ ServiceMetrics = (*NoOpShadowsocksMetrics)(nil)
+var _ ShadowsocksConnMetrics = (*NoOpShadowsocksConnMetrics)(nil)
 
-func (m *NoOpShadowsocksMetrics) AddOpenTCPConnection(conn net.Conn) TCPConnMetrics {
-	return &NoOpTCPConnMetrics{}
-}
-
-func (m *NoOpShadowsocksMetrics) AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration) {
+func (m *NoOpShadowsocksConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }

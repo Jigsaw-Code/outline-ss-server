@@ -90,6 +90,12 @@ type packetHandler struct {
 
 // NewPacketHandler creates a UDPService
 func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
+	if m == nil {
+		m = &NoOpUDPMetrics{}
+	}
+	if ssMetrics == nil {
+		ssMetrics = &NoOpShadowsocksConnMetrics{}
+	}
 	return &packetHandler{
 		l:                 &noopLogger{},
 		natTimeout:        natTimeout,
