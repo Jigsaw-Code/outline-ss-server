@@ -92,11 +92,14 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 	if m == nil {
 		m = &NoOpUDPMetrics{}
 	}
+	if ssMetrics == nil {
+		ssMetrics = &NoOpShadowsocksConnMetrics{}
+	}
 	return &packetHandler{
-		natTimeout: natTimeout,
-		ciphers: cipherList,
-		m: m,
-		ssm: ssMetrics,
+		natTimeout:        natTimeout,
+		ciphers:           cipherList,
+		m:                 m,
+		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
 	}
 }
