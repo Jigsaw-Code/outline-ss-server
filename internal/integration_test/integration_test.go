@@ -133,7 +133,7 @@ func TestTCPEcho(t *testing.T) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(&noopLogger{}, authFunc, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
@@ -223,7 +223,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(&noopLogger{}, authFunc, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -322,7 +322,7 @@ func TestUDPEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	testMetrics := &fakeUDPMetrics{}
-	proxy := service.NewPacketHandler(&noopLogger{}, time.Hour, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -412,7 +412,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPConnMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(&noopLogger{}, authFunc, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
@@ -479,7 +479,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPConnMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(&noopLogger{}, authFunc, testTimeout)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
@@ -555,7 +555,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(&noopLogger{}, time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -599,7 +599,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(&noopLogger{}, time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {

@@ -51,7 +51,7 @@ type Service interface {
 type Option func(s *ssService) error
 
 type ssService struct {
-	logger      logger
+	logger      Logger
 	m           ServiceMetrics
 	ciphers     CipherList
 	natTimeout  time.Duration
@@ -70,10 +70,6 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 		}
 	}
 
-	if s.logger == nil {
-		s.logger = &noopLogger{}
-	}
-
 	if s.natTimeout == 0 {
 		s.natTimeout = defaultNatTimeout
 	}
@@ -81,8 +77,7 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 }
 
 // WithLogger can be used to provide a custom log target.
-// Defaults to io.Discard.
-func WithLogger(l logger) Option {
+func WithLogger(l Logger) Option {
 	return func(s *ssService) error {
 		s.logger = l
 		return nil
@@ -130,7 +125,10 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 			&ssConnMetrics{ServiceMetrics: s.m, proto: "tcp"},
 		)
 		// TODO: Register initial data metrics at zero.
-		s.sh = NewStreamHandler(s.logger, authFunc, tcpReadTimeout)
+		s.sh = NewStreamHandler(authFunc, tcpReadTimeout)
+		if s.logger != nil {
+			s.sh.SetLogger(s.logger)
+		}
 	}
 	connMetrics := s.m.AddOpenTCPConnection(conn)
 	s.sh.Handle(ctx, conn, connMetrics)
@@ -140,12 +138,14 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 func (s *ssService) HandlePacket(conn net.PacketConn) {
 	if s.ph == nil {
 		s.ph = NewPacketHandler(
-			s.logger,
 			s.natTimeout,
 			s.ciphers,
 			s.m,
 			&ssConnMetrics{ServiceMetrics: s.m, proto: "udp"},
 		)
+		if s.logger != nil {
+			s.ph.SetLogger(s.logger)
+		}
 	}
 	s.ph.Handle(conn)
 }

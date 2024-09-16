@@ -58,7 +58,7 @@ func remoteIP(conn net.Conn) netip.Addr {
 }
 
 // Wrapper for slog.Debug during TCP access key searches.
-func debugTCP(l logger, template string, cipherID string, attr slog.Attr) {
+func debugTCP(l Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
 	if l.Enabled(nil, slog.LevelDebug) {
@@ -72,7 +72,7 @@ func debugTCP(l logger, template string, cipherID string, attr slog.Attr) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(l logger, clientReader io.Reader, clientIP netip.Addr, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
+func findAccessKey(l Logger, clientReader io.Reader, clientIP netip.Addr, cipherList CipherList) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
 	firstBytes := make([]byte, bytesForKeyFinding)
@@ -95,7 +95,7 @@ func findAccessKey(l logger, clientReader io.Reader, clientIP netip.Addr, cipher
 }
 
 // Implements a trial decryption search.  This assumes that all ciphers are AEAD.
-func findEntry(l logger, firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.Element) {
+func findEntry(l Logger, firstBytes []byte, ciphers []*list.Element) (*CipherEntry, *list.Element) {
 	// To hold the decrypted chunk length.
 	chunkLenBuf := [2]byte{}
 	for ci, elt := range ciphers {
@@ -112,12 +112,12 @@ func findEntry(l logger, firstBytes []byte, ciphers []*list.Element) (*CipherEnt
 	return nil, nil
 }
 
-type StreamAuthenticateFunc func(l logger, clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
+type StreamAuthenticateFunc func(l Logger, clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError)
 
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksConnMetrics) StreamAuthenticateFunc {
-	return func(l logger, clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
+	return func(l Logger, clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
 		// Find the cipher and acess key id.
 		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(l, clientConn, remoteIP(clientConn), ciphers)
 		metrics.AddCipherSearch(keyErr == nil, timeToCipher)
@@ -151,7 +151,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 }
 
 type streamHandler struct {
-	l            logger
+	l            Logger
 	listenerId   string
 	readTimeout  time.Duration
 	authenticate StreamAuthenticateFunc
@@ -159,9 +159,9 @@ type streamHandler struct {
 }
 
 // NewStreamHandler creates a StreamHandler
-func NewStreamHandler(l logger, authenticate StreamAuthenticateFunc, timeout time.Duration) StreamHandler {
+func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration) StreamHandler {
 	return &streamHandler{
-		l:            l,
+		l:            &noopLogger{},
 		readTimeout:  timeout,
 		authenticate: authenticate,
 		dialer:       defaultDialer,
@@ -180,8 +180,14 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 // StreamHandler is a handler that handles stream connections.
 type StreamHandler interface {
 	Handle(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
+	// SetLogger sets the logger used to log messages.
+	SetLogger(l Logger)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
+}
+
+func (s *streamHandler) SetLogger(l Logger) {
+	s.l = l
 }
 
 func (s *streamHandler) SetTargetDialer(dialer transport.StreamDialer) {
@@ -272,7 +278,7 @@ func getProxyRequest(clientConn transport.StreamConn) (string, error) {
 	return tgtAddr.String(), nil
 }
 
-func proxyConnection(l logger, ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
+func proxyConnection(l Logger, ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
 	tgtConn, dialErr := dialer.DialStream(ctx, tgtAddr)
 	if dialErr != nil {
 		// We don't drain so dial errors and invalid addresses are communicated quickly.

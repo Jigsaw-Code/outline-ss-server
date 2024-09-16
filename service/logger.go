@@ -19,7 +19,7 @@ import (
 	"log/slog"
 )
 
-type logger interface {
+type Logger interface {
 	Enabled(ctx context.Context, level slog.Level) bool
 	LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr)
 }
@@ -27,7 +27,7 @@ type logger interface {
 type noopLogger struct {
 }
 
-var _ logger = (*noopLogger)(nil)
+var _ Logger = (*noopLogger)(nil)
 
 func (l *noopLogger) Enabled(ctx context.Context, level slog.Level) bool {
 	return false

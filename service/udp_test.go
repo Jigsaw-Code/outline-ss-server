@@ -136,7 +136,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	handler := NewPacketHandler(&noopLogger{}, timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
+	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
@@ -482,7 +482,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(&noopLogger{}, testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
