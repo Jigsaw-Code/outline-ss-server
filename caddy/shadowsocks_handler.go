@@ -45,6 +45,12 @@ type ShadowsocksHandler struct {
 	logger  *slog.Logger
 }
 
+var (
+	_ caddy.Provisioner  = (*ShadowsocksHandler)(nil)
+	_ layer4.NextHandler = (*ShadowsocksHandler)(nil)
+)
+
+
 func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID:  "layer4.handlers.shadowsocks",
@@ -56,17 +62,13 @@ func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Slogger()
 
-	ctx.App(moduleName)
-	if _, err := ctx.AppIfConfigured(moduleName); err != nil {
-		return fmt.Errorf("outline app configure error: %w", err)
-	}
-	mod, err := ctx.App(moduleName)
+	mod, err := ctx.AppIfConfigured(outlineModuleName)
 	if err != nil {
-		return err
+		return fmt.Errorf("outline app configure error: %w", err)
 	}
 	app, ok := mod.(*OutlineApp)
 	if !ok {
-		return fmt.Errorf("module `%s` is not an OutlineApp", moduleName)
+		return fmt.Errorf("module `%s` is of type `%T`, expected `OutlineApp`", outlineModuleName, app)
 	}
 
 	if len(h.Keys) == 0 {
@@ -120,8 +122,3 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	}
 	return nil
 }
-
-var (
-	_ caddy.Provisioner  = (*ShadowsocksHandler)(nil)
-	_ layer4.NextHandler = (*ShadowsocksHandler)(nil)
-)

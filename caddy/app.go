@@ -31,7 +31,7 @@ func init() {
 	caddy.RegisterModule(OutlineApp{})
 }
 
-const moduleName = "outline"
+const outlineModuleName = "outline"
 
 type ShadowsocksConfig struct {
 	ReplayHistory int `json:"replay_history,omitempty"`
@@ -46,9 +46,14 @@ type OutlineApp struct {
 	buildInfo   *prometheus.GaugeVec
 }
 
+var (
+	_ caddy.App         = (*OutlineApp)(nil)
+	_ caddy.Provisioner = (*OutlineApp)(nil)
+)
+
 func (OutlineApp) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
-		ID:  moduleName,
+		ID:  outlineModuleName,
 		New: func() caddy.Module { return new(OutlineApp) },
 	}
 }
@@ -123,8 +128,3 @@ func (app *OutlineApp) Stop() error {
 	app.logger.Debug("stopped app instance")
 	return nil
 }
-
-var (
-	_ caddy.App         = (*OutlineApp)(nil)
-	_ caddy.Provisioner = (*OutlineApp)(nil)
-)
