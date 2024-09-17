@@ -117,6 +117,9 @@ type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, trans
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
 // TODO(fortuna): Offer alternative transports.
 func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksConnMetrics) StreamAuthenticateFunc {
+	if metrics == nil {
+		metrics = &NoOpShadowsocksConnMetrics{}
+	}
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
 		// Find the cipher and acess key id.
 		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers)
@@ -241,6 +244,9 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 }
 
 func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamConn, connMetrics TCPConnMetrics) {
+	if connMetrics == nil {
+		connMetrics = &NoOpTCPConnMetrics{}
+	}
 	var proxyMetrics metrics.ProxyMetrics
 	measuredClientConn := metrics.MeasureConn(clientConn, &proxyMetrics.ProxyClient, &proxyMetrics.ClientProxy)
 	connStart := time.Now()

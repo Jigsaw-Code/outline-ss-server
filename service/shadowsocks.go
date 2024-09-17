@@ -20,3 +20,12 @@ import "time"
 type ShadowsocksConnMetrics interface {
 	AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
 }
+
+// NoOpShadowsocksConnMetrics is a [ShadowsocksConnMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpShadowsocksConnMetrics struct{}
+
+var _ ShadowsocksConnMetrics = (*NoOpShadowsocksConnMetrics)(nil)
+
+func (m *NoOpShadowsocksConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+}
