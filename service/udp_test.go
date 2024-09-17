@@ -136,7 +136,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	handler := NewPacketHandler(&noopLogger{}, timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
+	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
@@ -207,14 +207,14 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(&noopLogger{}, timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, &noopLogger{})
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(&noopLogger{}, timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, &noopLogger{})
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
@@ -409,7 +409,7 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 	testIP := netip.MustParseAddr("192.0.2.1")
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		findAccessKeyUDP(&noopLogger{}, testIP, textBuf, testPayload, cipherList)
+		findAccessKeyUDP(testIP, textBuf, testPayload, cipherList, nil)
 	}
 }
 
@@ -439,7 +439,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 		cipherNumber := n % numCiphers
 		ip := ips[cipherNumber]
 		packet := packets[cipherNumber]
-		_, _, _, err := findAccessKeyUDP(&noopLogger{}, ip, testBuf, packet, cipherList)
+		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList, nil)
 		if err != nil {
 			b.Error(err)
 		}
@@ -468,7 +468,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		ip := ips[n%numIPs]
-		_, _, _, err := findAccessKeyUDP(&noopLogger{}, ip, testBuf, packet, cipherList)
+		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList, nil)
 		if err != nil {
 			b.Error(err)
 		}
@@ -482,7 +482,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(&noopLogger{}, testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {

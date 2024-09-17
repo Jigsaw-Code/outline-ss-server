@@ -16,7 +16,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"time"
 
@@ -47,12 +46,12 @@ type Service interface {
 	HandlePacket(conn net.PacketConn)
 }
 
-// Option user's option.
-type Option func(s *ssService) error
+// Option is a Shadowsocks service constructor option.
+type Option func(s *ssService)
 
 type ssService struct {
-	logger      logger
-	m           ServiceMetrics
+	logger      Logger
+	metrics     ServiceMetrics
 	ciphers     CipherList
 	natTimeout  time.Duration
 	replayCache *ReplayCache
@@ -61,92 +60,83 @@ type ssService struct {
 	ph PacketHandler
 }
 
+// NewShadowsocksService creates a new Shadowsocks service.
 func NewShadowsocksService(opts ...Option) (Service, error) {
 	s := &ssService{}
 
 	for _, opt := range opts {
-		if err := opt(s); err != nil {
-			return nil, fmt.Errorf("failed to create new service: %v", err)
-		}
+		opt(s)
 	}
 
+	// If no NAT timeout is provided via options, use the recommended default.
+	if s.natTimeout == 0 {
+		s.natTimeout = defaultNatTimeout
+	}
+	// If no logger is provided via options, use a noop logger.
 	if s.logger == nil {
 		s.logger = &noopLogger{}
 	}
 
-	if s.natTimeout == 0 {
-		s.natTimeout = defaultNatTimeout
-	}
+	// TODO: Register initial data metrics at zero.
+	s.sh = NewStreamHandler(
+		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "tcp"}, s.logger),
+		tcpReadTimeout,
+	)
+	s.sh.SetLogger(s.logger)
+
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	s.ph.SetLogger(s.logger)
+
 	return s, nil
 }
 
-// WithLogger can be used to provide a custom log target.
-// Defaults to io.Discard.
-func WithLogger(l logger) Option {
-	return func(s *ssService) error {
+// WithLogger can be used to provide a custom log target. If not provided,
+// the service uses a noop logger (i.e., no logging).
+func WithLogger(l Logger) Option {
+	return func(s *ssService) {
 		s.logger = l
-		return nil
 	}
 }
 
 // WithCiphers option function.
 func WithCiphers(ciphers CipherList) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.ciphers = ciphers
-		return nil
 	}
 }
 
 // WithMetrics option function.
 func WithMetrics(metrics ServiceMetrics) Option {
-	return func(s *ssService) error {
-		s.m = metrics
-		return nil
+	return func(s *ssService) {
+		s.metrics = metrics
 	}
 }
 
 // WithReplayCache option function.
 func WithReplayCache(replayCache *ReplayCache) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.replayCache = replayCache
-		return nil
 	}
 }
 
 // WithNatTimeout option function.
 func WithNatTimeout(natTimeout time.Duration) Option {
-	return func(s *ssService) error {
+	return func(s *ssService) {
 		s.natTimeout = natTimeout
-		return nil
 	}
 }
 
 // HandleStream handles a Shadowsocks stream-based connection.
 func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	if s.sh == nil {
-		authFunc := NewShadowsocksStreamAuthenticator(
-			s.ciphers,
-			s.replayCache,
-			&ssConnMetrics{ServiceMetrics: s.m, proto: "tcp"},
-		)
-		// TODO: Register initial data metrics at zero.
-		s.sh = NewStreamHandler(s.logger, authFunc, tcpReadTimeout)
+	var connMetrics TCPConnMetrics
+	if s.metrics != nil {
+		connMetrics = s.metrics.AddOpenTCPConnection(conn)
 	}
-	connMetrics := s.m.AddOpenTCPConnection(conn)
 	s.sh.Handle(ctx, conn, connMetrics)
 }
 
 // HandlePacket handles a Shadowsocks packet connection.
 func (s *ssService) HandlePacket(conn net.PacketConn) {
-	if s.ph == nil {
-		s.ph = NewPacketHandler(
-			s.logger,
-			s.natTimeout,
-			s.ciphers,
-			s.m,
-			&ssConnMetrics{ServiceMetrics: s.m, proto: "udp"},
-		)
-	}
 	s.ph.Handle(conn)
 }
 
@@ -158,5 +148,16 @@ type ssConnMetrics struct {
 var _ ShadowsocksConnMetrics = (*ssConnMetrics)(nil)
 
 func (cm *ssConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
-	cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
+	if cm.ServiceMetrics != nil {
+		cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
+	}
+}
+
+// NoOpShadowsocksConnMetrics is a [ShadowsocksConnMetrics] that doesn't do anything. Useful in tests
+// or if you don't want to track metrics.
+type NoOpShadowsocksConnMetrics struct{}
+
+var _ ShadowsocksConnMetrics = (*NoOpShadowsocksConnMetrics)(nil)
+
+func (m *NoOpShadowsocksConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
 }

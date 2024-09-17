@@ -21,6 +21,7 @@ builds:
     main: ./cmd/outline-ss-server
     env:
       - CGO_ENABLED=0
+      - GOWORK=off
     goos:
       - darwin
       - windows
