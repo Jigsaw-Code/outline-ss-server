@@ -285,12 +285,10 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 		m.readCh = make(chan readRequest)
 		m.doneCh = make(chan struct{})
 		go func() {
+			defer close(m.readCh)
 			buffer := make([]byte, serverUDPBufferSize)
 			for {
 				n, addr, err := m.pc.ReadFrom(buffer)
-				if errors.Is(err, net.ErrClosed) {
-					return
-				}
 				buffer = buffer[:n]
 				select {
 				case req := <-m.readCh:
@@ -301,6 +299,9 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 						err  error
 					}{n, addr, err}
 				case <-m.doneCh:
+					return
+				}
+				if errors.Is(err, net.ErrClosed) {
 					return
 				}
 			}
