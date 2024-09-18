@@ -65,6 +65,7 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	app.logger.Info("provisioning app instance")
 
 	if app.ShadowsocksConfig != nil {
+		// TODO: Persist replay cache across config reloads.
 		app.ReplayCache = outline.NewReplayCache(app.ShadowsocksConfig.ReplayHistory)
 	}
 
