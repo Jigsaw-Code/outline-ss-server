@@ -312,7 +312,6 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			if m.count == 0 {
 				close(m.doneCh)
 				m.pc.Close()
-				m.pc = nil
 				if m.onCloseFunc != nil {
 					onCloseFunc := m.onCloseFunc
 					m.onCloseFunc = nil
