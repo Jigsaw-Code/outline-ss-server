@@ -285,7 +285,6 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 		m.readCh = make(chan readRequest)
 		m.doneCh = make(chan struct{})
 		go func() {
-			defer close(m.readCh)
 			buffer := make([]byte, serverUDPBufferSize)
 			for {
 				n, addr, err := m.pc.ReadFrom(buffer)
@@ -299,9 +298,6 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 						err  error
 					}{n, addr, err}
 				case <-m.doneCh:
-					return
-				}
-				if errors.Is(err, net.ErrClosed) {
 					return
 				}
 			}
