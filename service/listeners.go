@@ -281,10 +281,10 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			buffer := make([]byte, serverUDPBufferSize)
 			for {
 				n, addr, err := m.pc.ReadFrom(buffer)
-				buffer = buffer[:n]
 				if errors.Is(err, net.ErrClosed) {
 					return
 				}
+				buffer = buffer[:n]
 				select {
 				case req := <-m.readCh:
 					n := copy(req.buffer, buffer)
