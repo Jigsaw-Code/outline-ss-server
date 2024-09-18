@@ -128,43 +128,38 @@ type readRequest struct {
 
 type virtualPacketConn struct {
 	net.PacketConn
-	mu      sync.Mutex // Mutex to protect access to the channels
-	readCh  chan readRequest
-	closeCh chan struct{}
+	readCh      chan readRequest
+	closeCh     chan struct{}
+	onCloseFunc OnCloseFunc
 }
 
-func (pc *virtualPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+func (pc *virtualPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	respCh := make(chan struct {
 		n    int
 		addr net.Addr
 		err  error
 	}, 1)
 
-	pc.mu.Lock()
-	if pc.readCh == nil {
-		pc.mu.Unlock()
-		return 0, nil, net.ErrClosed
-	}
-	pc.readCh <- readRequest{
+	select {
+	case pc.readCh <- readRequest{
 		buffer: p,
 		respCh: respCh,
+	}:
+	case <-pc.closeCh:
+		return 0, nil, net.ErrClosed
 	}
-	pc.mu.Unlock()
 
 	resp := <-respCh
 	return resp.n, resp.addr, resp.err
 }
 
 func (pc *virtualPacketConn) Close() error {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-
-	if pc.readCh == nil {
-		return nil
-	}
-
 	close(pc.closeCh)
-	pc.readCh = nil
+	if pc.onCloseFunc != nil {
+		onCloseFunc := pc.onCloseFunc
+		pc.onCloseFunc = nil
+		return onCloseFunc()
+	}
 	return nil
 }
 
@@ -282,6 +277,27 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 		m.pc = pc
 		m.readCh = make(chan readRequest)
 		m.doneCh = make(chan struct{})
+		go func() {
+			buffer := make([]byte, serverUDPBufferSize)
+			for {
+				n, addr, err := m.pc.ReadFrom(buffer)
+				buffer = buffer[:n]
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
+				select {
+				case req := <-m.readCh:
+					n := copy(req.buffer, buffer)
+					req.respCh <- struct {
+						n    int
+						addr net.Addr
+						err  error
+					}{n, addr, err}
+				case <-m.doneCh:
+					return
+				}
+			}
+		}()
 	}
 
 	m.count++
@@ -289,42 +305,23 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 		PacketConn: m.pc,
 		readCh:     m.readCh,
 		closeCh:    make(chan struct{}),
-	}
-
-	go func() {
-		for {
-			select {
-			case req, ok := <-m.readCh:
-				if !ok {
-					// The read channel is closed.
-					return
+		onCloseFunc: func() error {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			m.count--
+			if m.count == 0 {
+				close(m.doneCh)
+				m.pc.Close()
+				m.pc = nil
+				if m.onCloseFunc != nil {
+					onCloseFunc := m.onCloseFunc
+					m.onCloseFunc = nil
+					return onCloseFunc()
 				}
-				n, addr, err := m.pc.ReadFrom(req.buffer)
-				req.respCh <- struct {
-					n    int
-					addr net.Addr
-					err  error
-				}{n, addr, err}
-			case <-vpc.closeCh:
-				m.mu.Lock()
-				defer m.mu.Unlock()
-				m.count--
-				if m.count == 0 {
-					close(m.doneCh)
-					m.pc.Close()
-					m.pc = nil
-					if m.onCloseFunc != nil {
-						onCloseFunc := m.onCloseFunc
-						m.onCloseFunc = nil
-						onCloseFunc()
-					}
-				}
-				return
-			case <-m.doneCh:
-				return
 			}
-		}
-	}()
+			return nil
+		},
+	}
 
 	return vpc, nil
 }
