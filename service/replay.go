@@ -104,8 +104,8 @@ func (c *ReplayCache) Add(id string, salt []byte) bool {
 // Resize adjusts the capacity of the ReplayCache.
 //
 // If the new capacity is less than the current capacity, and the number of
-// active handshakes exceeds the new capacity, then the least recently added
-// handshakes are moved to the archive.
+// active handshakes exceeds the new capacity, then we move the excess to the
+// archive.
 func (c *ReplayCache) Resize(capacity int) {
 	if capacity > MaxCapacity {
 		panic("ReplayCache capacity would result in too many false positives")
