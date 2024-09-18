@@ -25,7 +25,6 @@ import (
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/mholt/caddy-l4/layer4"
-	"go.uber.org/zap"
 )
 
 func init() {
@@ -39,7 +38,7 @@ type KeyConfig struct {
 }
 
 type ShadowsocksHandler struct {
-	Keys          []KeyConfig `json:"keys,omitempty"`
+	Keys []KeyConfig `json:"keys,omitempty"`
 
 	service outline.Service
 	logger  *slog.Logger
@@ -49,7 +48,6 @@ var (
 	_ caddy.Provisioner  = (*ShadowsocksHandler)(nil)
 	_ layer4.NextHandler = (*ShadowsocksHandler)(nil)
 )
-
 
 func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
@@ -83,7 +81,7 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	for _, cfg := range h.Keys {
 		key := cipherKey{cfg.Cipher, cfg.Secret}
 		if _, exists := existingCiphers[key]; exists {
-			h.logger.Debug("Encryption key already exists. Skipping.", zap.String("id", cfg.ID))
+			h.logger.Debug("Encryption key already exists. Skipping.", slog.String("id", cfg.ID))
 			continue
 		}
 		cryptoKey, err := shadowsocks.NewEncryptionKey(cfg.Cipher, cfg.Secret)
