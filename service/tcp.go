@@ -120,6 +120,9 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 	if metrics == nil {
 		metrics = &NoOpShadowsocksConnMetrics{}
 	}
+	if l == nil {
+		l = &noopLogger{}
+	}
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
 		// Find the cipher and acess key id.
 		cipherEntry, clientReader, clientSalt, timeToCipher, keyErr := findAccessKey(clientConn, remoteIP(clientConn), ciphers, l)
