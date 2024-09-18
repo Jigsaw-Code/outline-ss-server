@@ -301,7 +301,7 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 	}
 
 	m.count++
-	vpc := &virtualPacketConn{
+	return &virtualPacketConn{
 		PacketConn: m.pc,
 		readCh:     m.readCh,
 		closeCh:    make(chan struct{}),
@@ -320,9 +320,7 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			}
 			return nil
 		},
-	}
-
-	return vpc, nil
+	}, nil
 }
 
 // ListenerManager holds the state of shared listeners.
