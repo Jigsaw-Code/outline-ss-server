@@ -96,7 +96,7 @@ func TestListenerManagerPacketListenerEarlyClose(t *testing.T) {
 	_, writeErr := pc.WriteTo(nil, &net.UDPAddr{})
 
 	require.ErrorIs(t, readErr, net.ErrClosed)
-	require.ErrorContains(t, writeErr, "sendto: invalid argument")
+	require.ErrorIs(t, writeErr, net.ErrClosed)
 }
 
 func TestListenerManagerPacketListenerNotClosedIfStillInUse(t *testing.T) {
