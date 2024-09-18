@@ -128,7 +128,9 @@ type readRequest struct {
 
 type virtualPacketConn struct {
 	net.PacketConn
-	readCh      chan readRequest
+	readCh chan readRequest
+
+	mu          sync.Mutex // Mutex to protect against race conditions when closing the connection.
 	closeCh     chan struct{}
 	onCloseFunc OnCloseFunc
 }
@@ -153,7 +155,12 @@ func (pc *virtualPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	return resp.n, resp.addr, resp.err
 }
 
+// Close closes the virtualPacketConn. It must be called once, and only once,
+// per virtualPacketConn.
 func (pc *virtualPacketConn) Close() error {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+
 	close(pc.closeCh)
 	if pc.onCloseFunc != nil {
 		onCloseFunc := pc.onCloseFunc
