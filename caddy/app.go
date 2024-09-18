@@ -27,8 +27,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+var replayCache outline.ReplayCache
+
 func init() {
 	caddy.RegisterModule(OutlineApp{})
+	replayCache = outline.NewReplayCache(0)
 }
 
 const outlineModuleName = "outline"
@@ -65,8 +68,8 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	app.logger.Info("provisioning app instance")
 
 	if app.ShadowsocksConfig != nil {
-		// TODO: Persist replay cache across config reloads.
-		app.ReplayCache = outline.NewReplayCache(app.ShadowsocksConfig.ReplayHistory)
+		replayCache.Resize(app.ShadowsocksConfig.ReplayHistory)
+		app.ReplayCache = replayCache
 	}
 
 	if err := app.defineMetrics(); err != nil {

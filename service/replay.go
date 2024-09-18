@@ -100,3 +100,44 @@ func (c *ReplayCache) Add(id string, salt []byte) bool {
 	c.active[hash] = empty{}
 	return !inArchive
 }
+
+// Resize adjusts the capacity of the ReplayCache.
+//
+// If the new capacity is less than the current capacity, and the number of
+// active handshakes exceeds the new capacity, then the least recently added
+// handshakes are moved to the archive.
+func (c *ReplayCache) Resize(capacity int) {
+	if capacity > MaxCapacity {
+		panic("ReplayCache capacity would result in too many false positives")
+	}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// Shrink the active handshakes to capacity and move the rest to the archive.
+	if capacity < c.capacity {
+		active := make(map[uint32]empty, capacity)
+		archive := make(map[uint32]empty, 0)
+
+		// Move handshakes up to capacity into a new active, and the remainder into a new archive.
+		for k, v := range c.active {
+			if len(active) != capacity {
+				active[k] = v
+			} else if len(archive) != capacity {
+				archive[k] = v
+			}
+		}
+
+		// Fill the remainder of the new archive with old archive entries.
+		for k, v := range c.archive {
+			if len(archive) != capacity {
+				archive[k] = v
+			}
+		}
+
+		// Use the new active and archive handshakes.
+		c.active = active
+		c.archive = archive
+	}
+
+	c.capacity = capacity
+}

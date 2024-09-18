@@ -91,6 +91,67 @@ func TestReplayCache_Archive(t *testing.T) {
 	}
 }
 
+func TestReplayCache_Resize(t *testing.T) {
+	t.Run("Smaller", func(t *testing.T) {
+		cache := &ReplayCache{
+			capacity: 5,
+			active: map[uint32]empty{
+				1: {}, 2: {}, 3: {}, 4: {}, 5: {},
+			},
+			archive: map[uint32]empty{
+				6: {}, 7: {}, 8: {}, 9: {}, 10: {},
+			},
+		}
+
+		cache.Resize(3)
+
+		if cache.capacity != 3 {
+			t.Errorf("Expected capacity to be 3, got %d", cache.capacity)
+		}
+		if len(cache.active) != 3 {
+			t.Errorf("Expected active handshakes length to be 3, got %d", len(cache.active))
+		}
+		if len(cache.archive) != 3 {
+			t.Errorf("Expected archive handshakes length to be 3, got %d", len(cache.active))
+		}
+	})
+
+	t.Run("Larger", func(t *testing.T) {
+		cache := &ReplayCache{
+			capacity: 5,
+			active: map[uint32]empty{
+				1: {}, 2: {}, 3: {}, 4: {}, 5: {},
+			},
+			archive: map[uint32]empty{
+				6: {}, 7: {}, 8: {}, 9: {}, 10: {},
+			},
+		}
+
+		cache.Resize(10)
+
+		if cache.capacity != 10 {
+			t.Errorf("Expected capacity to be 10, got %d", cache.capacity)
+		}
+		if len(cache.active) != 5 {
+			t.Errorf("Expected active handshakes length to be 5, got %d", len(cache.active))
+		}
+		if len(cache.archive) != 5 {
+			t.Errorf("Expected archive handshakes length to be 5, got %d", len(cache.archive))
+		}
+	})
+
+	t.Run("Exceeding maximum capacity", func(t *testing.T) {
+		cache := &ReplayCache{}
+		defer func() {
+			if r := recover(); r == nil {
+				t.Errorf("The code did not panic")
+			}
+		}()
+
+		cache.Resize(MaxCapacity + 1)
+	})
+}
+
 // Benchmark to determine the memory usage of ReplayCache.
 // Note that NewReplayCache only allocates the active set,
 // so the eventual memory usage will be roughly double.
