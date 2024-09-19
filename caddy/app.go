@@ -27,11 +27,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func init() {
-	caddy.RegisterModule(OutlineApp{})
-}
-
 const outlineModuleName = "outline"
+
+func init() {
+	caddy.RegisterModule(ModuleRegistration{
+		ID:  outlineModuleName,
+		New: func() caddy.Module { return new(OutlineApp) },
+	})
+}
 
 type ShadowsocksConfig struct {
 	ReplayHistory int `json:"replay_history,omitempty"`
@@ -52,10 +55,7 @@ var (
 )
 
 func (OutlineApp) CaddyModule() caddy.ModuleInfo {
-	return caddy.ModuleInfo{
-		ID:  outlineModuleName,
-		New: func() caddy.Module { return new(OutlineApp) },
-	}
+	return caddy.ModuleInfo{ID: outlineModuleName}
 }
 
 // Provision sets up Outline.
