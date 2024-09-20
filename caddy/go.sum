@@ -22,6 +22,8 @@ github.com/Jigsaw-Code/outline-sdk v0.0.16 h1:WbHmv80FKDIpzEmR3GehTbq5CibYTLvcxI
 github.com/Jigsaw-Code/outline-sdk v0.0.16/go.mod h1:e1oQZbSdLJBBuHgfeQsgEkvkuyIePPwstUeZRGq0KO8=
 github.com/Jigsaw-Code/outline-ss-server v1.7.1 h1:KLrolmZZfuBx48GM4XblH0XoTK+wMWsEbx/QDZOuibs=
 github.com/Jigsaw-Code/outline-ss-server v1.7.1/go.mod h1:cKPicPWlLWZKJfkQ3CBpQm8a3gXrA2+dpQvsECqBVz8=
+github.com/Jigsaw-Code/outline-ss-server v1.7.2 h1:A//m3KNsguZwhI6AJyFl0Gj8SpwZM7cy+FPoxCNzz28=
+github.com/Jigsaw-Code/outline-ss-server v1.7.2/go.mod h1:cKPicPWlLWZKJfkQ3CBpQm8a3gXrA2+dpQvsECqBVz8=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.1.1/go.mod h1:VPu/7SZ7ePZ3QOrcuXROw5FAcLl4a0cBrbBpGY/8hQs=

@@ -4,7 +4,7 @@ go 1.23
 
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.16
-	github.com/Jigsaw-Code/outline-ss-server v1.7.1
+	github.com/Jigsaw-Code/outline-ss-server v1.7.2
 	github.com/caddyserver/caddy/v2 v2.8.4
 	github.com/mholt/caddy-l4 v0.0.0-20240812213304-afa78d72257b
 	github.com/prometheus/client_golang v1.20.0
