@@ -142,6 +142,33 @@ func TestListenerManagerPacketListenerCreatesListenerOnDemand(t *testing.T) {
 	<-done
 }
 
+func TestMultiPacketListener_SequentialReads(t *testing.T) {
+	m := NewListenerManager()
+	conn, err := m.ListenPacket("127.0.0.1:0")
+	require.NoError(t, err)
+	udpConn, err := net.Dial("udp", conn.LocalAddr().String())
+	require.NoError(t, err)
+
+	// Send and receive the first packet.
+	data1 := []byte("hello")
+	_, err = udpConn.Write(data1)
+	require.NoError(t, err)
+	received1 := make([]byte, serverUDPBufferSize)
+	n1, _, err := conn.ReadFrom(received1)
+	require.NoError(t, err)
+
+	// Send and receive a second larger packet.
+	data2 := []byte("a longer message than the first one")
+	_, err = udpConn.Write(data2)
+	require.NoError(t, err)
+	received2 := make([]byte, serverUDPBufferSize)
+	n2, _, err := conn.ReadFrom(received2)
+	require.NoError(t, err)
+
+	require.Equal(t, string(data1), string(received1[:n1]))
+	require.Equal(t, string(data2), string(received2[:n2]))
+}
+
 func BenchmarkMultiStreamListener_Acquire(b *testing.B) {
 	lm := NewListenerManager()
 
