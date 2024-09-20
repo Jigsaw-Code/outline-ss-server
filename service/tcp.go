@@ -186,13 +186,16 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 // StreamHandler is a handler that handles stream connections.
 type StreamHandler interface {
 	Handle(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
-	// SetLogger sets the logger used to log messages.
+	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l Logger)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
 }
 
 func (s *streamHandler) SetLogger(l Logger) {
+	if l == nil {
+		l = &noopLogger{}
+	}
 	s.l = l
 }
 
