@@ -157,7 +157,7 @@ func TestMultiPacketListener_SequentialReads(t *testing.T) {
 	n1, _, err := conn.ReadFrom(received1)
 	require.NoError(t, err)
 
-	// Send and receive a second larger datagram.
+	// Send and receive a second larger packet.
 	data2 := []byte("a longer message than the first one")
 	_, err = udpConn.Write(data2)
 	require.NoError(t, err)
