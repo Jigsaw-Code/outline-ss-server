@@ -108,7 +108,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
 type PacketHandler interface {
-	// SetLogger sets the logger used to log messages.
+	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
@@ -117,6 +117,9 @@ type PacketHandler interface {
 }
 
 func (h *packetHandler) SetLogger(l Logger) {
+	if l == nil {
+		l = &noopLogger{}
+	}
 	h.l = l
 }
 
