@@ -44,7 +44,7 @@ type UDPMetrics interface {
 const serverUDPBufferSize = 64 * 1024
 
 // Wrapper for slog.Debug during UDP proxying.
-func debugUDP(l Logger, template string, cipherID string, attr slog.Attr) {
+func debugUDP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
 	if l.Enabled(nil, slog.LevelDebug) {
@@ -52,7 +52,7 @@ func debugUDP(l Logger, template string, cipherID string, attr slog.Attr) {
 	}
 }
 
-func debugUDPAddr(l Logger, template string, addr net.Addr, attr slog.Attr) {
+func debugUDPAddr(l *slog.Logger, template string, addr net.Addr, attr slog.Attr) {
 	if l.Enabled(nil, slog.LevelDebug) {
 		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("address", addr.String()), attr)
 	}
@@ -60,7 +60,7 @@ func debugUDPAddr(l Logger, template string, addr net.Addr, attr slog.Attr) {
 
 // Decrypts src into dst. It tries each cipher until it finds one that authenticates
 // correctly. dst and src must not overlap.
-func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherList, l Logger) ([]byte, string, *shadowsocks.EncryptionKey, error) {
+func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherList, l *slog.Logger) ([]byte, string, *shadowsocks.EncryptionKey, error) {
 	// Try each cipher until we find one that authenticates successfully. This assumes that all ciphers are AEAD.
 	// We snapshot the list because it may be modified while we use it.
 	snapshot := cipherList.SnapshotForClientIP(clientIP)
@@ -80,7 +80,7 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 }
 
 type packetHandler struct {
-	l                 Logger
+	logger            *slog.Logger
 	natTimeout        time.Duration
 	ciphers           CipherList
 	m                 UDPMetrics
@@ -97,7 +97,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
 	}
 	return &packetHandler{
-		l:                 &noopLogger{},
+		logger:            noopLogger(),
 		natTimeout:        natTimeout,
 		ciphers:           cipherList,
 		m:                 m,
@@ -109,18 +109,18 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
 type PacketHandler interface {
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
-	SetLogger(l Logger)
+	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// Handle returns after clientConn closes and all the sub goroutines return.
 	Handle(clientConn net.PacketConn)
 }
 
-func (h *packetHandler) SetLogger(l Logger) {
+func (h *packetHandler) SetLogger(l *slog.Logger) {
 	if l == nil {
-		l = &noopLogger{}
+		l = noopLogger()
 	}
-	h.l = l
+	h.logger = l
 }
 
 func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
@@ -132,7 +132,7 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 func (h *packetHandler) Handle(clientConn net.PacketConn) {
 	var running sync.WaitGroup
 
-	nm := newNATmap(h.natTimeout, h.m, &running, h.l)
+	nm := newNATmap(h.natTimeout, h.m, &running, h.logger)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
@@ -160,7 +160,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				return onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
 			}
 			defer slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAddr.String()))
-			debugUDPAddr(h.l, "Outbound packet.", clientAddr, slog.Int("bytes", clientProxyBytes))
+			debugUDPAddr(h.logger, "Outbound packet.", clientAddr, slog.Int("bytes", clientProxyBytes))
 
 			cipherData := cipherBuf[:clientProxyBytes]
 			var payload []byte
@@ -171,7 +171,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				var textData []byte
 				var cryptoKey *shadowsocks.EncryptionKey
 				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.l)
+				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
 				timeToCipher := time.Since(unpackStart)
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
@@ -208,7 +208,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				}
 			}
 
-			debugUDPAddr(h.l, "Proxy exit.", clientAddr, slog.Any("target", targetConn.LocalAddr()))
+			debugUDPAddr(h.logger, "Proxy exit.", clientAddr, slog.Any("target", targetConn.LocalAddr()))
 			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
@@ -317,14 +317,14 @@ func (c *natconn) ReadFrom(buf []byte) (int, net.Addr, error) {
 type natmap struct {
 	sync.RWMutex
 	keyConn map[string]*natconn
-	l       Logger
+	logger  *slog.Logger
 	timeout time.Duration
 	metrics UDPMetrics
 	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup, l Logger) *natmap {
-	m := &natmap{l: l, metrics: sm, running: running}
+func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup, l *slog.Logger) *natmap {
+	m := &natmap{logger: l, metrics: sm, running: running}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
 	return m
@@ -370,7 +370,7 @@ func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *
 
 	m.running.Add(1)
 	go func() {
-		timedCopy(clientAddr, clientConn, entry, keyID, m.l)
+		timedCopy(clientAddr, clientConn, entry, keyID, m.logger)
 		connMetrics.RemoveNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
@@ -399,7 +399,7 @@ func (m *natmap) Close() error {
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
-func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, keyID string, l Logger) {
+func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, keyID string, l *slog.Logger) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.

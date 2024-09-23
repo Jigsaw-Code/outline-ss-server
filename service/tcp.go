@@ -58,7 +58,7 @@ func remoteIP(conn net.Conn) netip.Addr {
 }
 
 // Wrapper for slog.Debug during TCP access key searches.
-func debugTCP(l Logger, template string, cipherID string, attr slog.Attr) {
+func debugTCP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
 	if l != nil && l.Enabled(nil, slog.LevelDebug) {
@@ -72,7 +72,7 @@ func debugTCP(l Logger, template string, cipherID string, attr slog.Attr) {
 // required = saltSize + 2 + cipher.TagSize, the number of bytes needed to authenticate the connection.
 const bytesForKeyFinding = 50
 
-func findAccessKey(clientReader io.Reader, clientIP netip.Addr, cipherList CipherList, l Logger) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
+func findAccessKey(clientReader io.Reader, clientIP netip.Addr, cipherList CipherList, l *slog.Logger) (*CipherEntry, io.Reader, []byte, time.Duration, error) {
 	// We snapshot the list because it may be modified while we use it.
 	ciphers := cipherList.SnapshotForClientIP(clientIP)
 	firstBytes := make([]byte, bytesForKeyFinding)
@@ -95,7 +95,7 @@ func findAccessKey(clientReader io.Reader, clientIP netip.Addr, cipherList Ciphe
 }
 
 // Implements a trial decryption search.  This assumes that all ciphers are AEAD.
-func findEntry(firstBytes []byte, ciphers []*list.Element, l Logger) (*CipherEntry, *list.Element) {
+func findEntry(firstBytes []byte, ciphers []*list.Element, l *slog.Logger) (*CipherEntry, *list.Element) {
 	// To hold the decrypted chunk length.
 	chunkLenBuf := [2]byte{}
 	for ci, elt := range ciphers {
@@ -116,12 +116,12 @@ type StreamAuthenticateFunc func(clientConn transport.StreamConn) (string, trans
 
 // NewShadowsocksStreamAuthenticator creates a stream authenticator that uses Shadowsocks.
 // TODO(fortuna): Offer alternative transports.
-func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksConnMetrics, l Logger) StreamAuthenticateFunc {
+func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCache, metrics ShadowsocksConnMetrics, l *slog.Logger) StreamAuthenticateFunc {
 	if metrics == nil {
 		metrics = &NoOpShadowsocksConnMetrics{}
 	}
 	if l == nil {
-		l = &noopLogger{}
+		l = noopLogger()
 	}
 	return func(clientConn transport.StreamConn) (string, transport.StreamConn, *onet.ConnectionError) {
 		// Find the cipher and acess key id.
@@ -157,7 +157,7 @@ func NewShadowsocksStreamAuthenticator(ciphers CipherList, replayCache *ReplayCa
 }
 
 type streamHandler struct {
-	l            Logger
+	logger       *slog.Logger
 	listenerId   string
 	readTimeout  time.Duration
 	authenticate StreamAuthenticateFunc
@@ -167,7 +167,7 @@ type streamHandler struct {
 // NewStreamHandler creates a StreamHandler
 func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration) StreamHandler {
 	return &streamHandler{
-		l:            &noopLogger{},
+		logger:       noopLogger(),
 		readTimeout:  timeout,
 		authenticate: authenticate,
 		dialer:       defaultDialer,
@@ -187,16 +187,16 @@ func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) tra
 type StreamHandler interface {
 	Handle(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
-	SetLogger(l Logger)
+	SetLogger(l *slog.Logger)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
 	SetTargetDialer(dialer transport.StreamDialer)
 }
 
-func (s *streamHandler) SetLogger(l Logger) {
+func (s *streamHandler) SetLogger(l *slog.Logger) {
 	if l == nil {
-		l = &noopLogger{}
+		l = noopLogger()
 	}
-	s.l = l
+	s.logger = l
 }
 
 func (s *streamHandler) SetTargetDialer(dialer transport.StreamDialer) {
@@ -271,11 +271,11 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 	status := "OK"
 	if connError != nil {
 		status = connError.Status
-		h.l.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+		h.logger.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 	}
 	connMetrics.AddClosed(status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
-	h.l.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
+	h.logger.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
 }
 
 func getProxyRequest(clientConn transport.StreamConn) (string, error) {
@@ -290,7 +290,7 @@ func getProxyRequest(clientConn transport.StreamConn) (string, error) {
 	return tgtAddr.String(), nil
 }
 
-func proxyConnection(l Logger, ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
+func proxyConnection(l *slog.Logger, ctx context.Context, dialer transport.StreamDialer, tgtAddr string, clientConn transport.StreamConn) *onet.ConnectionError {
 	tgtConn, dialErr := dialer.DialStream(ctx, tgtAddr)
 	if dialErr != nil {
 		// We don't drain so dial errors and invalid addresses are communicated quickly.
@@ -365,7 +365,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 		tgtConn = metrics.MeasureConn(tgtConn, &proxyMetrics.ProxyTarget, &proxyMetrics.TargetProxy)
 		return tgtConn, nil
 	})
-	return proxyConnection(h.l, ctx, dialer, tgtAddr, innerConn)
+	return proxyConnection(h.logger, ctx, dialer, tgtAddr, innerConn)
 }
 
 // Keep the connection open until we hit the authentication deadline to protect against probing attacks
@@ -374,7 +374,7 @@ func (h *streamHandler) absorbProbe(clientConn io.ReadCloser, connMetrics TCPCon
 	// This line updates proxyMetrics.ClientProxy before it's used in AddTCPProbe.
 	_, drainErr := io.Copy(io.Discard, clientConn) // drain socket
 	drainResult := drainErrToString(drainErr)
-	h.l.LogAttrs(nil, slog.LevelDebug, "Drain error.", slog.Any("err", drainErr), slog.String("result", drainResult))
+	h.logger.LogAttrs(nil, slog.LevelDebug, "Drain error.", slog.Any("err", drainErr), slog.String("result", drainResult))
 	connMetrics.AddProbe(status, drainResult, proxyMetrics.ClientProxy)
 }
 

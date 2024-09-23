@@ -15,23 +15,10 @@
 package service
 
 import (
-	"context"
+	"io"
 	"log/slog"
 )
 
-type Logger interface {
-	Enabled(ctx context.Context, level slog.Level) bool
-	LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr)
-}
-
-type noopLogger struct {
-}
-
-var _ Logger = (*noopLogger)(nil)
-
-func (l *noopLogger) Enabled(ctx context.Context, level slog.Level) bool {
-	return false
-}
-
-func (l *noopLogger) LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+func noopLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
