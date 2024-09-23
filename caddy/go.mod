@@ -8,6 +8,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.8.4
 	github.com/mholt/caddy-l4 v0.0.0-20240812213304-afa78d72257b
 	github.com/prometheus/client_golang v1.20.0
+	golang.org/x/net v0.26.0
 )
 
 require (
@@ -57,7 +58,6 @@ require (
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/libdns/libdns v0.2.2 // indirect
-	github.com/lmittmann/tint v1.0.5 // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -109,7 +109,6 @@ require (
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20240507223354-67b13616a595 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/term v0.21.0 // indirect

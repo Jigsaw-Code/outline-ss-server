@@ -10,7 +10,42 @@
     "apps": {
         "http": {
             "servers": {
-				"": {
+                "srv0": {
+                    "listen": [":8000"],
+                    "routes": [
+                        {
+                            "match": [
+								{
+									"path": [
+										"/tcp"
+									]
+								}
+							],
+                            "handle": [
+                                {
+                                    "handler": "websocket",
+                                    "backend": ":9000"
+                                }
+                            ]
+                        },
+                        {
+                            "match": [
+								{
+									"path": [
+										"/udp"
+									]
+								}
+							],
+                            "handle": [
+                                {
+                                    "handler": "websocket",
+                                    "backend": "udp/[::]:9000"
+                                }
+                            ]
+                        }
+                    ]
+                },
+				"metrics": {
 					"listen": [
 						":9091"
 					],

@@ -16,10 +16,20 @@ From this directory, build and run a custom binary with `xcaddy`:
 xcaddy run --config config_example.json --watch
 ```
 
-In a separate window, confirm you can fetch a page using this server:
+In a separate window, confirm you can fetch a page over Shadowsocks:
 
 ```sh
-go run github.com/Jigsaw-Code/outline-sdk/x/examples/fetch -transport "ss://chacha20-ietf-poly1305:Secret1@:9000" http://ipinfo.io
+go run github.com/Jigsaw-Code/outline-sdk/x/examples/fetch \
+  -transport "ss://chacha20-ietf-poly1305:Secret1@:9000" \
+  http://ipinfo.io
+```
+
+Or Shadowsocks over Websockets:
+
+```sh
+go run github.com/Jigsaw-Code/outline-sdk/x/examples/fetch \
+  -transport "ws:tcp_path=/tcp&udp_path=/udp|ss://chacha20-ietf-poly1305:Secret1@:8000" \
+  http://ipinfo.io
 ```
 
 Prometheus metrics are available on http://localhost:9091/metrics.
