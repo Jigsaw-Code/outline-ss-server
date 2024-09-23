@@ -61,7 +61,7 @@ func remoteIP(conn net.Conn) netip.Addr {
 func debugTCP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
-	if l != nil && l.Enabled(nil, slog.LevelDebug) {
+	if l.Enabled(nil, slog.LevelDebug) {
 		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("TCP: %s", template), slog.String("ID", cipherID), attr)
 	}
 }
