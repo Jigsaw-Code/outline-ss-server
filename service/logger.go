@@ -17,8 +17,10 @@ package service
 import (
 	"io"
 	"log/slog"
+	"math"
 )
 
 func noopLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	// TODO: Use built-in no-op log level when available: https://go.dev/issue/62005
+	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.Level(math.MaxInt)}))
 }
