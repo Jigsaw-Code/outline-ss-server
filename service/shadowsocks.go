@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"time"
 
@@ -50,7 +51,7 @@ type Service interface {
 type Option func(s *ssService)
 
 type ssService struct {
-	logger      Logger
+	logger      *slog.Logger
 	metrics     ServiceMetrics
 	ciphers     CipherList
 	natTimeout  time.Duration
@@ -74,7 +75,7 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	}
 	// If no logger is provided via options, use a noop logger.
 	if s.logger == nil {
-		s.logger = &noopLogger{}
+		s.logger = noopLogger()
 	}
 
 	// TODO: Register initial data metrics at zero.
@@ -92,7 +93,7 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 
 // WithLogger can be used to provide a custom log target. If not provided,
 // the service uses a noop logger (i.e., no logging).
-func WithLogger(l Logger) Option {
+func WithLogger(l *slog.Logger) Option {
 	return func(s *ssService) {
 		s.logger = l
 	}
