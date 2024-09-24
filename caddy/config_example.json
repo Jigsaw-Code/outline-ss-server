@@ -15,12 +15,12 @@
                     "routes": [
                         {
                             "match": [
-								{
-									"path": [
-										"/tcp"
-									]
-								}
-							],
+                                {
+                                    "path": [
+                                        "/tcp"
+                                    ]
+                                }
+                            ],
                             "handle": [
                                 {
                                     "handler": "websocket",
@@ -30,12 +30,12 @@
                         },
                         {
                             "match": [
-								{
-									"path": [
-										"/udp"
-									]
-								}
-							],
+                                {
+                                    "path": [
+                                        "/udp"
+                                    ]
+                                }
+                            ],
                             "handle": [
                                 {
                                     "handler": "websocket",
@@ -45,28 +45,28 @@
                         }
                     ]
                 },
-				"metrics": {
-					"listen": [
-						":9091"
-					],
-					"routes": [
-						{
-							"match": [
-								{
-									"path": [
-										"/metrics"
-									]
-								}
-							],
-							"handle": [
-								{
-									"disable_openmetrics": true,
-									"handler": "metrics"
-								}
-							]
-						}
-					]
-				}
+                "metrics": {
+                    "listen": [
+                        ":9091"
+                    ],
+                    "routes": [
+                        {
+                            "match": [
+                                {
+                                    "path": [
+                                        "/metrics"
+                                    ]
+                                }
+                            ],
+                            "handle": [
+                                {
+                                    "disable_openmetrics": true,
+                                    "handler": "metrics"
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
         },
         "layer4": {
