@@ -45,6 +45,7 @@ func init() {
 // WebSocketHandler implements a Caddy plugin for WebSocket connections.
 type WebSocketHandler struct {
 	logger *slog.Logger
+	u      websocket.Upgrader
 }
 
 var (
@@ -71,8 +72,7 @@ func (h *WebSocketHandler) Handle(cx *layer4.Connection, next layer4.Handler) er
 
 	// Upgrade the TCP connection to a WebSocket connection
 	rw := &responseWriter{cx, req.Header}
-	upgrader := websocket.Upgrader{}
-	wsConn, err := upgrader.Upgrade(rw, req, nil)
+	wsConn, err := h.u.Upgrade(rw, req, nil)
 	if err != nil {
 		return fmt.Errorf("error upgrading connection:", err)
 	}
