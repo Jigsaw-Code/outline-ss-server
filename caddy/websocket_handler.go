@@ -17,6 +17,7 @@ package outlinecaddy
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	_ "errors"
 	"fmt"
 	"io"
@@ -100,21 +101,13 @@ func (c *wsConnWrapper) Read(b []byte) (n int, err error) {
 		if err != nil {
 			return 0, err
 		}
-
-		switch messageType {
-		case websocket.TextMessage:
-			_, err = io.Copy(&c.readBuf, reader)
-			if err != nil {
-				return 0, err
-			}
-		case websocket.BinaryMessage:
-			return 0, nil
-		case websocket.CloseMessage:
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("unsupported message type: %v", messageType)
+		if messageType != websocket.TextMessage {
+			return 0, errors.New("must be text message")
 		}
-		return 0, nil
+		_, err = io.Copy(&c.readBuf, reader)
+		if err != nil {
+			return 0, err
+		}
 	}
 	return c.readBuf.Read(b)
 }
