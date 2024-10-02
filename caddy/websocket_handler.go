@@ -113,7 +113,7 @@ func (c *wsConnWrapper) Read(b []byte) (n int, err error) {
 }
 
 func (c *wsConnWrapper) Write(b []byte) (n int, err error) {
-	err = c.WriteMessage(websocket.BinaryMessage, b)
+	err = c.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
 		return 0, err
 	}
