@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package caddy
+package outlinecaddy
 
 import (
-	"errors"
+	"bufio"
+	"bytes"
+	_ "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,11 +27,12 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/caddyserver/caddy/v2"
-	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"golang.org/x/net/websocket"
+	"github.com/mholt/caddy-l4/layer4"
+
+	"github.com/gorilla/websocket"
 )
 
-const wsModuleName = "http.handlers.websocket"
+const wsModuleName = "layer4.handlers.websocket"
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -38,19 +41,14 @@ func init() {
 	})
 }
 
-// WebSocketHandler implements a middleware Caddy handler that proxies
-// WebSockets connections.
+// WebSocketHandler implements a Caddy plugin for WebSocket connections.
 type WebSocketHandler struct {
-	// The address of the backend to connect to.
-	Backend string `json:"backend,omitempty"`
-
 	logger *slog.Logger
 }
 
 var (
-	_ caddy.Provisioner           = (*WebSocketHandler)(nil)
-	_ caddy.Validator             = (*WebSocketHandler)(nil)
-	_ caddyhttp.MiddlewareHandler = (*WebSocketHandler)(nil)
+	_ caddy.Provisioner  = (*WebSocketHandler)(nil)
+	_ layer4.NextHandler = (*WebSocketHandler)(nil)
 )
 
 func (*WebSocketHandler) CaddyModule() caddy.ModuleInfo {
@@ -63,82 +61,109 @@ func (h *WebSocketHandler) Provision(ctx caddy.Context) error {
 	return nil
 }
 
-// Validate implements caddy.Validator.
-func (h *WebSocketHandler) Validate() error {
-	if h.Backend == "" {
-		return errors.New("must specify `backend`")
-	}
-	return nil
-}
-
-// ServeHTTP implements caddyhttp.MiddlewareHandler.
-func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	h.logger.Info("handling websocket connection", slog.String("path", r.URL.Path))
-
-	backendAddr, err := caddy.ParseNetworkAddress(h.Backend)
+// Handle implements layer4.NextHandler.
+func (h *WebSocketHandler) Handle(cx *layer4.Connection, next layer4.Handler) error {
+	req, err := http.ReadRequest(bufio.NewReader(cx))
 	if err != nil {
-		return fmt.Errorf("unable to parse `backend` network address: %v", err)
+		return err
 	}
 
-	var handler func(wsConn *websocket.Conn)
-	switch backendAddr.Network {
-	case "tcp":
-		streamDialer := &transport.TCPDialer{}
-		endpoint := transport.StreamDialerEndpoint{Dialer: streamDialer, Address: backendAddr.JoinHostPort(0)}
-		handler = func(wsConn *websocket.Conn) {
-			targetConn, err := endpoint.ConnectStream(r.Context())
-			if err != nil {
-				h.logger.Error("failed to connect to backend", slog.Any("err", err))
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-			defer targetConn.Close()
-
-			go func() {
-				io.Copy(targetConn, wsConn)
-				targetConn.CloseWrite()
-			}()
-
-			io.Copy(wsConn, targetConn)
-			wsConn.Close()
-		}
-	case "udp":
-		packetDialer := &transport.UDPDialer{}
-		endpoint := transport.PacketDialerEndpoint{Dialer: packetDialer, Address: backendAddr.JoinHostPort(0)}
-		handler = func(wsConn *websocket.Conn) {
-			targetConn, err := endpoint.ConnectPacket(r.Context())
-			if err != nil {
-				h.logger.Error("failed to connect to backend", slog.Any("err", err))
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-			// Expire connection after 5 minutes of idle time, as per
-			// https://datatracker.ietf.org/doc/html/rfc4787#section-4.3
-			targetConn = &natConn{targetConn, 5 * time.Minute}
-
-			go func() {
-				io.Copy(targetConn, wsConn)
-				targetConn.Close()
-			}()
-
-			io.Copy(wsConn, targetConn)
-			wsConn.Close()
-		}
-	default:
-		return fmt.Errorf("unsupported `backend` network: %v", backendAddr.Network)
+	// Upgrade the TCP connection to a WebSocket connection
+	rw := &responseWriter{cx, req.Header}
+	upgrader := websocket.Upgrader{}
+	wsConn, err := upgrader.Upgrade(rw, req, nil)
+	if err != nil {
+		return fmt.Errorf("error upgrading connection:", err)
 	}
 
-	websocket.Server{Handler: handler}.ServeHTTP(w, r)
+	h.logger.Debug("connection established", "URL", req.URL)
+
+	if err != nil {
+		return err
+	}
+
+	return next.Handle(cx.Wrap(&wsConnWrapper{Conn: wsConn}))
+}
+
+// wsConnWrapper converts a [websocket.Conn] to a [transport.StreamConn].
+type wsConnWrapper struct {
+	*websocket.Conn
+	readBuf bytes.Buffer // Buffer for storing incomplete frames
+}
+
+var _ net.Conn = (*wsConnWrapper)(nil)
+var _ transport.StreamConn = (*wsConnWrapper)(nil)
+
+func (c *wsConnWrapper) Read(b []byte) (n int, err error) {
+	for c.readBuf.Len() < len(b) {
+		messageType, reader, err := c.Conn.NextReader()
+		if err != nil {
+			return 0, err
+		}
+
+		switch messageType {
+		case websocket.TextMessage:
+			_, err = io.Copy(&c.readBuf, reader)
+			if err != nil {
+				return 0, err
+			}
+		case websocket.BinaryMessage:
+			return 0, nil
+		case websocket.CloseMessage:
+			return 0, nil
+		default:
+			return 0, fmt.Errorf("unsupported message type: %v", messageType)
+		}
+		return 0, nil
+	}
+	return c.readBuf.Read(b)
+}
+
+func (c *wsConnWrapper) Write(b []byte) (n int, err error) {
+	err = c.WriteMessage(websocket.BinaryMessage, b)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+func (c *wsConnWrapper) SetDeadline(t time.Time) error {
+	if err := c.SetReadDeadline(t); err != nil {
+		return err
+	}
+	return c.SetWriteDeadline(t)
+}
+
+func (c *wsConnWrapper) CloseRead() error {
 	return nil
 }
 
-type natConn struct {
-	net.Conn
-	mappingTimeout time.Duration
+func (c *wsConnWrapper) CloseWrite() error {
+	return c.Close()
 }
 
-// Consider ReadFrom/WriteTo
-func (c *natConn) Write(b []byte) (int, error) {
-	c.Conn.SetDeadline(time.Now().Add(c.mappingTimeout))
-	return c.Conn.Write(b)
+type responseWriter struct {
+	conn   net.Conn
+	header http.Header
+}
+
+var _ http.ResponseWriter = (*responseWriter)(nil)
+
+func (rw *responseWriter) Header() http.Header {
+	return http.Header{}
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	return rw.conn.Write(b)
+}
+
+func (rw *responseWriter) WriteHeader(statusCode int) {
+	statusLine := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode))
+	rw.conn.Write([]byte(statusLine))
+	rw.header.Write(rw.conn)
+	rw.conn.Write([]byte("\r\n"))
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
 }

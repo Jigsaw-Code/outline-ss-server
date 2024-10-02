@@ -10,41 +10,6 @@
     "apps": {
         "http": {
             "servers": {
-                "srv0": {
-                    "listen": [":8000"],
-                    "routes": [
-                        {
-                            "match": [
-                                {
-                                    "path": [
-                                        "/tcp"
-                                    ]
-                                }
-                            ],
-                            "handle": [
-                                {
-                                    "handler": "websocket",
-                                    "backend": ":9000"
-                                }
-                            ]
-                        },
-                        {
-                            "match": [
-                                {
-                                    "path": [
-                                        "/udp"
-                                    ]
-                                }
-                            ],
-                            "handle": [
-                                {
-                                    "handler": "websocket",
-                                    "backend": "udp/[::]:9000"
-                                }
-                            ]
-                        }
-                    ]
-                },
                 "metrics": {
                     "listen": [
                         ":9091"
@@ -77,6 +42,43 @@
                         "udp/[::]:9000"
                     ],
                     "routes": [
+                        {
+                            "match": [
+                                {
+                                    "http": [
+                                        {
+                                            "path": [
+                                                "/ws"
+                                            ],
+                                            "header": {
+                                                "Connection": ["*Upgrade*"],
+                                                "Upgrade": ["websocket"]
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                            "handle": [
+                                {
+                                    "handler": "websocket"
+                                },
+                                {
+                                    "handler": "shadowsocks",
+                                    "keys": [
+                                        {
+                                            "id": "user-0",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret0"
+                                        },
+                                        {
+                                            "id": "user-1",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret1"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
                         {
                             "handle": [
                                 {

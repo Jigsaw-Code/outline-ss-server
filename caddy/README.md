@@ -10,10 +10,14 @@ Shadowsocks backend.
 
 ## Usage
 
-From this directory, build and run a custom binary with `xcaddy`:
+From this directory, build and run a custom Caddy binary with this Go module plugged in using `xcaddy`:
 
 ```sh
-xcaddy run --config config_example.json --watch
+xcaddy build \
+  --with github.com/iamd3vil/caddy_yaml_adapter \
+  --with github.com/mholt/caddy-l4 \
+  --with github.com/Jigsaw-Code/outline-ss-server/caddy
+./caddy run --config caddy/examples/simple.yaml --adapter yaml --watch
 ```
 
 In a separate window, confirm you can fetch a page over Shadowsocks:
@@ -24,12 +28,12 @@ go run github.com/Jigsaw-Code/outline-sdk/x/examples/fetch \
   http://ipinfo.io
 ```
 
-Or Shadowsocks over Websockets:
+Prometheus metrics are available on http://localhost:9091/metrics.
+
+## Development
+
+From the repo's root directory, run the Caddy module directly from Go:
 
 ```sh
-go run github.com/Jigsaw-Code/outline-sdk/x/examples/fetch \
-  -transport "ws:tcp_path=/tcp&udp_path=/udp|ss://chacha20-ietf-poly1305:Secret1@:8000" \
-  http://ipinfo.io
+go run ./cmd/caddy run --config caddy/examples/config_example.json --watch
 ```
-
-Prometheus metrics are available on http://localhost:9091/metrics.

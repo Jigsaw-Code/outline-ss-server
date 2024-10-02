@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package caddy
+package outlinecaddy
 
 import (
 	"container/list"
@@ -31,7 +31,7 @@ const ssModuleName = "layer4.handlers.shadowsocks"
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
-		ID: ssModuleName,
+		ID:  ssModuleName,
 		New: func() caddy.Module { return new(ShadowsocksHandler) },
 	})
 }
@@ -42,6 +42,7 @@ type KeyConfig struct {
 	Secret string
 }
 
+// ShadowsocksHandler implements a Caddy plugin for Shadowsocks connections.
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
@@ -114,11 +115,25 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
 	switch conn := cx.Conn.(type) {
 	case transport.StreamConn:
-		h.service.HandleStream(cx.Context, conn)
+		h.service.HandleStream(cx.Context, &l4StreamConn{cx})
 	case net.PacketConn:
 		h.service.HandlePacket(conn)
 	default:
-		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
+		return fmt.Errorf("failed to handle unknown connection type: %T", conn)
 	}
+	return nil
+}
+
+type l4StreamConn struct {
+	*layer4.Connection
+}
+
+var _ transport.StreamConn = (*l4StreamConn)(nil)
+
+func (c l4StreamConn) CloseWrite() error {
+	return nil
+}
+
+func (c l4StreamConn) CloseRead() error {
 	return nil
 }

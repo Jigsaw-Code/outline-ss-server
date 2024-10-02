@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package caddy
+package outlinecaddy
 
 import (
 	"github.com/caddyserver/caddy/v2"
