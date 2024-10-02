@@ -78,11 +78,6 @@ func (h *WebSocketHandler) Handle(cx *layer4.Connection, next layer4.Handler) er
 	}
 
 	h.logger.Debug("connection established", "URL", req.URL)
-
-	if err != nil {
-		return err
-	}
-
 	return next.Handle(cx.Wrap(&wsConnWrapper{Conn: wsConn}))
 }
 
