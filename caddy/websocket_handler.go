@@ -17,7 +17,6 @@ package outlinecaddy
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	_ "errors"
 	"fmt"
 	"io"
@@ -91,12 +90,9 @@ var _ transport.StreamConn = (*wsConnWrapper)(nil)
 
 func (c *wsConnWrapper) Read(b []byte) (n int, err error) {
 	for c.readBuf.Len() < len(b) {
-		messageType, reader, err := c.Conn.NextReader()
+		_, reader, err := c.Conn.NextReader()
 		if err != nil {
 			return 0, err
-		}
-		if messageType != websocket.TextMessage {
-			return 0, errors.New("must be text message")
 		}
 		_, err = io.Copy(&c.readBuf, reader)
 		if err != nil {
@@ -107,7 +103,7 @@ func (c *wsConnWrapper) Read(b []byte) (n int, err error) {
 }
 
 func (c *wsConnWrapper) Write(b []byte) (n int, err error) {
-	err = c.WriteMessage(websocket.TextMessage, b)
+	err = c.WriteMessage(websocket.BinaryMessage, b)
 	if err != nil {
 		return 0, err
 	}
