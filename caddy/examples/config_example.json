@@ -48,7 +48,7 @@
                                     "http": [
                                         {
                                             "path": [
-                                                "/ws"
+                                                "/tcp"
                                             ],
                                             "header": {
                                                 "Connection": ["*Upgrade*"],
@@ -60,7 +60,46 @@
                             ],
                             "handle": [
                                 {
-                                    "handler": "websocket"
+                                    "handler": "websocket",
+                                    "type": "stream"
+                                },
+                                {
+                                    "handler": "shadowsocks",
+                                    "keys": [
+                                        {
+                                            "id": "user-0",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret0"
+                                        },
+                                        {
+                                            "id": "user-1",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret1"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "match": [
+                                {
+                                    "http": [
+                                        {
+                                            "path": [
+                                                "/udp"
+                                            ],
+                                            "header": {
+                                                "Connection": ["*Upgrade*"],
+                                                "Upgrade": ["websocket"]
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                            "handle": [
+                                {
+                                    "handler": "websocket",
+                                    "type": "packet"
                                 },
                                 {
                                     "handler": "shadowsocks",

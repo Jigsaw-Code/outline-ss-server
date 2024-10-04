@@ -39,14 +39,22 @@ func init() {
 	})
 }
 
+type ConnectionType string
+
+const connectionTypeStream ConnectionType = "stream"
+const connectionTypePacket ConnectionType = "packet"
+
 // WebSocketHandler implements a Caddy plugin for WebSocket connections.
 type WebSocketHandler struct {
+	Type ConnectionType `json:"type,omitempty"`
+
 	logger *slog.Logger
 	u      websocket.Upgrader
 }
 
 var (
 	_ caddy.Provisioner  = (*WebSocketHandler)(nil)
+	_ caddy.Validator    = (*WebSocketHandler)(nil)
 	_ layer4.NextHandler = (*WebSocketHandler)(nil)
 )
 
@@ -57,6 +65,13 @@ func (*WebSocketHandler) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (h *WebSocketHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Slogger()
+	return nil
+}
+
+func (h *WebSocketHandler) Validate() error {
+	if h.Type != connectionTypeStream && h.Type != connectionTypePacket {
+		return fmt.Errorf("unsupported connection type: %s", h.Type)
+	}
 	return nil
 }
 
@@ -75,17 +90,25 @@ func (h *WebSocketHandler) Handle(cx *layer4.Connection, next layer4.Handler) er
 	}
 
 	h.logger.Debug("connection established", "URL", req.URL)
-	return next.Handle(cx.Wrap(&wsConnWrapper{Conn: wsConn}))
+
+	switch h.Type {
+	case connectionTypeStream:
+		return next.Handle(cx.Wrap(&streamConn{&wsConnWrapper{Conn: wsConn}}))
+	case connectionTypePacket:
+		// TODO: Implement.
+		return nil
+	default:
+		return fmt.Errorf("unexpected connection type: %s", h.Type)
+	}
 }
 
-// wsConnWrapper converts a [websocket.Conn] to a [transport.StreamConn].
+// wsConnWrapper wraps a [websocket.Conn].
 type wsConnWrapper struct {
 	*websocket.Conn
 	readBuf bytes.Buffer // Buffer for storing incomplete frames
 }
 
 var _ net.Conn = (*wsConnWrapper)(nil)
-var _ transport.StreamConn = (*wsConnWrapper)(nil)
 
 func (c *wsConnWrapper) Read(b []byte) (n int, err error) {
 	for c.readBuf.Len() < len(b) {
@@ -116,11 +139,18 @@ func (c *wsConnWrapper) SetDeadline(t time.Time) error {
 	return c.SetWriteDeadline(t)
 }
 
-func (c *wsConnWrapper) CloseRead() error {
+// streamConn converts a [net.Conn] to a [transport.StreamConn].
+type streamConn struct {
+	net.Conn
+}
+
+var _ transport.StreamConn = (*streamConn)(nil)
+
+func (c *streamConn) CloseRead() error {
 	return nil
 }
 
-func (c *wsConnWrapper) CloseWrite() error {
+func (c *streamConn) CloseWrite() error {
 	return c.Close()
 }
 
