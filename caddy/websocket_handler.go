@@ -17,7 +17,6 @@ package outlinecaddy
 import (
 	"bufio"
 	"bytes"
-	_ "errors"
 	"fmt"
 	"io"
 	"log/slog"
