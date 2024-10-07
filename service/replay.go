@@ -16,6 +16,7 @@ package service
 
 import (
 	"encoding/binary"
+	"errors"
 	"sync"
 )
 
@@ -102,42 +103,15 @@ func (c *ReplayCache) Add(id string, salt []byte) bool {
 }
 
 // Resize adjusts the capacity of the ReplayCache.
-//
-// If the new capacity is less than the current capacity, and the number of
-// active handshakes exceeds the new capacity, then we move the excess to the
-// archive.
-func (c *ReplayCache) Resize(capacity int) {
+func (c *ReplayCache) Resize(capacity int) error {
 	if capacity > MaxCapacity {
-		panic("ReplayCache capacity would result in too many false positives")
+		return errors.New("ReplayCache capacity would result in too many false positives")
 	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-
-	// Shrink the active handshakes to capacity and move the rest to the archive.
-	if capacity < c.capacity {
-		active := make(map[uint32]empty, capacity)
-		archive := make(map[uint32]empty, 0)
-
-		// Move handshakes up to capacity into a new active, and the remainder into a new archive.
-		for k, v := range c.active {
-			if len(active) != capacity {
-				active[k] = v
-			} else if len(archive) != capacity {
-				archive[k] = v
-			}
-		}
-
-		// Fill the remainder of the new archive with old archive entries.
-		for k, v := range c.archive {
-			if len(archive) != capacity {
-				archive[k] = v
-			}
-		}
-
-		// Use the new active and archive handshakes.
-		c.active = active
-		c.archive = archive
-	}
-
 	c.capacity = capacity
+	// NOTE: The active handshakes and archive lists are not explicitly shrunk.
+	// Their sizes will naturally adjust as new handshakes are added  and the cache
+	// adheres to the updated capacity.
+	return nil
 }

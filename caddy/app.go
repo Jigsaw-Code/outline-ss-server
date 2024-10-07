@@ -70,7 +70,9 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	app.logger.Info("provisioning app instance")
 
 	if app.ShadowsocksConfig != nil {
-		app.ReplayCache.Resize(app.ShadowsocksConfig.ReplayHistory)
+		if err := app.ReplayCache.Resize(app.ShadowsocksConfig.ReplayHistory); err != nil {
+			return err
+		}
 	}
 
 	if err := app.defineMetrics(); err != nil {
