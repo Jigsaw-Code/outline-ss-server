@@ -19,6 +19,7 @@ package caddy
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
@@ -71,7 +72,7 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 
 	if app.ShadowsocksConfig != nil {
 		if err := app.ReplayCache.Resize(app.ShadowsocksConfig.ReplayHistory); err != nil {
-			return err
+			return fmt.Errorf("failed to configure replay history with capacity %d: %v", app.ShadowsocksConfig.ReplayHistory, err)
 		}
 	}
 
