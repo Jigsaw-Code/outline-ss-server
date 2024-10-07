@@ -288,10 +288,10 @@ func (m *multiPacketListener) Acquire() (net.PacketConn, error) {
 			buffer := make([]byte, serverUDPBufferSize)
 			for {
 				n, addr, err := m.pc.ReadFrom(buffer)
-				buffer = buffer[:n]
+				pkt := buffer[:n]
 				select {
 				case req := <-m.readCh:
-					n := copy(req.buffer, buffer)
+					n := copy(req.buffer, pkt)
 					req.respCh <- struct {
 						n    int
 						addr net.Addr

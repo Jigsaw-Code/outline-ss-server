@@ -1,10 +1,10 @@
-// Copyright 2018 Jigsaw Operations LLC
+// Copyright 2024 The Outline Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     https://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package service
+package caddy
 
 import (
-	"io"
-	"log/slog"
-	"math"
+	"github.com/caddyserver/caddy/v2"
 )
 
-func noopLogger() *slog.Logger {
-	// TODO: Use built-in no-op log level when available: https://go.dev/issue/62005
-	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.Level(math.MaxInt)}))
+type ModuleRegistration caddy.ModuleInfo
+
+var _ caddy.Module = (*ModuleRegistration)(nil)
+
+// CaddyModule implements the caddy.Module interface
+func (m ModuleRegistration) CaddyModule() caddy.ModuleInfo {
+	return caddy.ModuleInfo(m)
 }
