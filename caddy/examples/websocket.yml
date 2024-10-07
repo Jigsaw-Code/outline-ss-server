@@ -1,0 +1,55 @@
+---
+admin:
+  disabled: true
+logging:
+  logs:
+    default:
+      level: DEBUG
+      encoder:
+        format: console
+apps:
+  http:
+    servers:
+      metrics:
+        listen:
+        - ":9091"
+        routes:
+        - match:
+          - path:
+            - "/metrics"
+          handle:
+          - disable_openmetrics: true
+            handler: metrics
+  layer4:
+    servers:
+      '1':
+        listen:
+        - tcp/[::]:9000
+        - udp/[::]:9000
+        routes:
+        - match:
+          - http:
+            - path:
+              - "/ws"
+              header:
+                Connection:
+                - "*Upgrade*"
+                Upgrade:
+                - websocket
+          handle:
+          - handler: websocket
+          - handler: shadowsocks
+            keys:
+            - id: user-1
+              cipher: chacha20-ietf-poly1305
+              secret: Secret1
+        - handle:
+          - handler: shadowsocks
+            keys:
+            - id: user-1
+              cipher: chacha20-ietf-poly1305
+              secret: Secret1
+
+  outline:
+    shadowsocks:
+      replay_history: 10000

@@ -15,7 +15,7 @@
 // Package caddy provides an app and handler for Caddy Server (https://caddyserver.com/)
 // allowing it to turn any handler into one supporting the Vulcain protocol.
 
-package caddy
+package outlinecaddy
 
 import (
 	"errors"
