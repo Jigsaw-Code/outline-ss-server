@@ -17,6 +17,9 @@ package service
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const keyID = "the key"
@@ -92,63 +95,77 @@ func TestReplayCache_Archive(t *testing.T) {
 }
 
 func TestReplayCache_Resize(t *testing.T) {
-	t.Run("Smaller", func(t *testing.T) {
-		cache := &ReplayCache{
-			capacity: 5,
-			active: map[uint32]empty{
-				1: {}, 2: {}, 3: {}, 4: {}, 5: {},
-			},
-			archive: map[uint32]empty{
-				6: {}, 7: {}, 8: {}, 9: {}, 10: {},
-			},
+	t.Run("Smaller resizes active and archive maps", func(t *testing.T) {
+		salts := makeSalts(10)
+		cache := NewReplayCache(5)
+		for _, s := range salts {
+			cache.Add(keyID, s)
 		}
 
-		cache.Resize(3)
+		err := cache.Resize(3)
 
-		if cache.capacity != 3 {
-			t.Errorf("Expected capacity to be 3, got %d", cache.capacity)
+		require.NoError(t, err)
+		assert.Equal(t, cache.capacity, 3, "Expected capacity to be updated")
+
+		// Adding a new salt should trigger a shrinking of the active map as it hits the new
+		// capacity immediately.
+		cache.Add(keyID, salts[0])
+		assert.Len(t, cache.active, 1, "Expected active handshakes length to have shrunk")
+		assert.Len(t, cache.archive, 5, "Expected archive handshakes length to not have shrunk")
+
+		// Adding more new salts should eventually trigger a shrinking of the archive map as well,
+		// when the shrunken active map gets moved to the archive.
+		for _, s := range salts {
+			cache.Add(keyID, s)
 		}
-		if len(cache.active) != 3 {
-			t.Errorf("Expected active handshakes length to be 3, got %d", len(cache.active))
-		}
-		if len(cache.archive) != 3 {
-			t.Errorf("Expected archive handshakes length to be 3, got %d", len(cache.active))
-		}
+		assert.Len(t, cache.archive, 3, "Expected archive handshakes length to have shrunk")
 	})
 
-	t.Run("Larger", func(t *testing.T) {
-		cache := &ReplayCache{
-			capacity: 5,
-			active: map[uint32]empty{
-				1: {}, 2: {}, 3: {}, 4: {}, 5: {},
-			},
-			archive: map[uint32]empty{
-				6: {}, 7: {}, 8: {}, 9: {}, 10: {},
-			},
+	t.Run("Larger resizes active and archive maps", func(t *testing.T) {
+		salts := makeSalts(10)
+		cache := NewReplayCache(5)
+		for _, s := range salts {
+			cache.Add(keyID, s)
+		}
+
+		err := cache.Resize(10)
+
+		require.NoError(t, err)
+		assert.Equal(t, cache.capacity, 10, "Expected capacity to be updated")
+		assert.Len(t, cache.active, 5, "Expected active handshakes length not to have changed")
+		assert.Len(t, cache.archive, 5, "Expected archive handshakes length not to have changed")
+	})
+
+	t.Run("Still detect salts", func(t *testing.T) {
+		salts := makeSalts(10)
+		cache := NewReplayCache(5)
+		for _, s := range salts {
+			cache.Add(keyID, s)
 		}
 
 		cache.Resize(10)
 
-		if cache.capacity != 10 {
-			t.Errorf("Expected capacity to be 10, got %d", cache.capacity)
+		for _, s := range salts {
+			if cache.Add(keyID, s) {
+				t.Error("Should still be able to detect the salts after resizing")
+			}
 		}
-		if len(cache.active) != 5 {
-			t.Errorf("Expected active handshakes length to be 5, got %d", len(cache.active))
-		}
-		if len(cache.archive) != 5 {
-			t.Errorf("Expected archive handshakes length to be 5, got %d", len(cache.archive))
+
+		cache.Resize(3)
+
+		for _, s := range salts {
+			if cache.Add(keyID, s) {
+				t.Error("Should still be able to detect the salts after resizing")
+			}
 		}
 	})
 
 	t.Run("Exceeding maximum capacity", func(t *testing.T) {
 		cache := &ReplayCache{}
-		defer func() {
-			if r := recover(); r == nil {
-				t.Errorf("The code did not panic")
-			}
-		}()
 
-		cache.Resize(MaxCapacity + 1)
+		err := cache.Resize(MaxCapacity + 1)
+
+		require.Error(t, err)
 	})
 }
 

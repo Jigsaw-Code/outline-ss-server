@@ -93,7 +93,7 @@ func (c *ReplayCache) Add(id string, salt []byte) bool {
 		return false
 	}
 	_, inArchive := c.archive[hash]
-	if len(c.active) == c.capacity {
+	if len(c.active) >= c.capacity {
 		// Discard the archive and move active to archive.
 		c.archive = c.active
 		c.active = make(map[uint32]empty, c.capacity)
@@ -111,7 +111,7 @@ func (c *ReplayCache) Resize(capacity int) error {
 	defer c.mutex.Unlock()
 	c.capacity = capacity
 	// NOTE: The active handshakes and archive lists are not explicitly shrunk.
-	// Their sizes will naturally adjust as new handshakes are added  and the cache
+	// Their sizes will naturally adjust as new handshakes are added and the cache
 	// adheres to the updated capacity.
 	return nil
 }
