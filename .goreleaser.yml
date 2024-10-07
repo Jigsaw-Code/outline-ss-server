@@ -66,6 +66,9 @@ changelog:
     - '^test:'
 
 git:
+  # Sort tags by creation time when commit has more than one tag.
+  tag_sort: -version:creatordate
+
   # Specify prerelease suffix while sorting tags if there are more than one tag
   # in the same commit.
   prerelease_suffix: "-rc"
