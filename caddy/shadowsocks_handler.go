@@ -27,8 +27,13 @@ import (
 	"github.com/mholt/caddy-l4/layer4"
 )
 
+const ssModuleName = "layer4.handlers.shadowsocks"
+
 func init() {
-	caddy.RegisterModule(&ShadowsocksHandler{})
+	caddy.RegisterModule(ModuleRegistration{
+		ID:  ssModuleName,
+		New: func() caddy.Module { return new(ShadowsocksHandler) },
+	})
 }
 
 type KeyConfig struct {
@@ -50,10 +55,7 @@ var (
 )
 
 func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
-	return caddy.ModuleInfo{
-		ID:  "layer4.handlers.shadowsocks",
-		New: func() caddy.Module { return new(ShadowsocksHandler) },
-	}
+	return caddy.ModuleInfo{ID: ssModuleName}
 }
 
 // Provision implements caddy.Provisioner.

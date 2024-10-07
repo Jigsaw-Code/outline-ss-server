@@ -27,14 +27,19 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var replayCache outline.ReplayCache
+const outlineModuleName = "outline"
 
 func init() {
-	caddy.RegisterModule(OutlineApp{})
-	replayCache = outline.NewReplayCache(0)
+	replayCache := outline.NewReplayCache(0)
+	caddy.RegisterModule(ModuleRegistration{
+		ID: outlineModuleName,
+		New: func() caddy.Module {
+			app := new(OutlineApp)
+			app.ReplayCache = replayCache
+			return app
+		},
+	})
 }
-
-const outlineModuleName = "outline"
 
 type ShadowsocksConfig struct {
 	ReplayHistory int `json:"replay_history,omitempty"`
@@ -55,10 +60,7 @@ var (
 )
 
 func (OutlineApp) CaddyModule() caddy.ModuleInfo {
-	return caddy.ModuleInfo{
-		ID:  outlineModuleName,
-		New: func() caddy.Module { return new(OutlineApp) },
-	}
+	return caddy.ModuleInfo{ID: outlineModuleName}
 }
 
 // Provision sets up Outline.
@@ -68,8 +70,7 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	app.logger.Info("provisioning app instance")
 
 	if app.ShadowsocksConfig != nil {
-		replayCache.Resize(app.ShadowsocksConfig.ReplayHistory)
-		app.ReplayCache = replayCache
+		app.ReplayCache.Resize(app.ShadowsocksConfig.ReplayHistory)
 	}
 
 	if err := app.defineMetrics(); err != nil {

@@ -220,7 +220,6 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				ciphers.Update(cipherList)
 
 				ssService, err := service.NewShadowsocksService(
-					service.WithLogger(slog.Default()),
 					service.WithCiphers(ciphers),
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
@@ -248,7 +247,6 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					return fmt.Errorf("failed to create cipher list from config: %v", err)
 				}
 				ssService, err := service.NewShadowsocksService(
-					service.WithLogger(slog.Default()),
 					service.WithCiphers(ciphers),
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
