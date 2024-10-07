@@ -44,4 +44,14 @@ jobs:
 
     - name: Check licenses
       # We allow only "notice" type of licenses.
-      run: go run github.com/google/go-licenses check --ignore github.com/Jigsaw-Code --ignore=golang.org/x --ignore=go.uber.org/zap/exp/zapslog --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
+        run: |
+          go run github.com/google/go-licenses check \
+            # Ignore our own codebase.
+            --ignore github.com/Jigsaw-Code \
+            --ignore=golang.org/x \
+            # Missing license file, but Apache-2.0. See https://github.com/uber-go/zap/issues/1441#issuecomment-2389189961.
+            --ignore=go.uber.org/zap/exp/zapslog \
+            # TODO: Resolve this indirect Caddy dependency license before releasing the Caddy-backed binary.
+            --ignore github.com/go-sql-driver/mysql \
+            --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT \
+            ./...
