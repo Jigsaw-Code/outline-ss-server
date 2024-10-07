@@ -39,7 +39,8 @@ builds:
         goarch: 386
 
 archives:
-  -
+  - name_template: >-
+      {{ .ProjectName }}_{{ index (split .Version "-rc") 0 }}_{{ .Os }}_{{ .Arch }}"
     replacements:
       darwin: macos
       386: i386
@@ -63,3 +64,8 @@ changelog:
     exclude:
     - '^docs:'
     - '^test:'
+
+git:
+  # Specify prerelease suffix while sorting tags if there are more than one tag
+  # in the same commit.
+  prerelease_suffix: "-rc"

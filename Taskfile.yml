@@ -23,20 +23,14 @@ tasks:
   release:
     desc: "Release"
     deps: [clean]
-    vars:
-      RELEASE_TAG:
-        sh: echo "{{.TAG}}" | sed -E "s/-rc.+$//"
     cmds:
-      - GORELEASER_CURRENT_TAG={{.RELEASE_TAG}} go run github.com/goreleaser/goreleaser
+      - go run github.com/goreleaser/goreleaser
 
 
   release-local:
     desc: "Build a release binary"
-    vars:
-      RELEASE_TAG:
-        sh: echo "{{.TAG}}" | sed -E "s/-rc.+$//"
     cmds:
-      - GORELEASER_CURRENT_TAG={{.RELEASE_TAG}} go run github.com/goreleaser/goreleaser --clean --snapshot
+      - go run github.com/goreleaser/goreleaser --clean --snapshot
 
   test:
     desc: "Runs tests"
