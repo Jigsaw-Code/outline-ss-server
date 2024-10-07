@@ -40,7 +40,7 @@ builds:
 
 archives:
   - name_template: >-
-      {{ .ProjectName }}_{{ index (split .Version "-rc") 0 }}_{{ .Os }}_{{ .Arch }}"
+      {{ .ProjectName }}_{{ index (split .Version "-rc") 0 }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}
     replacements:
       darwin: macos
       386: i386
