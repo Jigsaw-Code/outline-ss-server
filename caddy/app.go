@@ -19,6 +19,7 @@ package outlinecaddy
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
@@ -30,9 +31,14 @@ import (
 const outlineModuleName = "outline"
 
 func init() {
+	replayCache := outline.NewReplayCache(0)
 	caddy.RegisterModule(ModuleRegistration{
-		ID:  outlineModuleName,
-		New: func() caddy.Module { return new(OutlineApp) },
+		ID: outlineModuleName,
+		New: func() caddy.Module {
+			app := new(OutlineApp)
+			app.ReplayCache = replayCache
+			return app
+		},
 	})
 }
 
@@ -65,8 +71,9 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	app.logger.Info("provisioning app instance")
 
 	if app.ShadowsocksConfig != nil {
-		// TODO: Persist replay cache across config reloads.
-		app.ReplayCache = outline.NewReplayCache(app.ShadowsocksConfig.ReplayHistory)
+		if err := app.ReplayCache.Resize(app.ShadowsocksConfig.ReplayHistory); err != nil {
+			return fmt.Errorf("failed to configure replay history with capacity %d: %v", app.ShadowsocksConfig.ReplayHistory, err)
+		}
 	}
 
 	if err := app.defineMetrics(); err != nil {
