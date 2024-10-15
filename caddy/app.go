@@ -28,7 +28,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const outlineModuleName = "outline"
+const (
+	outlineModuleName = "outline"
+	replayCacheCtxKey = "outline_replay_cache"
+	metricsCtxKey     = "outline_metrics"
+)
 
 func init() {
 	replayCache := outline.NewReplayCache(0)
@@ -36,7 +40,7 @@ func init() {
 		ID: outlineModuleName,
 		New: func() caddy.Module {
 			app := new(OutlineApp)
-			app.ReplayCache = replayCache
+			app.replayCache = replayCache
 			return app
 		},
 	})
@@ -48,10 +52,11 @@ type ShadowsocksConfig struct {
 
 type OutlineApp struct {
 	ShadowsocksConfig *ShadowsocksConfig `json:"shadowsocks,omitempty"`
+	Handlers          ConnectionHandlers `json:"connection_handlers,omitempty"`
 
-	ReplayCache outline.ReplayCache
 	logger      *slog.Logger
-	Metrics     outline.ServiceMetrics
+	replayCache outline.ReplayCache
+	metrics     outline.ServiceMetrics
 	buildInfo   *prometheus.GaugeVec
 }
 
@@ -71,7 +76,7 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	app.logger.Info("provisioning app instance")
 
 	if app.ShadowsocksConfig != nil {
-		if err := app.ReplayCache.Resize(app.ShadowsocksConfig.ReplayHistory); err != nil {
+		if err := app.replayCache.Resize(app.ShadowsocksConfig.ReplayHistory); err != nil {
 			return fmt.Errorf("failed to configure replay history with capacity %d: %v", app.ShadowsocksConfig.ReplayHistory, err)
 		}
 	}
@@ -82,6 +87,14 @@ func (app *OutlineApp) Provision(ctx caddy.Context) error {
 	// TODO: Set version at build time.
 	app.buildInfo.WithLabelValues("dev").Set(1)
 	// TODO: Add replacement metrics for `shadowsocks_keys` and `shadowsocks_ports`.
+
+	ctx = ctx.WithValue(replayCacheCtxKey, app.replayCache)
+	ctx = ctx.WithValue(metricsCtxKey, app.metrics)
+
+	err := app.Handlers.Provision(ctx)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -104,7 +117,7 @@ func (app *OutlineApp) defineMetrics() error {
 	if err != nil {
 		return err
 	}
-	app.Metrics, err = registerCollector(r, metrics)
+	app.metrics, err = registerCollector(r, metrics)
 	if err != nil {
 		return err
 	}

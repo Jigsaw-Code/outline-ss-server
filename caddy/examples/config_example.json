@@ -11,22 +11,39 @@
         "http": {
             "servers": {
                 "metrics": {
-                    "listen": [
-                        ":9091"
-                    ],
+                    "listen": [":9091"],
                     "routes": [
                         {
-                            "match": [
-                                {
-                                    "path": [
-                                        "/metrics"
-                                    ]
-                                }
-                            ],
+                            "match": [{"path": ["/metrics"]}],
                             "handle": [
                                 {
                                     "disable_openmetrics": true,
                                     "handler": "metrics"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "ws1": {
+                    "listen": [":8000"],
+                    "routes": [
+                        {
+                            "match": [{"path": ["/tcp"]}],
+                            "handle": [
+                                {
+                                    "handler": "ws2outline",
+                                    "type": "stream",
+                                    "connection_handler": "ss1"
+                                }
+                            ]
+                        },
+                        {
+                            "match": [{"path": ["/udp"]}],
+                            "handle": [
+                                {
+                                    "handler": "ws2outline",
+                                    "type": "packet",
+                                    "connection_handler": "ss1"
                                 }
                             ]
                         }
@@ -36,110 +53,23 @@
         },
         "layer4": {
             "servers": {
-                "1": {
+                "ss1": {
                     "listen": [
                         "tcp/[::]:9000",
                         "udp/[::]:9000"
                     ],
                     "routes": [
                         {
-                            "match": [
-                                {
-                                    "http": [
-                                        {
-                                            "path": [
-                                                "/tcp"
-                                            ],
-                                            "header": {
-                                                "Connection": ["*Upgrade*"],
-                                                "Upgrade": ["websocket"]
-                                            }
-                                        }
-                                    ]
-                                }
-                            ],
                             "handle": [
                                 {
-                                    "handler": "websocket",
-                                    "type": "stream"
-                                },
-                                {
-                                    "handler": "shadowsocks",
-                                    "keys": [
-                                        {
-                                            "id": "user-0",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret0"
-                                        },
-                                        {
-                                            "id": "user-1",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret1"
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            "match": [
-                                {
-                                    "http": [
-                                        {
-                                            "path": [
-                                                "/udp"
-                                            ],
-                                            "header": {
-                                                "Connection": ["*Upgrade*"],
-                                                "Upgrade": ["websocket"]
-                                            }
-                                        }
-                                    ]
-                                }
-                            ],
-                            "handle": [
-                                {
-                                    "handler": "websocket",
-                                    "type": "packet"
-                                },
-                                {
-                                    "handler": "shadowsocks",
-                                    "keys": [
-                                        {
-                                            "id": "user-0",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret0"
-                                        },
-                                        {
-                                            "id": "user-1",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret1"
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            "handle": [
-                                {
-                                    "handler": "shadowsocks",
-                                    "keys": [
-                                        {
-                                            "id": "user-0",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret0"
-                                        },
-                                        {
-                                            "id": "user-1",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret1"
-                                        }
-                                    ]
+                                    "handler": "outline",
+                                    "connection_handler": "ss1"
                                 }
                             ]
                         }
                     ]
                 },
-                "2": {
+                "ss2_no_replaycache": {
                     "listen": [
                         "tcp/[::]:9001",
                         "udp/[::]:9001"
@@ -148,14 +78,8 @@
                         {
                             "handle": [
                                 {
-                                    "handler": "shadowsocks",
-                                    "keys": [
-                                        {
-                                            "id": "user-2",
-                                            "cipher": "chacha20-ietf-poly1305",
-                                            "secret": "Secret2"
-                                        }
-                                    ]
+                                    "handler": "outline",
+                                    "connection_handler": "ss2"
                                 }
                             ]
                         }
@@ -166,7 +90,40 @@
         "outline": {
             "shadowsocks": {
                 "replay_history": 10000
-            }
+            },
+            "connection_handlers": [
+                {
+                    "name": "ss1",
+                    "handle": {
+                        "handler": "shadowsocks",
+                        "keys": [
+                            {
+                                "id": "user-0",
+                                "cipher": "chacha20-ietf-poly1305",
+                                "secret": "Secret0"
+                            },
+                            {
+                                "id": "user-1",
+                                "cipher": "chacha20-ietf-poly1305",
+                                "secret": "Secret1"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "ss2",
+                    "handle": {
+                        "handler": "shadowsocks",
+                        "keys": [
+                            {
+                                "id": "user-2",
+                                "cipher": "chacha20-ietf-poly1305",
+                                "secret": "Secret2"
+                            }
+                        ]
+                    }
+                }
+            ]
         }
     }
 }

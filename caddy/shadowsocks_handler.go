@@ -63,15 +63,6 @@ func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Slogger()
 
-	mod, err := ctx.AppIfConfigured(outlineModuleName)
-	if err != nil {
-		return fmt.Errorf("outline app configure error: %w", err)
-	}
-	app, ok := mod.(*OutlineApp)
-	if !ok {
-		return fmt.Errorf("module `%s` is of type `%T`, expected `OutlineApp`", outlineModuleName, app)
-	}
-
 	if len(h.Keys) == 0 {
 		h.logger.Warn("no keys configured")
 	}
@@ -98,11 +89,20 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	ciphers := outline.NewCipherList()
 	ciphers.Update(cipherList)
 
+	replayCache, ok := ctx.Value(replayCacheCtxKey).(outline.ReplayCache)
+	if !ok {
+		h.logger.Warn("Handler configured outside Outline app; replay cache not available.")
+	}
+	metrics, ok := ctx.Value(metricsCtxKey).(outline.ServiceMetrics)
+	if !ok {
+		h.logger.Warn("Handler configured outside Outline app; metrics not available.")
+	}
+
 	service, err := outline.NewShadowsocksService(
 		outline.WithLogger(h.logger),
 		outline.WithCiphers(ciphers),
-		outline.WithMetrics(app.Metrics),
-		outline.WithReplayCache(&app.ReplayCache),
+		outline.WithMetrics(metrics),
+		outline.WithReplayCache(&replayCache),
 	)
 	if err != nil {
 		return err
@@ -130,10 +130,10 @@ type l4StreamConn struct {
 
 var _ transport.StreamConn = (*l4StreamConn)(nil)
 
-func (c l4StreamConn) CloseWrite() error {
-	return nil
+func (c l4StreamConn) CloseRead() error {
+	return c.Close()
 }
 
-func (c l4StreamConn) CloseRead() error {
+func (c l4StreamConn) CloseWrite() error {
 	return nil
 }
