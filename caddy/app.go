@@ -30,8 +30,8 @@ import (
 
 const (
 	outlineModuleName = "outline"
-	replayCacheCtxKey = "outline_replay_cache"
-	metricsCtxKey     = "outline_metrics"
+	replayCacheCtxKey = "outline.replay_cache"
+	metricsCtxKey     = "outline.metrics"
 )
 
 func init() {
