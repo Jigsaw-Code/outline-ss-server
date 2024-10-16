@@ -28,7 +28,15 @@
                     "listen": [":8000"],
                     "routes": [
                         {
-                            "match": [{"path": ["/tcp"]}],
+                            "match": [
+                                {
+                                    "path": ["/tcp"],
+                                    "header": {
+                                        "Connection": ["*Upgrade*"],
+                                        "Upgrade": ["websocket"]
+                                    }
+                                }
+                            ],
                             "handle": [
                                 {
                                     "handler": "ws2outline",
@@ -38,7 +46,15 @@
                             ]
                         },
                         {
-                            "match": [{"path": ["/udp"]}],
+                            "match": [
+                                {
+                                    "path": ["/udp"],
+                                    "header": {
+                                        "Connection": ["*Upgrade*"],
+                                        "Upgrade": ["websocket"]
+                                    }
+                                }
+                            ],
                             "handle": [
                                 {
                                     "handler": "ws2outline",
