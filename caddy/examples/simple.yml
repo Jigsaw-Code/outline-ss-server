@@ -42,26 +42,34 @@ apps:
         - udp/[::]:9000
         routes:
         - handle:
-          - handler: shadowsocks
-            keys:
-            - id: user-0
-              cipher: chacha20-ietf-poly1305
-              secret: Secret0
-            - id: user-1
-              cipher: chacha20-ietf-poly1305
-              secret: Secret1
+          - handler: outline
+            connection_handler: ss1
       '2':
         listen:
         - tcp/[::]:9001
         - udp/[::]:9001
         routes:
         - handle:
-          - handler: shadowsocks
-            keys:
-            - id: user-2
-              cipher: chacha20-ietf-poly1305
-              secret: Secret2
-
+          - handler: outline
+            connection_handler: ss2
   outline:
     shadowsocks:
       replay_history: 10000
+    connection_handlers:
+    - name: ss1
+      handle:
+        handler: shadowsocks
+        keys:
+        - id: user-0
+          cipher: chacha20-ietf-poly1305
+          secret: Secret0
+        - id: user-1
+          cipher: chacha20-ietf-poly1305
+          secret: Secret1
+    - name: ss2
+      handle:
+        handler: shadowsocks
+        keys:
+        - id: user-2
+          cipher: chacha20-ietf-poly1305
+          secret: Secret2

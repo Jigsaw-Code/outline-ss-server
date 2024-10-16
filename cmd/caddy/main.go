@@ -19,6 +19,7 @@ import (
 
 	_ "github.com/Jigsaw-Code/outline-ss-server/caddy"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
+	_ "github.com/iamd3vil/caddy_yaml_adapter"
 	_ "github.com/mholt/caddy-l4"
 	_ "github.com/mholt/caddy-l4/layer4"
 	_ "github.com/mholt/caddy-l4/modules/l4http"

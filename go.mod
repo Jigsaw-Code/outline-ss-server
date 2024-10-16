@@ -8,6 +8,7 @@ require (
 	github.com/google/addlicense v1.1.1
 	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
+	github.com/iamd3vil/caddy_yaml_adapter v0.0.0-20200503183711-d479c29b475a
 	github.com/lmittmann/tint v1.0.5
 	github.com/mholt/caddy-l4 v0.0.0-20241012124037-5764d700c21c
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
@@ -140,6 +141,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.6.0 // indirect
+	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
 	github.com/go-chi/chi/v5 v5.0.12 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.5.0 // indirect
@@ -367,6 +369,7 @@ require (
 	gopkg.in/src-d/go-billy.v4 v4.3.2 // indirect
 	gopkg.in/src-d/go-git.v4 v4.13.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	howett.net/plist v1.0.0 // indirect
 	k8s.io/klog/v2 v2.110.1 // indirect
 	mvdan.cc/sh/v3 v3.7.0 // indirect

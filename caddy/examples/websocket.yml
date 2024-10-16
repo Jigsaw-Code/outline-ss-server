@@ -34,6 +34,34 @@ apps:
           handle:
           - disable_openmetrics: true
             handler: metrics
+      '1':
+        listen:
+        - ":8000"
+        routes:
+        - match:
+          - path:
+            - "/tcp"
+            header:
+              Connection:
+              - "*Upgrade*"
+              Upgrade:
+              - websocket
+          handle:
+          - handler: ws2outline
+            type: stream
+            connection_handler: ss1
+        - match:
+          - path:
+            - "/udp"
+            header:
+              Connection:
+              - "*Upgrade*"
+              Upgrade:
+              - websocket
+          handle:
+          - handler: ws2outline
+            type: packet
+            connection_handler: ss1
   layer4:
     servers:
       '1':
@@ -41,29 +69,20 @@ apps:
         - tcp/[::]:9000
         - udp/[::]:9000
         routes:
-        - match:
-          - http:
-            - path:
-              - "/ws"
-              header:
-                Connection:
-                - "*Upgrade*"
-                Upgrade:
-                - websocket
-          handle:
-          - handler: websocket
-          - handler: shadowsocks
-            keys:
-            - id: user-1
-              cipher: chacha20-ietf-poly1305
-              secret: Secret1
         - handle:
-          - handler: shadowsocks
-            keys:
-            - id: user-1
-              cipher: chacha20-ietf-poly1305
-              secret: Secret1
-
+          - handler: outline
+            connection_handler: ss1
   outline:
     shadowsocks:
       replay_history: 10000
+    connection_handlers:
+    - name: ss1
+      handle:
+        handler: shadowsocks
+        keys:
+        - id: user-0
+          cipher: chacha20-ietf-poly1305
+          secret: Secret0
+        - id: user-1
+          cipher: chacha20-ietf-poly1305
+          secret: Secret1
