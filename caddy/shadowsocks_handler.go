@@ -115,7 +115,7 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
 	switch conn := cx.Conn.(type) {
 	case transport.StreamConn:
-		h.service.HandleStream(cx.Context, &l4StreamConn{cx})
+		h.service.HandleStream(cx.Context, &l4StreamConn{Connection: cx, wrappedStreamConn: conn})
 	case net.PacketConn:
 		h.service.HandlePacket(conn)
 	default:
@@ -126,14 +126,15 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 
 type l4StreamConn struct {
 	*layer4.Connection
+	wrappedStreamConn transport.StreamConn
 }
 
 var _ transport.StreamConn = (*l4StreamConn)(nil)
 
 func (c l4StreamConn) CloseRead() error {
-	return c.Close()
+	return c.wrappedStreamConn.CloseRead()
 }
 
 func (c l4StreamConn) CloseWrite() error {
-	return nil
+	return c.wrappedStreamConn.CloseWrite()
 }
