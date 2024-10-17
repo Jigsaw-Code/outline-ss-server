@@ -46,10 +46,13 @@ jobs:
       # We allow only "notice" type of licenses.
         run: |
           go run github.com/google/go-licenses check \
-            # Ignore our own repo because go-license ignores the root license for submodules we have a submodule.
-            --ignore github.com/Jigsaw-Code/outline-ss-server \
-            --ignore=golang.org/x \
-            # TODO: Resolve this indirect Caddy dependency license before releasing the Caddy-backed binary.
-            --ignore github.com/go-sql-driver/mysql \
             --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT \
+            # Ignore our own repo because `go-licenses` ignores the root license for submodules and we have
+            # a submodule.
+            --ignore github.com/Jigsaw-Code/outline-ss-server \
+            # Caddy dependends on this MPL-2.0 licensed dependency. This puts obligations on us when
+            # distributing Caddy-backed binaries. We don't want to automatically allow this license type,
+            # so we instead allow them on a per-module basis so that we are notified of and can resolve
+            # our licensing obligations if we add another one in the future.
+            --ignore github.com/go-sql-driver/mysql \
             ./...
