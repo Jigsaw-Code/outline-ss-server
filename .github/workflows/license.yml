@@ -50,6 +50,8 @@ jobs:
             # Ignore our own repo because `go-licenses` ignores the root license for submodules and we have
             # a submodule.
             --ignore github.com/Jigsaw-Code/outline-ss-server \
+            # Missing license file, but Apache-2.0. See https://github.com/uber-go/zap/issues/1441#issuecomment-2389189961.
+            --ignore=go.uber.org/zap/exp/zapslog \
             # Caddy dependends on this MPL-2.0 licensed dependency. This puts obligations on us when
             # distributing Caddy-backed binaries. We don't want to automatically allow this license type,
             # so we instead allow them on a per-module basis so that we are notified of and can resolve

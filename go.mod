@@ -378,6 +378,3 @@ require (
 )
 
 go 1.23
-
-// Replace indirect dependency with a newer version that has a LICENSE file.
-replace go.uber.org/zap/exp => go.uber.org/zap/exp v0.1.1-0.20240913022758-ede8e1888f83
