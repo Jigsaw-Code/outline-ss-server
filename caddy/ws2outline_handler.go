@@ -20,7 +20,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strconv"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/caddyserver/caddy/v2"
@@ -110,17 +109,24 @@ func (h *WebSocketHandler) Validate() error {
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	h.logger.Debug("handling websocket connection", slog.String("path", r.URL.Path))
+	h.logger.Debug("handling connection",
+		slog.String("path", r.URL.Path),
+		slog.Any("remote_addr", r.RemoteAddr))
 
 	var handler func(wsConn *websocket.Conn)
 	switch h.Type {
 	case connectionTypeStream:
 		handler = func(wsConn *websocket.Conn) {
-			cx := layer4.WrapConnection(&wsToStreamConn{wsConn}, []byte{}, zap.NewNop())
+			raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+			if err != nil {
+				h.logger.Error("failed to upgrade", "err", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			cx := layer4.WrapConnection(&wsToStreamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}, []byte{}, zap.NewNop())
 			defer cx.Close()
 
-			err := h.compiledHandler.Handle(cx, nil)
-			if err != nil {
+			if err = h.compiledHandler.Handle(cx, nil); err != nil {
 				h.logger.Error("failed to upgrade", "err", err)
 				w.WriteHeader(http.StatusBadGateway)
 				return
@@ -135,31 +141,22 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 	return nil
 }
 
+// wsConn overrides [websocket.Conn]'s remote address handling.
+type wrappedConn struct {
+	*websocket.Conn
+	raddr net.Addr
+}
+
+func (c wrappedConn) RemoteAddr() net.Addr {
+	return c.raddr
+}
+
 // wsToStreamConn converts a [websocket.Conn] to a [transport.StreamConn].
 type wsToStreamConn struct {
-	*websocket.Conn
+	net.Conn
 }
 
 var _ transport.StreamConn = (*wsToStreamConn)(nil)
-
-// RemoteAddr returns the remote network address of the websocket connection.
-func (c wsToStreamConn) RemoteAddr() net.Addr {
-	wsAddr, ok := c.Conn.RemoteAddr().(*websocket.Addr)
-	if !ok {
-		return &net.TCPAddr{}
-	}
-	if wsAddr.URL == nil {
-		return &net.TCPAddr{}
-	}
-	port, err := strconv.Atoi(wsAddr.URL.Port())
-	if err != nil {
-		return &net.TCPAddr{}
-	}
-	return &net.TCPAddr{
-		IP:   net.ParseIP(wsAddr.URL.Hostname()),
-		Port: port,
-	}
-}
 
 func (c wsToStreamConn) CloseRead() error {
 	return c.Close()
