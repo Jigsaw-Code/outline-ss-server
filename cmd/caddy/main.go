@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package outlinecaddy
+package main
 
 import (
-	"github.com/caddyserver/caddy/v2"
+	caddycmd "github.com/caddyserver/caddy/v2/cmd"
+
+	_ "github.com/Jigsaw-Code/outline-ss-server/caddy"
+	_ "github.com/caddyserver/caddy/v2/modules/standard"
+	_ "github.com/iamd3vil/caddy_yaml_adapter"
+	_ "github.com/mholt/caddy-l4"
+	_ "github.com/mholt/caddy-l4/layer4"
+	_ "github.com/mholt/caddy-l4/modules/l4http"
 )
 
-type ModuleRegistration caddy.ModuleInfo
-
-var _ caddy.Module = (*ModuleRegistration)(nil)
-
-// CaddyModule implements the caddy.Module interface
-func (m ModuleRegistration) CaddyModule() caddy.ModuleInfo {
-	return caddy.ModuleInfo(m)
+func main() {
+	caddycmd.Main()
 }
