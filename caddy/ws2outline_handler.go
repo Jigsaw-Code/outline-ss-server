@@ -133,8 +133,22 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 			}
 		}
 	case connectionTypePacket:
-		// TODO: Implement.
-		return errors.New("not supported yet")
+		handler = func(wsConn *websocket.Conn) {
+			raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
+			if err != nil {
+				h.logger.Error("failed to upgrade", "err", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			cx := layer4.WrapConnection(&wrappedConn{Conn: wsConn, raddr: raddr}, []byte{}, zap.NewNop())
+			defer cx.Close()
+
+			if err = h.compiledHandler.Handle(cx, nil); err != nil {
+				h.logger.Error("failed to upgrade", "err", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+		}
 	}
 
 	websocket.Server{Handler: handler}.ServeHTTP(w, r)
