@@ -220,12 +220,13 @@ func (h *packetHandler) Handle(clientConn net.Conn, pkt []byte) {
 				return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
 			}
 			pc := shadowsocks.NewPacketConn(clientConn, cryptoKey)
-			targetConn = h.nm.Add(clientConn.RemoteAddr(), pc, cryptoKey, udpConn, keyID)
+			targetConn = h.nm.Add(clientConn.RemoteAddr(), pc, udpConn, keyID)
 		} else {
 			unpackStart := time.Now()
-			textData, err := shadowsocks.Unpack(nil, pkt, targetConn.cryptoKey)
+			n, _, err := targetConn.ReadFrom(buffer)
 			timeToCipher := time.Since(unpackStart)
 			h.ssm.AddCipherSearch(err == nil, timeToCipher)
+			textData := buffer[:n]
 
 			if err != nil {
 				return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
@@ -283,9 +284,8 @@ func isDNS(addr net.Addr) bool {
 
 type natconn struct {
 	net.PacketConn
-	cryptoKey *shadowsocks.EncryptionKey
-	keyID     string
-	metrics   UDPConnMetrics
+	keyID   string
+	metrics UDPConnMetrics
 	// NAT timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
 	// Current read deadline of PacketConn.  Used to avoid decreasing the
@@ -363,10 +363,9 @@ func (m *natmap) get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, connMetrics UDPConnMetrics) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, keyID string, connMetrics UDPConnMetrics) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
-		cryptoKey:      cryptoKey,
 		keyID:          keyID,
 		metrics:        connMetrics,
 		defaultTimeout: m.timeout,
@@ -391,9 +390,9 @@ func (m *natmap) del(key string) net.PacketConn {
 	return nil
 }
 
-func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, keyID string) *natconn {
+func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, targetConn net.PacketConn, keyID string) *natconn {
 	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
-	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, connMetrics)
+	entry := m.set(clientAddr.String(), targetConn, keyID, connMetrics)
 
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID, m.logger)
@@ -430,10 +429,6 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 	// Padding is only used if the address is IPv4.
 	pkt := make([]byte, serverUDPBufferSize)
 
-	saltSize := targetConn.cryptoKey.SaltSize()
-	// Leave enough room at the beginning of the packet for a max-length header (i.e. IPv6).
-	bodyStart := saltSize + maxAddrLen
-
 	expired := false
 	for {
 		var bodyLen, proxyClientBytes int
@@ -445,8 +440,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			// `readBuf` receives the plaintext body in `pkt`:
 			// [padding?][salt][address][body][tag][unused]
 			// |--     bodyStart     --|[      readBuf    ]
-			readBuf := pkt[bodyStart:]
-			bodyLen, raddr, err = targetConn.ReadFrom(readBuf)
+			bodyLen, raddr, err = targetConn.ReadFrom(pkt)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok {
 					if netErr.Timeout() {
@@ -461,7 +455,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 
 			// Prepare the packet for writing to the client connection.
 			// This includes adding the SOCKS address and encrypting the payload.
-			proxyClientBytes, err = clientConn.WriteTo(readBuf[:bodyLen], raddr)
+			proxyClientBytes, err = clientConn.WriteTo(pkt[:bodyLen], raddr)
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to client", err)
 			}
