@@ -141,7 +141,7 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 	return nil
 }
 
-// wsConn overrides [websocket.Conn]'s remote address handling.
+// wrappedConn overrides [websocket.Conn]'s remote address handling.
 type wrappedConn struct {
 	*websocket.Conn
 	raddr net.Addr
