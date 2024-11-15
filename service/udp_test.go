@@ -19,7 +19,6 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"sync"
 	"testing"
 	"time"
 
@@ -207,14 +206,14 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, noopLogger())
+	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{}, noopLogger())
+	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")

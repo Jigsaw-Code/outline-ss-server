@@ -130,9 +130,7 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 // Listen on addr for encrypted packets and basically do UDP NAT.
 // We take the ciphers as a pointer because it gets replaced on config updates.
 func (h *packetHandler) Handle(clientConn net.PacketConn) {
-	var running sync.WaitGroup
-
-	nm := newNATmap(h.natTimeout, h.m, &running, h.logger)
+	nm := newNATmap(h.natTimeout, h.m, h.logger)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
@@ -320,11 +318,10 @@ type natmap struct {
 	logger  *slog.Logger
 	timeout time.Duration
 	metrics UDPMetrics
-	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup, l *slog.Logger) *natmap {
-	m := &natmap{logger: l, metrics: sm, running: running}
+func newNATmap(timeout time.Duration, sm UDPMetrics, l *slog.Logger) *natmap {
+	m := &natmap{logger: l, metrics: sm}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
 	return m
@@ -368,14 +365,12 @@ func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *
 	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
 	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, connMetrics)
 
-	m.running.Add(1)
 	go func() {
 		timedCopy(clientAddr, clientConn, entry, keyID, m.logger)
 		connMetrics.RemoveNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
 		}
-		m.running.Done()
 	}()
 	return entry
 }
