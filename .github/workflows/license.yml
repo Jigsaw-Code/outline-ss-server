@@ -52,9 +52,7 @@ jobs:
             --ignore github.com/Jigsaw-Code/outline-ss-server \
             # Missing license file, but Apache-2.0. See https://github.com/uber-go/zap/issues/1441#issuecomment-2389189961.
             --ignore=go.uber.org/zap/exp/zapslog \
-            # Caddy dependends on this MPL-2.0 licensed dependency. This puts obligations on us when
-            # distributing Caddy-backed binaries. We don't want to automatically allow this license type,
-            # so we instead allow them on a per-module basis so that we are notified of and can resolve
-            # our licensing obligations if we add another one in the future.
+            # Caddy dependends on this MPL-2.0 licensed dependency, but doesn't actually compile it into
+            # the binary. See https://github.com/caddyserver/caddy/pull/6655.
             --ignore github.com/go-sql-driver/mysql \
             ./...
