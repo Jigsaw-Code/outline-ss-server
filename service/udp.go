@@ -141,7 +141,6 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			break
 		}
 
-		keyID := ""
 		var proxyTargetBytes int
 		var targetConn *natconn
 
@@ -169,7 +168,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				var textData []byte
 				var cryptoKey *shadowsocks.EncryptionKey
 				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
+				textData, keyID, cryptoKey, err := findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
 				timeToCipher := time.Since(unpackStart)
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
@@ -196,9 +195,6 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
 				}
-
-				// The key ID is known with confidence once decryption succeeds.
-				keyID = targetConn.keyID
 
 				var onetErr *onet.ConnectionError
 				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
@@ -254,7 +250,6 @@ func isDNS(addr net.Addr) bool {
 type natconn struct {
 	net.PacketConn
 	cryptoKey *shadowsocks.EncryptionKey
-	keyID     string
 	metrics   UDPConnMetrics
 	// NAT timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
@@ -333,11 +328,10 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, connMetrics UDPConnMetrics) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, connMetrics UDPConnMetrics) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		cryptoKey:      cryptoKey,
-		keyID:          keyID,
 		metrics:        connMetrics,
 		defaultTimeout: m.timeout,
 	}
@@ -363,10 +357,10 @@ func (m *natmap) del(key string) net.PacketConn {
 
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, keyID string) *natconn {
 	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
-	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, connMetrics)
+	entry := m.set(clientAddr.String(), targetConn, cryptoKey, connMetrics)
 
 	go func() {
-		timedCopy(clientAddr, clientConn, entry, keyID, m.logger)
+		timedCopy(clientAddr, clientConn, entry, m.logger)
 		connMetrics.RemoveNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
@@ -394,7 +388,7 @@ func (m *natmap) Close() error {
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
-func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, keyID string, l *slog.Logger) {
+func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, l *slog.Logger) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
