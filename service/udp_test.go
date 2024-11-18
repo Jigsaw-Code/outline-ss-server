@@ -139,7 +139,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
-		handler.Handle(clientConn)
+		PacketServe(clientConn, handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -216,7 +216,7 @@ func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
 	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
+	nat.Add(&wrappedPacketConn{PacketConn: clientConn, raddr: &clientAddr}, targetConn, natCryptoKey, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }
@@ -481,7 +481,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	ph := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -489,7 +489,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	require.Nil(t, clientConn.Close())
 	// This should return quickly without timing out.
-	s.Handle(clientConn)
+	PacketServe(clientConn, ph.Handle)
 }
 
 // Makes sure the UDP listener returns [io.ErrClosed] on reads and writes after Close().

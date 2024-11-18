@@ -17,6 +17,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -104,6 +105,9 @@ func startUDPEchoServer(t testing.TB) (*net.UDPConn, *sync.WaitGroup) {
 		for {
 			n, clientAddr, err := conn.ReadFromUDP(buf)
 			if err != nil {
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
 				t.Logf("Failed to read from UDP conn: %v", err)
 				return
 			}
@@ -268,16 +272,23 @@ type fakeUDPConnMetrics struct {
 	clientAddr net.Addr
 	accessKey  string
 	up, down   []udpRecord
+	mu         sync.Mutex
 }
 
 var _ service.UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
 
 func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.up = append(m.up, udpRecord{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
+
 func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.down = append(m.down, udpRecord{m.clientAddr, m.accessKey, status, targetProxyBytes, proxyClientBytes})
 }
+
 func (m *fakeUDPConnMetrics) RemoveNatEntry() {
 	// Not tested because it requires waiting for a long timeout.
 }
@@ -315,7 +326,7 @@ func TestUDPEcho(t *testing.T) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(proxyConn)
+		service.PacketServe(proxyConn, proxy.Handle)
 		done <- struct{}{}
 	}()
 
@@ -361,29 +372,26 @@ func TestUDPEcho(t *testing.T) {
 	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	keyID := snapshot[0].Value.(*service.CipherEntry).ID
 
-	if len(testMetrics.connMetrics) != 1 {
-		t.Errorf("Wrong NAT count: %d", len(testMetrics.connMetrics))
-	}
-	if len(testMetrics.connMetrics[0].up) != 1 {
-		t.Errorf("Wrong number of packets sent: %v", testMetrics.connMetrics[0].up)
-	} else {
-		record := testMetrics.connMetrics[0].up[0]
-		require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad upstream metrics")
-		require.Equal(t, keyID, record.accessKey, "Bad upstream metrics")
-		require.Equal(t, "OK", record.status, "Bad upstream metrics")
-		require.Greater(t, record.in, record.out, "Bad upstream metrics")
-		require.Equal(t, int64(N), record.out, "Bad upstream metrics")
-	}
-	if len(testMetrics.connMetrics[0].down) != 1 {
-		t.Errorf("Wrong number of packets received: %v", testMetrics.connMetrics[0].down)
-	} else {
-		record := testMetrics.connMetrics[0].down[0]
-		require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad downstream metrics")
-		require.Equal(t, keyID, record.accessKey, "Bad downstream metrics")
-		require.Equal(t, "OK", record.status, "Bad downstream metrics")
-		require.Greater(t, record.out, record.in, "Bad downstream metrics")
-		require.Equal(t, int64(N), record.in, "Bad downstream metrics")
-	}
+	require.Lenf(t, testMetrics.connMetrics, 1, "Wrong NAT count")
+
+	testMetrics.connMetrics[0].mu.Lock()
+	defer testMetrics.connMetrics[0].mu.Unlock()
+
+	require.Lenf(t, testMetrics.connMetrics[0].up, 1, "Wrong number of packets sent")
+	record := testMetrics.connMetrics[0].up[0]
+	require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad upstream metrics")
+	require.Equal(t, keyID, record.accessKey, "Bad upstream metrics")
+	require.Equal(t, "OK", record.status, "Bad upstream metrics")
+	require.Greater(t, record.in, record.out, "Bad upstream metrics")
+	require.Equal(t, int64(N), record.out, "Bad upstream metrics")
+
+	require.Lenf(t, testMetrics.connMetrics[0].down, 1, "Wrong number of packets received")
+	record = testMetrics.connMetrics[0].down[0]
+	require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad downstream metrics")
+	require.Equal(t, keyID, record.accessKey, "Bad downstream metrics")
+	require.Equal(t, "OK", record.status, "Bad downstream metrics")
+	require.Greater(t, record.out, record.in, "Bad downstream metrics")
+	require.Equal(t, int64(N), record.in, "Bad downstream metrics")
 }
 
 func BenchmarkTCPThroughput(b *testing.B) {
@@ -548,7 +556,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(server)
+		service.PacketServe(server, proxy.Handle)
 		done <- struct{}{}
 	}()
 
@@ -592,7 +600,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		proxy.Handle(proxyConn)
+		service.PacketServe(proxyConn, proxy.Handle)
 		done <- struct{}{}
 	}()
 

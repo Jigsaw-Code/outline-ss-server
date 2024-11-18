@@ -44,7 +44,7 @@ type ServiceMetrics interface {
 
 type Service interface {
 	HandleStream(ctx context.Context, conn transport.StreamConn)
-	HandlePacket(conn net.PacketConn)
+	HandlePacket(conn net.Conn, pkt []byte)
 }
 
 // Option is a Shadowsocks service constructor option.
@@ -137,8 +137,8 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 }
 
 // HandlePacket handles a Shadowsocks packet connection.
-func (s *ssService) HandlePacket(conn net.PacketConn) {
-	s.ph.Handle(conn)
+func (s *ssService) HandlePacket(conn net.Conn, pkt []byte) {
+	s.ph.Handle(conn, pkt)
 }
 
 type ssConnMetrics struct {
