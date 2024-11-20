@@ -169,7 +169,7 @@ func TestIPFilter(t *testing.T) {
 
 	t.Run("Localhost allowed", func(t *testing.T) {
 		metrics := sendToDiscard(payloads, allowAll)
-		assert.Equal(t, len(metrics.connMetrics), 1, "Expected 1 NAT entry, not %d", len(metrics.connMetrics))
+		assert.Equal(t, 1, len(metrics.connMetrics), "Expected 1 NAT entry, not %d", len(metrics.connMetrics))
 	})
 
 	t.Run("Localhost not allowed", func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestUpstreamMetrics(t *testing.T) {
 
 	metrics := sendToDiscard(payloads, allowAll)
 
-	assert.Equal(t, N, len(metrics.connMetrics[0].upstreamPackets), "Expected %d reports, not %v", N, metrics.connMetrics[0].upstreamPackets)
+	assert.Equal(t, N, len(metrics.connMetrics[0].upstreamPackets), "Expected %d reports, not %d", N, len(metrics.connMetrics[0].upstreamPackets))
 	for i, report := range metrics.connMetrics[0].upstreamPackets {
 		assert.Equal(t, int64(i+1), report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
 		assert.Greater(t, report.clientProxyBytes, report.proxyTargetBytes, "Expected nonzero input overhead (%d > %d)", report.clientProxyBytes, report.proxyTargetBytes)
