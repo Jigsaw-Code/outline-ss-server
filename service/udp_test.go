@@ -216,7 +216,7 @@ func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
 	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&wrappedPacketConn{PacketConn: clientConn, raddr: &clientAddr}, targetConn, natCryptoKey, "key id")
+	nat.Add(&packetConn{PacketConn: clientConn, raddr: &clientAddr}, targetConn, natCryptoKey, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }

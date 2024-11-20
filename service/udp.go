@@ -150,13 +150,13 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 			continue
 		}
 		pkt := buffer[:n]
-		conn := &wrappedPacketConn{
+		conn := &packetConn{
 			PacketConn: clientConn,
 			readCh:     make(chan []byte, 1),
 			raddr: 		addr,
 		}
 
-		func(conn *wrappedPacketConn) {
+		func(conn *packetConn) {
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
@@ -169,24 +169,24 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 	}
 }
 
-type wrappedPacketConn struct {
+type packetConn struct {
 	net.PacketConn
 	readCh chan []byte
 	raddr net.Addr
 }
 
-var _ net.Conn = (*wrappedPacketConn)(nil)
+var _ net.Conn = (*packetConn)(nil)
 
-func (pc *wrappedPacketConn) Read(p []byte) (int, error) {
+func (pc *packetConn) Read(p []byte) (int, error) {
 	data := <-pc.readCh
 	return copy(p, data), nil
 }
 
-func (pc *wrappedPacketConn) Write(b []byte) (n int, err error) {
+func (pc *packetConn) Write(b []byte) (n int, err error) {
 	return pc.PacketConn.WriteTo(b, pc.raddr)
 }
 
-func (pc *wrappedPacketConn) RemoteAddr() net.Addr {
+func (pc *packetConn) RemoteAddr() net.Addr {
 	return pc.raddr
 }
 
