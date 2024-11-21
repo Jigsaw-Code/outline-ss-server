@@ -130,9 +130,7 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 // Listen on addr for encrypted packets and basically do UDP NAT.
 // We take the ciphers as a pointer because it gets replaced on config updates.
 func (h *packetHandler) Handle(clientConn net.PacketConn) {
-	var running sync.WaitGroup
-
-	nm := newNATmap(h.natTimeout, h.m, &running, h.logger)
+	nm := newNATmap(h.natTimeout, h.m, h.logger)
 	defer nm.Close()
 	cipherBuf := make([]byte, serverUDPBufferSize)
 	textBuf := make([]byte, serverUDPBufferSize)
@@ -143,7 +141,6 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 			break
 		}
 
-		keyID := ""
 		var proxyTargetBytes int
 		var targetConn *natconn
 
@@ -171,7 +168,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				var textData []byte
 				var cryptoKey *shadowsocks.EncryptionKey
 				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
+				textData, keyID, cryptoKey, err := findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
 				timeToCipher := time.Since(unpackStart)
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
@@ -198,9 +195,6 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 				if err != nil {
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
 				}
-
-				// The key ID is known with confidence once decryption succeeds.
-				keyID = targetConn.keyID
 
 				var onetErr *onet.ConnectionError
 				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
@@ -256,7 +250,6 @@ func isDNS(addr net.Addr) bool {
 type natconn struct {
 	net.PacketConn
 	cryptoKey *shadowsocks.EncryptionKey
-	keyID     string
 	metrics   UDPConnMetrics
 	// NAT timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
@@ -320,11 +313,10 @@ type natmap struct {
 	logger  *slog.Logger
 	timeout time.Duration
 	metrics UDPMetrics
-	running *sync.WaitGroup
 }
 
-func newNATmap(timeout time.Duration, sm UDPMetrics, running *sync.WaitGroup, l *slog.Logger) *natmap {
-	m := &natmap{logger: l, metrics: sm, running: running}
+func newNATmap(timeout time.Duration, sm UDPMetrics, l *slog.Logger) *natmap {
+	m := &natmap{logger: l, metrics: sm}
 	m.keyConn = make(map[string]*natconn)
 	m.timeout = timeout
 	return m
@@ -336,11 +328,10 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, keyID string, connMetrics UDPConnMetrics) *natconn {
+func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, connMetrics UDPConnMetrics) *natconn {
 	entry := &natconn{
 		PacketConn:     pc,
 		cryptoKey:      cryptoKey,
-		keyID:          keyID,
 		metrics:        connMetrics,
 		defaultTimeout: m.timeout,
 	}
@@ -366,16 +357,14 @@ func (m *natmap) del(key string) net.PacketConn {
 
 func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, keyID string) *natconn {
 	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
-	entry := m.set(clientAddr.String(), targetConn, cryptoKey, keyID, connMetrics)
+	entry := m.set(clientAddr.String(), targetConn, cryptoKey, connMetrics)
 
-	m.running.Add(1)
 	go func() {
-		timedCopy(clientAddr, clientConn, entry, keyID, m.logger)
+		timedCopy(clientAddr, clientConn, entry, m.logger)
 		connMetrics.RemoveNatEntry()
 		if pc := m.del(clientAddr.String()); pc != nil {
 			pc.Close()
 		}
-		m.running.Done()
 	}()
 	return entry
 }
@@ -399,7 +388,7 @@ func (m *natmap) Close() error {
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
-func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, keyID string, l *slog.Logger) {
+func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, l *slog.Logger) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
