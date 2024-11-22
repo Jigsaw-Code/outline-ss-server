@@ -117,7 +117,7 @@ func (h *WebSocketHandler) Validate() error {
 }
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
-func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, _ caddyhttp.Handler) error {
 	h.logger.Debug("handling connection",
 		slog.String("path", r.URL.Path),
 		slog.Any("remote_addr", r.RemoteAddr))
