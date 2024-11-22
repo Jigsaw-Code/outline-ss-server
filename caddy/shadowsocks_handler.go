@@ -29,6 +29,9 @@ import (
 
 const ssModuleName = "layer4.handlers.shadowsocks"
 
+// Max UDP buffer size for the server code.
+const serverUDPBufferSize = 64 * 1024
+
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
 		ID:  ssModuleName,
@@ -47,6 +50,7 @@ type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
 	service outline.Service
+	buffer  []byte
 	logger  *slog.Logger
 }
 
@@ -108,6 +112,7 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 		return err
 	}
 	h.service = service
+	h.buffer = make([]byte, serverUDPBufferSize)
 	return nil
 }
 
@@ -117,7 +122,12 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	case transport.StreamConn:
 		h.service.HandleStream(cx.Context, &l4StreamConn{Connection: cx, wrappedStreamConn: conn})
 	case net.PacketConn:
-		h.service.HandlePacket(conn)
+		n, err := cx.Read(h.buffer)
+		if err != nil {
+			return err
+		}
+		pkt := h.buffer[:n]
+		h.service.HandlePacket(cx, pkt)
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %T", conn)
 	}

@@ -139,7 +139,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
-		handler.Handle(clientConn)
+		PacketServe(clientConn, handler.Handle)
 		done <- struct{}{}
 	}()
 
@@ -169,7 +169,7 @@ func TestIPFilter(t *testing.T) {
 
 	t.Run("Localhost allowed", func(t *testing.T) {
 		metrics := sendToDiscard(payloads, allowAll)
-		assert.Equal(t, len(metrics.connMetrics), 1, "Expected 1 NAT entry, not %d", len(metrics.connMetrics))
+		assert.Equal(t, 1, len(metrics.connMetrics), "Expected 1 NAT entry, not %d", len(metrics.connMetrics))
 	})
 
 	t.Run("Localhost not allowed", func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestUpstreamMetrics(t *testing.T) {
 
 	metrics := sendToDiscard(payloads, allowAll)
 
-	assert.Equal(t, N, len(metrics.connMetrics[0].upstreamPackets), "Expected %d reports, not %v", N, metrics.connMetrics[0].upstreamPackets)
+	assert.Equal(t, N, len(metrics.connMetrics[0].upstreamPackets), "Expected %d reports, not %d", N, len(metrics.connMetrics[0].upstreamPackets))
 	for i, report := range metrics.connMetrics[0].upstreamPackets {
 		assert.Equal(t, int64(i+1), report.proxyTargetBytes, "Expected %d payload bytes, not %d", i+1, report.proxyTargetBytes)
 		assert.Greater(t, report.clientProxyBytes, report.proxyTargetBytes, "Expected nonzero input overhead (%d > %d)", report.clientProxyBytes, report.proxyTargetBytes)
@@ -216,7 +216,7 @@ func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
 	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
+	nat.Add(&packetConn{PacketConn: clientConn, raddr: &clientAddr}, targetConn, natCryptoKey, "key id")
 	entry := nat.Get(clientAddr.String())
 	return clientConn, targetConn, entry
 }
@@ -481,7 +481,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	ph := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -489,7 +489,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	require.Nil(t, clientConn.Close())
 	// This should return quickly without timing out.
-	s.Handle(clientConn)
+	PacketServe(clientConn, ph.Handle)
 }
 
 // Makes sure the UDP listener returns [io.ErrClosed] on reads and writes after Close().
