@@ -114,7 +114,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
 type PacketHandler interface {
-	Handle(conn net.Conn, pkt []byte)
+	Handle(conn net.Conn)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
@@ -132,7 +132,7 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 	h.targetIPValidator = targetIPValidator
 }
 
-type PacketHandleFunc func(conn net.Conn, pkt []byte)
+type PacketHandleFunc func(conn net.Conn)
 
 // PacketServe listens for packets and calls `handle` to handle them until the connection
 // returns [ErrClosed].
@@ -153,17 +153,17 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 		conn := &packetConn{
 			PacketConn: clientConn,
 			readCh:     make(chan []byte, 1),
-			raddr: 		addr,
+			raddr:      addr,
 		}
 
-		func(conn *packetConn) {
+		go func(conn *packetConn) {
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
 					debug.PrintStack()
 				}
 			}()
-			handle(conn, pkt)
+			handle(conn)
 		}(conn)
 		conn.readCh <- pkt
 	}
@@ -172,7 +172,7 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 type packetConn struct {
 	net.PacketConn
 	readCh chan []byte
-	raddr net.Addr
+	raddr  net.Addr
 }
 
 var _ net.Conn = (*packetConn)(nil)
@@ -190,10 +190,16 @@ func (pc *packetConn) RemoteAddr() net.Addr {
 	return pc.raddr
 }
 
-func (h *packetHandler) Handle(clientConn net.Conn, pkt []byte) {
-	debugUDPAddr(h.logger, "Outbound packet.", clientConn.RemoteAddr(), slog.Int("bytes", len(pkt)))
+func (h *packetHandler) Handle(clientConn net.Conn) {
+	cipherBuf := bufferPool.Get().([]byte)
+	defer bufferPool.Put(cipherBuf)
+	clientProxyBytes, err := clientConn.Read(cipherBuf)
+	if errors.Is(err, net.ErrClosed) {
+		return
+	}
+	debugUDPAddr(h.logger, "Outbound packet.", clientConn.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
+	pkt := cipherBuf[:clientProxyBytes]
 
-	var err error
 	var proxyTargetBytes int
 	var targetConn *natconn
 
@@ -207,10 +213,10 @@ func (h *packetHandler) Handle(clientConn net.Conn, pkt []byte) {
 			ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 			var textData []byte
 			var cryptoKey *shadowsocks.EncryptionKey
-			buffer := bufferPool.Get().([]byte)
-			defer bufferPool.Put(buffer)
+			textBuf := bufferPool.Get().([]byte)
+			defer bufferPool.Put(textBuf)
 			unpackStart := time.Now()
-			textData, keyID, cryptoKey, err := findAccessKeyUDP(ip, buffer, pkt, h.ciphers, h.logger)
+			textData, keyID, cryptoKey, err := findAccessKeyUDP(ip, textBuf, pkt, h.ciphers, h.logger)
 			timeToCipher := time.Since(unpackStart)
 			h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
