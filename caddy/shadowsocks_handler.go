@@ -120,7 +120,7 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
 	switch conn := cx.Conn.(type) {
 	case transport.StreamConn:
-		h.service.HandleStream(cx.Context, &l4StreamConn{Connection: cx, wrappedStreamConn: conn})
+		h.service.HandleStream(cx.Context, conn)
 	case net.Conn:
 		n, err := cx.Read(h.buffer)
 		if err != nil {
@@ -132,19 +132,4 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 		return fmt.Errorf("failed to handle unknown connection type: %T", conn)
 	}
 	return nil
-}
-
-type l4StreamConn struct {
-	*layer4.Connection
-	wrappedStreamConn transport.StreamConn
-}
-
-var _ transport.StreamConn = (*l4StreamConn)(nil)
-
-func (c l4StreamConn) CloseRead() error {
-	return c.wrappedStreamConn.CloseRead()
-}
-
-func (c l4StreamConn) CloseWrite() error {
-	return c.wrappedStreamConn.CloseWrite()
 }
