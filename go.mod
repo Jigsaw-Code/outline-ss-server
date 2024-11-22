@@ -21,6 +21,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace (
+  github.com/Jigsaw-Code/outline-ss-server/caddy => ./caddy
+)
+
 require (
 	cloud.google.com/go v0.112.2 // indirect
 	cloud.google.com/go/auth v0.4.1 // indirect
