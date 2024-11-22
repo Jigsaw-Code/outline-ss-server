@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/caddyserver/caddy/v2"
@@ -29,7 +30,13 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-const wsModuleName = "http.handlers.ws2outline"
+const (
+	wsModuleName = "http.handlers.ws2outline"
+
+	// Expire NAT connections after 5 minutes of idle time, as per
+	// https://datatracker.ietf.org/doc/html/rfc4787#section-4.3
+	natTimeout = 5 * time.Minute
+)
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -53,7 +60,8 @@ type WebSocketHandler struct {
 	ConnectionHandler string         `json:"connection_handler,omitempty"`
 	compiledHandler   layer4.NextHandler
 
-	logger *slog.Logger
+	logger  *slog.Logger
+	zlogger *zap.Logger
 }
 
 var (
@@ -69,6 +77,7 @@ func (*WebSocketHandler) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (h *WebSocketHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Slogger()
+	h.zlogger = ctx.Logger()
 	if h.Type == "" {
 		// The default connection type if not provided is a stream.
 		h.Type = connectionTypeStream
@@ -113,31 +122,72 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		slog.String("path", r.URL.Path),
 		slog.Any("remote_addr", r.RemoteAddr))
 
-	var handler func(wsConn *websocket.Conn)
 	switch h.Type {
 	case connectionTypeStream:
-		handler = func(wsConn *websocket.Conn) {
+		handler := func(wsConn *websocket.Conn) {
 			raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
 			if err != nil {
 				h.logger.Error("failed to upgrade", "err", err)
 				w.WriteHeader(http.StatusBadGateway)
 				return
 			}
-			cx := layer4.WrapConnection(&wsToStreamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}, []byte{}, zap.NewNop())
-			defer cx.Close()
 
-			if err = h.compiledHandler.Handle(cx, nil); err != nil {
+			conn := &wsToStreamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
+
+			if err = h.compiledHandler.Handle(layer4.WrapConnection(conn, []byte{}, h.zlogger), nil); err != nil {
 				h.logger.Error("failed to upgrade", "err", err)
 				w.WriteHeader(http.StatusBadGateway)
 				return
 			}
 		}
+		websocket.Handler(handler).ServeHTTP(w, r)
 	case connectionTypePacket:
-		// TODO: Implement.
-		return errors.New("not supported yet")
+		handler := func(wsConn *websocket.Conn) {
+			raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
+			if err != nil {
+				h.logger.Error("failed to upgrade", "err", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+
+			conn := &natConn{
+				Conn:           &wrappedConn{Conn: wsConn, raddr: raddr},
+				mappingTimeout: 5 * time.Minute,
+				lastWrite:      time.Now(),
+			}
+
+			if err = h.compiledHandler.Handle(layer4.WrapConnection(conn, []byte{}, h.zlogger), nil); err != nil {
+				h.logger.Error("failed to upgrade", "err", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+
+			// Keep the handler alive to prevent the websocket server from closing the
+			// connection when the handler returns.
+			doneCh := make(chan struct{})
+			go func() {
+				timer := time.NewTimer(conn.mappingTimeout)
+				defer timer.Stop()
+				for {
+					select {
+					case <-timer.C:
+						h.logger.Info("inactivity timeout")
+						close(doneCh)
+						return
+					case <-doneCh:
+						return
+					default:
+						if time.Since(conn.lastWrite) < conn.mappingTimeout {
+							timer.Reset(conn.mappingTimeout)
+						}
+					}
+				}
+			}()
+			<-doneCh
+		}
+		websocket.Handler(handler).ServeHTTP(w, r)
 	}
 
-	websocket.Server{Handler: handler}.ServeHTTP(w, r)
 	return nil
 }
 
@@ -164,4 +214,17 @@ func (c wsToStreamConn) CloseRead() error {
 
 func (c wsToStreamConn) CloseWrite() error {
 	return nil
+}
+
+type natConn struct {
+	net.Conn
+	mappingTimeout time.Duration
+	lastWrite      time.Time
+}
+
+func (c *natConn) Write(b []byte) (int, error) {
+	c.Conn.SetDeadline(time.Now().Add(c.mappingTimeout))
+	n, err := c.Conn.Write(b)
+	c.lastWrite = time.Now()
+	return n, err
 }

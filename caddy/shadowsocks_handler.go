@@ -121,7 +121,7 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	switch conn := cx.Conn.(type) {
 	case transport.StreamConn:
 		h.service.HandleStream(cx.Context, &l4StreamConn{Connection: cx, wrappedStreamConn: conn})
-	case net.PacketConn:
+	case net.Conn:
 		n, err := cx.Read(h.buffer)
 		if err != nil {
 			return err

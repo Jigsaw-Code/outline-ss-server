@@ -126,6 +126,7 @@ func (h *packetHandler) SetLogger(l *slog.Logger) {
 		l = noopLogger()
 	}
 	h.logger = l
+	h.nm.logger = l
 }
 
 func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
@@ -153,7 +154,7 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 		conn := &packetConn{
 			PacketConn: clientConn,
 			readCh:     make(chan []byte, 1),
-			raddr: 		addr,
+			raddr:      addr,
 		}
 
 		func(conn *packetConn) {
@@ -172,7 +173,7 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 type packetConn struct {
 	net.PacketConn
 	readCh chan []byte
-	raddr net.Addr
+	raddr  net.Addr
 }
 
 var _ net.Conn = (*packetConn)(nil)
@@ -198,7 +199,7 @@ func (h *packetHandler) Handle(clientConn net.Conn, pkt []byte) {
 	var targetConn *natconn
 
 	connError := func() (connError *onet.ConnectionError) {
-		defer slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientConn.RemoteAddr().String()))
+		defer h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientConn.RemoteAddr().String()))
 
 		var payload []byte
 		var tgtUDPAddr *net.UDPAddr
@@ -254,7 +255,7 @@ func (h *packetHandler) Handle(clientConn net.Conn, pkt []byte) {
 
 	status := "OK"
 	if connError != nil {
-		slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+		h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 		status = connError.Status
 	}
 	if targetConn != nil {
@@ -491,7 +492,7 @@ func timedCopy(clientConn net.Conn, targetConn *natconn, l *slog.Logger) {
 		}()
 		status := "OK"
 		if connError != nil {
-			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+			l.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
 		if expired {
