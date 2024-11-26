@@ -37,7 +37,7 @@ type ShadowsocksConnMetrics interface {
 }
 
 type ServiceMetrics interface {
-	UDPMetrics
+	AddOpenUDPAssociation(conn net.Conn) UDPConnMetrics
 	AddOpenTCPConnection(conn net.Conn) TCPConnMetrics
 	AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration)
 }
@@ -85,7 +85,7 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	)
 	s.sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
 	s.ph.SetLogger(s.logger)
 
 	return s, nil
@@ -138,7 +138,11 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 
 // HandlePacket handles a Shadowsocks packet connection.
 func (s *ssService) HandlePacket(conn net.Conn) {
-	s.ph.Handle(conn)
+	var connMetrics UDPConnMetrics
+	if s.metrics != nil {
+		connMetrics = s.metrics.AddOpenUDPAssociation(conn)
+	}
+	s.ph.Handle(conn, connMetrics)
 }
 
 type ssConnMetrics struct {

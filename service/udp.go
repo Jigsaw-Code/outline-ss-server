@@ -32,13 +32,10 @@ import (
 
 // UDPConnMetrics is used to report metrics on UDP connections.
 type UDPConnMetrics interface {
+	AddAuthenticated(accessKey string)
 	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64)
 	AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64)
-	RemoveNatEntry()
-}
-
-type UDPMetrics interface {
-	AddUDPNatEntry(clientAddr net.Addr, accessKey string) UDPConnMetrics
+	AddClosed()
 }
 
 // Max UDP buffer size for the server code.
@@ -90,16 +87,12 @@ type packetHandler struct {
 	logger            *slog.Logger
 	natTimeout        time.Duration
 	ciphers           CipherList
-	m                 UDPMetrics
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
 }
 
 // NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
-	if m == nil {
-		m = &NoOpUDPMetrics{}
-	}
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, ssMetrics ShadowsocksConnMetrics) PacketHandler {
 	if ssMetrics == nil {
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
 	}
@@ -107,7 +100,6 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 		logger:            noopLogger(),
 		natTimeout:        natTimeout,
 		ciphers:           cipherList,
-		m:                 m,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
 	}
@@ -115,7 +107,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 
 // PacketHandler is a running UDP shadowsocks proxy that can be stopped.
 type PacketHandler interface {
-	Handle(conn net.Conn)
+	Handle(conn net.Conn, connMetrics UDPConnMetrics)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
@@ -159,7 +151,7 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 				Conn:   &packetConnWrapper{PacketConn: clientConn, raddr: addr},
 				readCh: make(chan []byte, 1),
 			}
-			deleteEntry := nm.Add(addr.String(), conn)
+			deleteEntry := nm.Add(addr, conn)
 			go func(conn *natconn) {
 				defer func() {
 					conn.Close()
@@ -198,20 +190,18 @@ func (c *natconn) Close() error {
 	return nil
 }
 
-func (h *packetHandler) Handle(clientConn net.Conn) {
+func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) {
+	if connMetrics == nil {
+		connMetrics = &NoOpUDPConnMetrics{}
+	}
+	defer connMetrics.AddClosed()
+
 	targetConn, err := newTargetConn(h.natTimeout)
 	if err != nil {
 		slog.Error("UDP: failed to create target connection", slog.Any("err", err))
 		return
 	}
 	defer targetConn.Close()
-
-	var connMetrics UDPConnMetrics
-	defer func() {
-		if connMetrics != nil {
-			connMetrics.RemoveNatEntry()
-		}
-	}()
 
 	var cryptoKey *shadowsocks.EncryptionKey
 	var proxyTargetBytes int
@@ -235,22 +225,22 @@ func (h *packetHandler) Handle(clientConn net.Conn) {
 			}()
 
 			var err error
-			unpackStart := time.Now()
 			if cryptoKey == nil {
 				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var keyID string
 				var cryptoKey *shadowsocks.EncryptionKey
+				unpackStart := time.Now()
 				pkt, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, pkt, h.ciphers, h.logger)
+				timeToCipher := time.Since(unpackStart)
+				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 				wrappedClientConn := shadowsocks.NewPacketConn(clientConn, cryptoKey)
 				clientConn = &packetConnWrapper{
 					PacketConn: wrappedClientConn,
 					raddr:      clientConn.RemoteAddr(),
 				}
-				connMetrics = h.m.AddUDPNatEntry(clientConn.RemoteAddr(), keyID)
+				connMetrics.AddAuthenticated(keyID)
 				go timedCopy(clientConn.RemoteAddr(), wrappedClientConn, targetConn, cryptoKey, connMetrics, h.logger)
 			}
-			timeToCipher := time.Since(unpackStart)
-			h.ssm.AddCipherSearch(err == nil, timeToCipher)
 			if err != nil {
 				return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack packet from client", err)
 			}
@@ -273,9 +263,7 @@ func (h *packetHandler) Handle(clientConn net.Conn) {
 			h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
-		if connMetrics != nil {
-			connMetrics.AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
-		}
+		connMetrics.AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
 	}
 }
 
@@ -380,9 +368,7 @@ type natmap struct {
 }
 
 func newNATmap() *natmap {
-	m := &natmap{}
-	m.keyConn = make(map[string]*natconn)
-	return m
+	return &natmap{keyConn: make(map[string]*natconn)}
 }
 
 func (m *natmap) Get(key string) *natconn {
@@ -413,7 +399,8 @@ func (m *natmap) del(key string) *natconn {
 
 // Add adds a new UDP NAT entry to the natmap and returns a closure to delete
 // the entry.
-func (m *natmap) Add(key string, pc *natconn) func() {
+func (m *natmap) Add(addr net.Addr, pc *natconn) func() {
+	key := addr.String()
 	m.set(key, pc)
 	return func() {
 		m.del(key)
@@ -503,18 +490,11 @@ type NoOpUDPConnMetrics struct{}
 
 var _ UDPConnMetrics = (*NoOpUDPConnMetrics)(nil)
 
+func (m *NoOpUDPConnMetrics) AddAuthenticated(accessKey string) {}
+
 func (m *NoOpUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 }
 func (m *NoOpUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
-func (m *NoOpUDPConnMetrics) RemoveNatEntry() {}
-
-// NoOpUDPMetrics is a [UDPMetrics] that doesn't do anything. Useful in tests
-// or if you don't want to track metrics.
-type NoOpUDPMetrics struct{}
-
-var _ UDPMetrics = (*NoOpUDPMetrics)(nil)
-
-func (m *NoOpUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) UDPConnMetrics {
-	return &NoOpUDPConnMetrics{}
+func (m *NoOpUDPConnMetrics) AddClosed() {
 }
