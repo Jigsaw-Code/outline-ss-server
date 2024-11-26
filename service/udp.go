@@ -200,7 +200,6 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 		slog.Error("UDP: failed to create target connection", slog.Any("err", err))
 		return
 	}
-	defer targetConn.Close()
 
 	var cryptoKey *shadowsocks.EncryptionKey
 	var proxyTargetBytes int
