@@ -194,7 +194,6 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 	if connMetrics == nil {
 		connMetrics = &NoOpUDPConnMetrics{}
 	}
-	defer connMetrics.AddClosed()
 
 	targetConn, err := newTargetConn(h.natTimeout)
 	if err != nil {
@@ -239,7 +238,10 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 					raddr:      clientConn.RemoteAddr(),
 				}
 				connMetrics.AddAuthenticated(keyID)
-				go timedCopy(clientConn.RemoteAddr(), wrappedClientConn, targetConn, cryptoKey, connMetrics, h.logger)
+				go func() {
+					defer connMetrics.AddClosed()
+					timedCopy(clientConn.RemoteAddr(), wrappedClientConn, targetConn, connMetrics, h.logger)
+				}()
 			}
 			if err != nil {
 				return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack packet from client", err)
@@ -447,7 +449,7 @@ func (pcw *packetConnWrapper) RemoteAddr() net.Addr {
 }
 
 // copy from target to client until read timeout
-func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, m UDPConnMetrics, l *slog.Logger) {
+func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn net.PacketConn, m UDPConnMetrics, l *slog.Logger) {
 	buffer := make([]byte, serverUDPBufferSize)
 
 	expired := false
