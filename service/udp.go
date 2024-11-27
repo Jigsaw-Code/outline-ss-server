@@ -47,12 +47,6 @@ type UDPConnMetrics interface {
 // Max UDP buffer size for the server code.
 const serverUDPBufferSize = 64 * 1024
 
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, serverUDPBufferSize)
-	},
-}
-
 // Wrapper for slog.Debug during UDP proxying.
 func debugUDP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
@@ -91,6 +85,7 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 
 type packetHandler struct {
 	logger            *slog.Logger
+	bufferPool        sync.Pool
 	natTimeout        time.Duration
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
@@ -102,8 +97,14 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, ssMetrics
 	if ssMetrics == nil {
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
 	}
+	bufferPool := sync.Pool{
+		New: func() interface{} {
+			return make([]byte, serverUDPBufferSize)
+		},
+	}
 	return &packetHandler{
 		logger:            noopLogger(),
+		bufferPool:        bufferPool,
 		natTimeout:        natTimeout,
 		ciphers:           cipherList,
 		ssm:               ssMetrics,
@@ -138,9 +139,8 @@ type PacketHandleFunc func(conn net.Conn)
 func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc, metrics NATMetrics) {
 	nm := newNATmap()
 	defer nm.Close()
+	buffer := make([]byte, serverUDPBufferSize)
 	for {
-		buffer := bufferPool.Get().([]byte)
-		defer bufferPool.Put(buffer)
 		n, addr, err := clientConn.ReadFrom(buffer)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
@@ -210,10 +210,15 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 		return
 	}
 
+	cipherBuf := h.bufferPool.Get().([]byte)
+	textBuf := h.bufferPool.Get().([]byte)
+	defer func() {
+		h.bufferPool.Put(cipherBuf)
+		h.bufferPool.Put(textBuf)
+	}()
+
 	var cryptoKey *shadowsocks.EncryptionKey
 	var proxyTargetBytes int
-	cipherBuf := make([]byte, serverUDPBufferSize)
-	textBuf := make([]byte, serverUDPBufferSize)
 	for {
 		clientProxyBytes, err := clientConn.Read(cipherBuf)
 		if errors.Is(err, net.ErrClosed) {
