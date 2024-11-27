@@ -250,9 +250,9 @@ type udpConnMetrics struct {
 	accessKey  string
 }
 
-var _ service.UDPConnMetrics = (*udpConnMetrics)(nil)
+var _ service.UDPAssocationMetrics = (*udpConnMetrics)(nil)
 
-func newUDPConnMetrics(udpServiceMetrics *udpServiceMetrics, tunnelTimeMetrics *tunnelTimeMetrics, clientAddr net.Addr, clientInfo ipinfo.IPInfo) *udpConnMetrics {
+func newUDPAssocationMetrics(udpServiceMetrics *udpServiceMetrics, tunnelTimeMetrics *tunnelTimeMetrics, clientAddr net.Addr, clientInfo ipinfo.IPInfo) *udpConnMetrics {
 	return &udpConnMetrics{
 		udpServiceMetrics: udpServiceMetrics,
 		tunnelTimeMetrics: tunnelTimeMetrics,
@@ -515,10 +515,10 @@ func (m *serviceMetrics) AddOpenTCPConnection(clientConn net.Conn) service.TCPCo
 	return newTCPConnMetrics(m.tcpServiceMetrics, m.tunnelTimeMetrics, clientConn, clientInfo)
 }
 
-func (m *serviceMetrics) AddOpenUDPAssociation(clientConn net.Conn) service.UDPConnMetrics {
+func (m *serviceMetrics) AddOpenUDPAssociation(clientConn net.Conn) service.UDPAssocationMetrics {
 	clientAddr := clientConn.RemoteAddr()
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
-	return newUDPConnMetrics(m.udpServiceMetrics, m.tunnelTimeMetrics, clientAddr, clientInfo)
+	return newUDPAssocationMetrics(m.udpServiceMetrics, m.tunnelTimeMetrics, clientAddr, clientInfo)
 }
 
 func (m *serviceMetrics) AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration) {

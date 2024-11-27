@@ -37,14 +37,14 @@ type ShadowsocksConnMetrics interface {
 }
 
 type ServiceMetrics interface {
-	AddOpenUDPAssociation(conn net.Conn) UDPConnMetrics
+	AddOpenUDPAssociation(conn net.Conn) UDPAssocationMetrics
 	AddOpenTCPConnection(conn net.Conn) TCPConnMetrics
 	AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration)
 }
 
 type Service interface {
 	HandleStream(ctx context.Context, conn transport.StreamConn)
-	HandlePacket(conn net.Conn)
+	HandleAssociation(conn net.Conn)
 }
 
 // Option is a Shadowsocks service constructor option.
@@ -58,7 +58,7 @@ type ssService struct {
 	replayCache *ReplayCache
 
 	sh StreamHandler
-	ph PacketHandler
+	ah AssociationHandler
 }
 
 // NewShadowsocksService creates a new Shadowsocks service.
@@ -85,8 +85,8 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	)
 	s.sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
-	s.ph.SetLogger(s.logger)
+	s.ah = NewAssociationHandler(s.natTimeout, s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	s.ah.SetLogger(s.logger)
 
 	return s, nil
 }
@@ -129,20 +129,20 @@ func WithNatTimeout(natTimeout time.Duration) Option {
 
 // HandleStream handles a Shadowsocks stream-based connection.
 func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	var connMetrics TCPConnMetrics
+	var metrics TCPConnMetrics
 	if s.metrics != nil {
-		connMetrics = s.metrics.AddOpenTCPConnection(conn)
+		metrics = s.metrics.AddOpenTCPConnection(conn)
 	}
-	s.sh.Handle(ctx, conn, connMetrics)
+	s.sh.Handle(ctx, conn, metrics)
 }
 
-// HandlePacket handles a Shadowsocks packet connection.
-func (s *ssService) HandlePacket(conn net.Conn) {
-	var connMetrics UDPConnMetrics
+// HandleAssociation handles a Shadowsocks packet-based assocation.
+func (s *ssService) HandleAssociation(conn net.Conn) {
+	var metrics UDPAssocationMetrics
 	if s.metrics != nil {
-		connMetrics = s.metrics.AddOpenUDPAssociation(conn)
+		metrics = s.metrics.AddOpenUDPAssociation(conn)
 	}
-	s.ph.Handle(conn, connMetrics)
+	s.ah.Handle(conn, metrics)
 }
 
 type ssConnMetrics struct {

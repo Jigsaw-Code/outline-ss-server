@@ -268,40 +268,40 @@ type udpRecord struct {
 	in, out           int64
 }
 
-type fakeUDPConnMetrics struct {
+type fakeUDPAssocationMetrics struct {
 	clientAddr net.Addr
 	accessKey  string
 	up, down   []udpRecord
 	mu         sync.Mutex
 }
 
-var _ service.UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
+var _ service.UDPAssocationMetrics = (*fakeUDPAssocationMetrics)(nil)
 
-func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+func (m *fakeUDPAssocationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.up = append(m.up, udpRecord{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
 
-func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+func (m *fakeUDPAssocationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.down = append(m.down, udpRecord{m.clientAddr, m.accessKey, status, targetProxyBytes, proxyClientBytes})
 }
 
-func (m *fakeUDPConnMetrics) RemoveNatEntry() {
+func (m *fakeUDPAssocationMetrics) RemoveNatEntry() {
 	// Not tested because it requires waiting for a long timeout.
 }
 
 // Fake metrics implementation for UDP
 type fakeUDPMetrics struct {
-	connMetrics []fakeUDPConnMetrics
+	connMetrics []fakeUDPAssocationMetrics
 }
 
 var _ service.UDPMetrics = (*fakeUDPMetrics)(nil)
 
-func (m *fakeUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) service.UDPConnMetrics {
-	cm := fakeUDPConnMetrics{
+func (m *fakeUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) service.UDPAssocationMetrics {
+	cm := fakeUDPAssocationMetrics{
 		clientAddr: clientAddr,
 		accessKey:  accessKey,
 	}
