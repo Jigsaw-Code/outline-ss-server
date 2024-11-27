@@ -30,6 +30,12 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
+// NATMetrics is used to report NAT related metrics.
+type NATMetrics interface {
+	AddNATEntry()
+	RemoveNATEntry()
+}
+
 // UDPConnMetrics is used to report metrics on UDP connections.
 type UDPConnMetrics interface {
 	AddAuthenticated(accessKey string)
@@ -129,7 +135,7 @@ type PacketHandleFunc func(conn net.Conn)
 
 // PacketServe listens for packets and calls `handle` to handle them until the connection
 // returns [ErrClosed].
-func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
+func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc, metrics NATMetrics) {
 	nm := newNATmap()
 	defer nm.Close()
 	for {
@@ -145,17 +151,20 @@ func PacketServe(clientConn net.PacketConn, handle PacketHandleFunc) {
 		}
 		pkt := buffer[:n]
 
+		// TODO: Include server address in the NAT key as well.
 		conn := nm.Get(addr.String())
 		if conn == nil {
 			conn = &natconn{
 				Conn:   &packetConnWrapper{PacketConn: clientConn, raddr: addr},
 				readCh: make(chan []byte, 1),
 			}
+			metrics.AddNATEntry()
 			deleteEntry := nm.Add(addr, conn)
 			go func(conn *natconn) {
 				defer func() {
 					conn.Close()
 					deleteEntry()
+					metrics.RemoveNATEntry()
 				}()
 				handle(conn)
 			}(conn)

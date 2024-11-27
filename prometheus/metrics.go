@@ -292,8 +292,6 @@ type udpServiceMetrics struct {
 	proxyCollector *proxyCollector
 	// NOTE: New metrics need to be added to `newUDPCollector()`, `Describe()` and `Collect()`.
 	packetsFromClientPerLocation *prometheus.CounterVec
-	addedNatEntries              prometheus.Counter
-	removedNatEntries            prometheus.Counter
 	timeToCipherMs               prometheus.ObserverVec
 }
 
