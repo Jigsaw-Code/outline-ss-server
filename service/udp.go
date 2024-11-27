@@ -225,7 +225,7 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 			return
 		}
 		debugUDPAddr(h.logger, "Outbound packet.", clientConn.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
-		pkt := cipherBuf[:clientProxyBytes]
+		cipherData := cipherBuf[:clientProxyBytes]
 
 		connError := func() *onet.ConnectionError {
 			defer func() {
@@ -236,31 +236,40 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 				slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientConn.RemoteAddr().String()))
 			}()
 
+			var textData []byte
 			var err error
+
 			if cryptoKey == nil {
 				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var keyID string
 				var cryptoKey *shadowsocks.EncryptionKey
 				unpackStart := time.Now()
-				pkt, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, pkt, h.ciphers, h.logger)
+				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
 				timeToCipher := time.Since(unpackStart)
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
-				wrappedClientConn := shadowsocks.NewPacketConn(clientConn, cryptoKey)
-				clientConn = &packetConnWrapper{
-					PacketConn: wrappedClientConn,
-					raddr:      clientConn.RemoteAddr(),
+
+				if err != nil {
+					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
 				}
+
 				connMetrics.AddAuthenticated(keyID)
 				go func() {
 					defer connMetrics.AddClosed()
-					timedCopy(clientConn.RemoteAddr(), wrappedClientConn, targetConn, connMetrics, h.logger)
+					timedCopy(clientConn, targetConn, cryptoKey, connMetrics, h.logger)
 				}()
-			}
-			if err != nil {
-				return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack packet from client", err)
+
+			} else {
+				unpackStart := time.Now()
+				textData, err = shadowsocks.Unpack(nil, cipherData, cryptoKey)
+				timeToCipher := time.Since(unpackStart)
+				h.ssm.AddCipherSearch(err == nil, timeToCipher)
+
+				if err != nil {
+					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
+				}
 			}
 
-			payload, tgtUDPAddr, onetErr := h.validatePacket(pkt)
+			payload, tgtUDPAddr, onetErr := h.validatePacket(textData)
 			if onetErr != nil {
 				return onetErr
 			}
@@ -278,7 +287,7 @@ func (h *packetHandler) Handle(clientConn net.Conn, connMetrics UDPConnMetrics) 
 			h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
-		connMetrics.AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
+		connMetrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
 	}
 }
 
@@ -461,15 +470,34 @@ func (pcw *packetConnWrapper) RemoteAddr() net.Addr {
 	return pcw.raddr
 }
 
+// Get the maximum length of the shadowsocks address header by parsing
+// and serializing an IPv6 address from the example range.
+var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
+
 // copy from target to client until read timeout
-func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn net.PacketConn, m UDPConnMetrics, l *slog.Logger) {
-	buffer := make([]byte, serverUDPBufferSize)
+func timedCopy(clientConn net.Conn, targetConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, m UDPConnMetrics, l *slog.Logger) {
+	// pkt is used for in-place encryption of downstream UDP packets, with the layout
+	// [padding?][salt][address][body][tag][extra]
+	// Padding is only used if the address is IPv4.
+	pkt := make([]byte, serverUDPBufferSize)
+
+	saltSize := cryptoKey.SaltSize()
+	// Leave enough room at the beginning of the packet for a max-length header (i.e. IPv6).
+	bodyStart := saltSize + maxAddrLen
 
 	expired := false
 	for {
 		var bodyLen, proxyClientBytes int
 		connError := func() (connError *onet.ConnectionError) {
-			n, raddr, err := targetConn.ReadFrom(buffer)
+			var (
+				raddr net.Addr
+				err   error
+			)
+			// `readBuf` receives the plaintext body in `pkt`:
+			// [padding?][salt][address][body][tag][unused]
+			// |--     bodyStart     --|[      readBuf    ]
+			readBuf := pkt[bodyStart:]
+			bodyLen, raddr, err = targetConn.ReadFrom(readBuf)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok {
 					if netErr.Timeout() {
@@ -479,9 +507,29 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn net.Pa
 				}
 				return onet.NewConnectionError("ERR_READ", "Failed to read from target", err)
 			}
-			payload := buffer[:n]
-			debugUDPAddr(l, "Got response.", clientAddr, slog.Any("target", raddr))
-			proxyClientBytes, err = clientConn.WriteTo(payload, raddr)
+
+			debugUDPAddr(l, "Got response.", clientConn.RemoteAddr(), slog.Any("target", raddr))
+			srcAddr := socks.ParseAddr(raddr.String())
+			addrStart := bodyStart - len(srcAddr)
+			// `plainTextBuf` concatenates the SOCKS address and body:
+			// [padding?][salt][address][body][tag][unused]
+			// |-- addrStart -|[plaintextBuf ]
+			plaintextBuf := pkt[addrStart : bodyStart+bodyLen]
+			copy(plaintextBuf, srcAddr)
+
+			// saltStart is 0 if raddr is IPv6.
+			saltStart := addrStart - saltSize
+			// `packBuf` adds space for the salt and tag.
+			// `buf` shows the space that was used.
+			// [padding?][salt][address][body][tag][unused]
+			//           [            packBuf             ]
+			//           [          buf           ]
+			packBuf := pkt[saltStart:]
+			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, cryptoKey) // Encrypt in-place
+			if err != nil {
+				return onet.NewConnectionError("ERR_PACK", "Failed to pack data to client", err)
+			}
+			proxyClientBytes, err = clientConn.Write(buf)
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to client", err)
 			}
