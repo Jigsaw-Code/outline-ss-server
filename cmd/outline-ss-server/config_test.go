@@ -79,6 +79,18 @@ func TestValidateConfigFails(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "WithWebSocketWithoutOptions",
+			cfg: &Config{
+				Services: []ServiceConfig{
+					ServiceConfig{
+						Listeners: []ListenerConfig{
+							ListenerConfig{Type: listenerTypeWebSocket, Address: "[::]:9000"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -99,6 +111,20 @@ func TestReadConfig(t *testing.T) {
 				Listeners: []ListenerConfig{
 					ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
 					ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9000"},
+					ListenerConfig{
+						Type:    listenerTypeWebSocket,
+						Address: "[::]:8000",
+						Options: []ConfigOption{
+							{
+								Path:           "/tcp",
+								ConnectionType: connectionTypeStream,
+							},
+							{
+								Path:           "/udp",
+								ConnectionType: connectionTypePacket,
+							},
+						},
+					},
 				},
 				Keys: []KeyConfig{
 					KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
