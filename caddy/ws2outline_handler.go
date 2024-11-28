@@ -20,7 +20,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/caddyserver/caddy/v2"
@@ -146,40 +145,13 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, _ ca
 				return
 			}
 
-			conn := &natConn{
-				Conn:           &wrappedConn{Conn: wsConn, raddr: raddr},
-				mappingTimeout: 5 * time.Minute,
-				lastWrite:      time.Now(),
-			}
+			conn := &wrappedConn{Conn: wsConn, raddr: raddr}
 
 			if err = h.compiledHandler.Handle(layer4.WrapConnection(conn, []byte{}, h.zlogger), nil); err != nil {
 				h.logger.Error("failed to upgrade", "err", err)
 				w.WriteHeader(http.StatusBadGateway)
 				return
 			}
-
-			// Keep the handler alive to prevent the websocket server from closing the
-			// connection when the handler returns.
-			doneCh := make(chan struct{})
-			go func() {
-				timer := time.NewTimer(conn.mappingTimeout)
-				defer timer.Stop()
-				for {
-					select {
-					case <-timer.C:
-						h.logger.Info("inactivity timeout")
-						close(doneCh)
-						return
-					case <-doneCh:
-						return
-					default:
-						if time.Since(conn.lastWrite) < conn.mappingTimeout {
-							timer.Reset(conn.mappingTimeout)
-						}
-					}
-				}
-			}()
-			<-doneCh
 		}
 		websocket.Handler(handler).ServeHTTP(w, r)
 	}
@@ -210,17 +182,4 @@ func (c wsToStreamConn) CloseRead() error {
 
 func (c wsToStreamConn) CloseWrite() error {
 	return nil
-}
-
-type natConn struct {
-	net.Conn
-	mappingTimeout time.Duration
-	lastWrite      time.Time
-}
-
-func (c *natConn) Write(b []byte) (int, error) {
-	c.Conn.SetDeadline(time.Now().Add(c.mappingTimeout))
-	n, err := c.Conn.Write(b)
-	c.lastWrite = time.Now()
-	return n, err
 }
