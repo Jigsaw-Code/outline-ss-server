@@ -32,10 +32,6 @@ import (
 
 const (
 	wsModuleName = "http.handlers.ws2outline"
-
-	// Expire NAT connections after 5 minutes of idle time, as per
-	// https://datatracker.ietf.org/doc/html/rfc4787#section-4.3
-	natTimeout = 5 * time.Minute
 )
 
 func init() {
