@@ -86,10 +86,10 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 type associationHandler struct {
 	logger            *slog.Logger
 	bufferPool        sync.Pool
-	natTimeout        time.Duration
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
+	targetConnFactory func() (net.PacketConn, error)
 }
 
 var _ AssociationHandler = (*associationHandler)(nil)
@@ -107,10 +107,19 @@ func NewAssociationHandler(natTimeout time.Duration, cipherList CipherList, ssMe
 	return &associationHandler{
 		logger:            noopLogger(),
 		bufferPool:        bufferPool,
-		natTimeout:        natTimeout,
 		ciphers:           cipherList,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
+		targetConnFactory: func() (net.PacketConn, error) {
+			pc, err := net.ListenPacket("udp", "")
+			if err != nil {
+				return nil, fmt.Errorf("failed to create UDP socket: %v", err)
+			}
+			return &timedPacketConn{
+				PacketConn:     pc,
+				defaultTimeout: natTimeout,
+			}, nil
+		},
 	}
 }
 
@@ -121,6 +130,8 @@ type AssociationHandler interface {
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
+	// SetTargetConnFactory sets the function to be used to create new target connections.
+	SetTargetConnFactory(factory func() (net.PacketConn, error))
 }
 
 func (h *associationHandler) SetLogger(l *slog.Logger) {
@@ -132,6 +143,10 @@ func (h *associationHandler) SetLogger(l *slog.Logger) {
 
 func (h *associationHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
 	h.targetIPValidator = targetIPValidator
+}
+
+func (h *associationHandler) SetTargetConnFactory(factory func() (net.PacketConn, error)) {
+	h.targetConnFactory = factory
 }
 
 type AssocationHandleFunc func(assocation net.Conn)
@@ -206,7 +221,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 		connMetrics = &NoOpUDPAssocationMetrics{}
 	}
 
-	targetConn, err := newTargetConn(h.natTimeout)
+	targetConn, err := h.targetConnFactory()
 	if err != nil {
 		slog.Error("UDP: failed to create target connection", slog.Any("err", err))
 		return
@@ -258,6 +273,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 				go func() {
 					defer connMetrics.AddClosed()
 					timedCopy(clientAssociation, targetConn, cryptoKey, connMetrics, h.logger)
+					targetConn.Close()
 				}()
 
 			} else {
@@ -319,7 +335,7 @@ func isDNS(addr net.Addr) bool {
 	return port == "53"
 }
 
-type targetconn struct {
+type timedPacketConn struct {
 	net.PacketConn
 	// Connection timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
@@ -331,18 +347,7 @@ type targetconn struct {
 	fastClose sync.Once
 }
 
-func newTargetConn(defaultTimeout time.Duration) (net.PacketConn, error) {
-	pc, err := net.ListenPacket("udp", "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create UDP socket: %v", err)
-	}
-	return &targetconn{
-		PacketConn:     pc,
-		defaultTimeout: defaultTimeout,
-	}, nil
-}
-
-func (c *targetconn) onWrite(addr net.Addr) {
+func (c *timedPacketConn) onWrite(addr net.Addr) {
 	// Fast close is only allowed if there has been exactly one write,
 	// and it was a DNS query.
 	isDNS := isDNS(addr)
@@ -365,7 +370,7 @@ func (c *targetconn) onWrite(addr net.Addr) {
 	}
 }
 
-func (c *targetconn) onRead(addr net.Addr) {
+func (c *timedPacketConn) onRead(addr net.Addr) {
 	c.fastClose.Do(func() {
 		if isDNS(addr) {
 			// The next ReadFrom() should time out immediately.
@@ -374,12 +379,12 @@ func (c *targetconn) onRead(addr net.Addr) {
 	})
 }
 
-func (c *targetconn) WriteTo(buf []byte, dst net.Addr) (int, error) {
+func (c *timedPacketConn) WriteTo(buf []byte, dst net.Addr) (int, error) {
 	c.onWrite(dst)
 	return c.PacketConn.WriteTo(buf, dst)
 }
 
-func (c *targetconn) ReadFrom(buf []byte) (int, net.Addr, error) {
+func (c *timedPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
 	n, addr, err := c.PacketConn.ReadFrom(buf)
 	if err == nil {
 		c.onRead(addr)

@@ -261,53 +261,50 @@ func TestRestrictedAddresses(t *testing.T) {
 	assert.ElementsMatch(t, testMetrics.statuses, expectedStatus)
 }
 
+// Stub metrics implementation for testing NAT behaviors.
+
+type natTestMetrics struct {
+	natEntriesAdded int
+}
+
+var _ service.NATMetrics = (*natTestMetrics)(nil)
+
+func (m *natTestMetrics) AddNATEntry() {
+	m.natEntriesAdded++
+}
+func (m *natTestMetrics) RemoveNATEntry() {}
+
 // Metrics about one UDP packet.
 type udpRecord struct {
-	clientAddr        net.Addr
 	accessKey, status string
 	in, out           int64
 }
 
 type fakeUDPAssocationMetrics struct {
-	clientAddr net.Addr
-	accessKey  string
-	up, down   []udpRecord
-	mu         sync.Mutex
+	accessKey string
+	up, down  []udpRecord
+	mu        sync.Mutex
 }
 
 var _ service.UDPAssocationMetrics = (*fakeUDPAssocationMetrics)(nil)
 
+func (m *fakeUDPAssocationMetrics) AddAuthenticated(key string) {
+	m.accessKey = key
+}
+
 func (m *fakeUDPAssocationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.up = append(m.up, udpRecord{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
+	m.up = append(m.up, udpRecord{m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
 
 func (m *fakeUDPAssocationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.down = append(m.down, udpRecord{m.clientAddr, m.accessKey, status, targetProxyBytes, proxyClientBytes})
+	m.down = append(m.down, udpRecord{m.accessKey, status, targetProxyBytes, proxyClientBytes})
 }
 
-func (m *fakeUDPAssocationMetrics) RemoveNatEntry() {
-	// Not tested because it requires waiting for a long timeout.
-}
-
-// Fake metrics implementation for UDP
-type fakeUDPMetrics struct {
-	connMetrics []fakeUDPAssocationMetrics
-}
-
-var _ service.UDPMetrics = (*fakeUDPMetrics)(nil)
-
-func (m *fakeUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) service.UDPAssocationMetrics {
-	cm := fakeUDPAssocationMetrics{
-		clientAddr: clientAddr,
-		accessKey:  accessKey,
-	}
-	m.connMetrics = append(m.connMetrics, cm)
-	return &m.connMetrics[len(m.connMetrics)-1]
-}
+func (m *fakeUDPAssocationMetrics) AddClosed() {}
 
 func TestUDPEcho(t *testing.T) {
 	echoConn, echoRunning := startUDPEchoServer(t)
@@ -321,12 +318,14 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testMetrics := &fakeUDPMetrics{}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
+
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
+	natMetrics := &natTestMetrics{}
+	associationMetrics := &fakeUDPAssocationMetrics{}
 	go func() {
-		service.PacketServe(proxyConn, proxy.Handle)
+		service.PacketServe(proxyConn, func(conn net.Conn) { proxy.Handle(conn, associationMetrics) }, natMetrics)
 		done <- struct{}{}
 	}()
 
@@ -372,22 +371,20 @@ func TestUDPEcho(t *testing.T) {
 	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	keyID := snapshot[0].Value.(*service.CipherEntry).ID
 
-	require.Lenf(t, testMetrics.connMetrics, 1, "Wrong NAT count")
+	require.Equal(t, natMetrics.natEntriesAdded, 1, "Wrong NAT count")
 
-	testMetrics.connMetrics[0].mu.Lock()
-	defer testMetrics.connMetrics[0].mu.Unlock()
+	associationMetrics.mu.Lock()
+	defer associationMetrics.mu.Unlock()
 
-	require.Lenf(t, testMetrics.connMetrics[0].up, 1, "Wrong number of packets sent")
-	record := testMetrics.connMetrics[0].up[0]
-	require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad upstream metrics")
+	require.Lenf(t, associationMetrics.up, 1, "Wrong number of packets sent")
+	record := associationMetrics.up[0]
 	require.Equal(t, keyID, record.accessKey, "Bad upstream metrics")
 	require.Equal(t, "OK", record.status, "Bad upstream metrics")
 	require.Greater(t, record.in, record.out, "Bad upstream metrics")
 	require.Equal(t, int64(N), record.out, "Bad upstream metrics")
 
-	require.Lenf(t, testMetrics.connMetrics[0].down, 1, "Wrong number of packets received")
-	record = testMetrics.connMetrics[0].down[0]
-	require.Equal(t, conn.LocalAddr(), record.clientAddr, "Bad downstream metrics")
+	require.Lenf(t, associationMetrics.down, 1, "Wrong number of packets received")
+	record = associationMetrics.down[0]
 	require.Equal(t, keyID, record.accessKey, "Bad downstream metrics")
 	require.Equal(t, "OK", record.status, "Bad downstream metrics")
 	require.Greater(t, record.out, record.in, "Bad downstream metrics")
@@ -552,11 +549,11 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(server, proxy.Handle)
+		service.PacketServe(server, func(conn net.Conn) { proxy.Handle(conn, &service.NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
 		done <- struct{}{}
 	}()
 
@@ -596,11 +593,11 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(proxyConn, proxy.Handle)
+		service.PacketServe(proxyConn, func(conn net.Conn) { proxy.Handle(conn, &service.NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
 		done <- struct{}{}
 	}()
 
