@@ -36,7 +36,7 @@ type NATMetrics interface {
 	RemoveNATEntry()
 }
 
-// UDPAssocationMetrics is used to report metrics on UDP connections.
+// UDPAssocationMetrics is used to report metrics on UDP associations.
 type UDPAssocationMetrics interface {
 	AddAuthenticated(accessKey string)
 	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64)
