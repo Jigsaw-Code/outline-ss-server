@@ -151,8 +151,10 @@ func (h *associationHandler) SetTargetConnFactory(factory func() (net.PacketConn
 
 type AssocationHandleFunc func(assocation net.Conn)
 
-// PacketServe listens for packets and calls `handle` to handle them until the connection
-// returns [ErrClosed].
+// PacketServe listens for UDP packets on the provided [net.PacketConn], creates
+// creates and manages NAT associations, and invokes the provided `handle`
+// function for each association. It uses a NAT map to track active associations
+// and handles their lifecycle.
 func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics NATMetrics) {
 	nm := newNATmap()
 	defer nm.Close()
