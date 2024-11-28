@@ -35,5 +35,5 @@ Prometheus metrics are available on http://localhost:9091/metrics.
 From the repo's root directory, run the Caddy module directly from Go:
 
 ```sh
-go run ./cmd/caddy run --adapter yaml --config caddy/examples/simple.yml --watch
+go run -tags nomysql ./cmd/caddy run --adapter yaml --config caddy/examples/simple.yml --watch
 ```
