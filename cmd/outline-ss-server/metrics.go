@@ -17,6 +17,7 @@ package main
 import (
 	"time"
 
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -25,12 +26,15 @@ var now = time.Now
 
 type serverMetrics struct {
 	// NOTE: New metrics need to be added to `newPrometheusServerMetrics()`, `Describe()` and `Collect()`.
-	buildInfo  *prometheus.GaugeVec
-	accessKeys prometheus.Gauge
-	ports      prometheus.Gauge
+	buildInfo         *prometheus.GaugeVec
+	accessKeys        prometheus.Gauge
+	ports             prometheus.Gauge
+	addedNatEntries   prometheus.Counter
+	removedNatEntries prometheus.Counter
 }
 
 var _ prometheus.Collector = (*serverMetrics)(nil)
+var _ service.NATMetrics = (*serverMetrics)(nil)
 
 // newPrometheusServerMetrics constructs a Prometheus metrics collector for server
 // related metrics.
@@ -48,6 +52,16 @@ func newPrometheusServerMetrics() *serverMetrics {
 			Name: "ports",
 			Help: "Count of open ports",
 		}),
+		addedNatEntries: prometheus.NewCounter(prometheus.CounterOpts{
+			Subsystem: "udp",
+			Name:      "nat_entries_added",
+			Help:      "Entries added to the UDP NAT table",
+		}),
+		removedNatEntries: prometheus.NewCounter(prometheus.CounterOpts{
+			Subsystem: "udp",
+			Name:      "nat_entries_removed",
+			Help:      "Entries removed from the UDP NAT table",
+		}),
 	}
 }
 
@@ -55,12 +69,16 @@ func (m *serverMetrics) Describe(ch chan<- *prometheus.Desc) {
 	m.buildInfo.Describe(ch)
 	m.accessKeys.Describe(ch)
 	m.ports.Describe(ch)
+	m.addedNatEntries.Describe(ch)
+	m.removedNatEntries.Describe(ch)
 }
 
 func (m *serverMetrics) Collect(ch chan<- prometheus.Metric) {
 	m.buildInfo.Collect(ch)
 	m.accessKeys.Collect(ch)
 	m.ports.Collect(ch)
+	m.addedNatEntries.Collect(ch)
+	m.removedNatEntries.Collect(ch)
 }
 
 func (m *serverMetrics) SetVersion(version string) {
@@ -70,4 +88,12 @@ func (m *serverMetrics) SetVersion(version string) {
 func (m *serverMetrics) SetNumAccessKeys(numKeys int, ports int) {
 	m.accessKeys.Set(float64(numKeys))
 	m.ports.Set(float64(ports))
+}
+
+func (m *serverMetrics) AddNATEntry() {
+	m.addedNatEntries.Inc()
+}
+
+func (m *serverMetrics) RemoveNATEntry() {
+	m.removedNatEntries.Inc()
 }
