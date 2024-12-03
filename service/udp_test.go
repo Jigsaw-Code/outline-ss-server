@@ -19,7 +19,6 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"sync"
 	"testing"
 	"time"
 
@@ -215,14 +214,14 @@ func assertAlmostEqual(t *testing.T, a, b time.Time) {
 }
 
 func TestNATEmpty(t *testing.T) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	if nat.Get("foo") != nil {
 		t.Error("Expected nil value from empty NAT map")
 	}
 }
 
 func setupNAT() (*fakePacketConn, *fakePacketConn, *natconn) {
-	nat := newNATmap(timeout, &natTestMetrics{}, &sync.WaitGroup{})
+	nat := newNATmap(timeout, &natTestMetrics{}, noopLogger())
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	nat.Add(&clientAddr, clientConn, natCryptoKey, targetConn, "key id")
@@ -417,7 +416,7 @@ func BenchmarkUDPUnpackFail(b *testing.B) {
 	testIP := netip.MustParseAddr("192.0.2.1")
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		findAccessKeyUDP(testIP, textBuf, testPayload, cipherList)
+		findAccessKeyUDP(testIP, textBuf, testPayload, cipherList, noopLogger())
 	}
 }
 
@@ -447,7 +446,7 @@ func BenchmarkUDPUnpackRepeat(b *testing.B) {
 		cipherNumber := n % numCiphers
 		ip := ips[cipherNumber]
 		packet := packets[cipherNumber]
-		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
+		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList, noopLogger())
 		if err != nil {
 			b.Error(err)
 		}
@@ -476,7 +475,7 @@ func BenchmarkUDPUnpackSharedKey(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		ip := ips[n%numIPs]
-		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList)
+		_, _, _, err := findAccessKeyUDP(ip, testBuf, packet, cipherList, noopLogger())
 		if err != nil {
 			b.Error(err)
 		}

@@ -137,8 +137,14 @@ func TestTCPEcho(t *testing.T) {
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
+<<<<<<< HEAD
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout, &transport.TCPDialer{})
+=======
+	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{}, nil)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
+	handler.SetTargetDialer(&transport.TCPDialer{})
+>>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -215,8 +221,13 @@ func TestRestrictedAddresses(t *testing.T) {
 	require.NoError(t, err)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
+<<<<<<< HEAD
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout, tcpDefaultDialer)
+=======
+	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
+>>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -406,8 +417,14 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	}
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPConnMetrics{}
+<<<<<<< HEAD
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout, &transport.TCPDialer{})
+=======
+	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
+	handler.SetTargetDialer(&transport.TCPDialer{})
+>>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -472,8 +489,14 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPConnMetrics{}
+<<<<<<< HEAD
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
 	handler := service.NewStreamHandler(authFunc, testTimeout, &transport.TCPDialer{})
+=======
+	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{}, nil)
+	handler := service.NewStreamHandler(authFunc, testTimeout)
+	handler.SetTargetDialer(&transport.TCPDialer{})
+>>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(

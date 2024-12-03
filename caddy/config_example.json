@@ -1,0 +1,96 @@
+{
+    "admin": {
+        "disabled": true
+    },
+    "logging": {
+      "logs": {
+        "default": {"level":"DEBUG", "encoder": {"format":"console"}}
+      }
+    },
+    "apps": {
+        "http": {
+            "servers": {
+				"": {
+					"listen": [
+						":9091"
+					],
+					"routes": [
+						{
+							"match": [
+								{
+									"path": [
+										"/metrics"
+									]
+								}
+							],
+							"handle": [
+								{
+									"disable_openmetrics": true,
+									"handler": "metrics"
+								}
+							]
+						}
+					]
+				}
+            }
+        },
+        "layer4": {
+            "servers": {
+                "1": {
+                    "listen": [
+                        "tcp/[::]:9000",
+                        "udp/[::]:9000"
+                    ],
+                    "routes": [
+                        {
+                            "handle": [
+                                {
+                                    "handler": "shadowsocks",
+                                    "keys": [
+                                        {
+                                            "id": "user-0",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret0"
+                                        },
+                                        {
+                                            "id": "user-1",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret1"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "2": {
+                    "listen": [
+                        "tcp/[::]:9001",
+                        "udp/[::]:9001"
+                    ],
+                    "routes": [
+                        {
+                            "handle": [
+                                {
+                                    "handler": "shadowsocks",
+                                    "keys": [
+                                        {
+                                            "id": "user-2",
+                                            "cipher": "chacha20-ietf-poly1305",
+                                            "secret": "Secret2"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        "outline": {
+            "shadowsocks": {
+                "replay_history": 10000
+            }
+        }
+    }
+}

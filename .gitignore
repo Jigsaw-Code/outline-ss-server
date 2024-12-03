@@ -27,3 +27,10 @@
 
 # Go task
 /.task/
+
+# Go workspace
+go.work
+go.work.sum
+
+# Custom caddy binary
+/caddy/caddy

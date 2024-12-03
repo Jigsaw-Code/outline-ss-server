@@ -17,6 +17,9 @@ package service
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const keyID = "the key"
@@ -89,6 +92,81 @@ func TestReplayCache_Archive(t *testing.T) {
 			t.Error("First 10 vectors should have been forgotten")
 		}
 	}
+}
+
+func TestReplayCache_Resize(t *testing.T) {
+	t.Run("Smaller resizes active and archive maps", func(t *testing.T) {
+		salts := makeSalts(10)
+		cache := NewReplayCache(5)
+		for _, s := range salts {
+			cache.Add(keyID, s)
+		}
+
+		err := cache.Resize(3)
+
+		require.NoError(t, err)
+		assert.Equal(t, cache.capacity, 3, "Expected capacity to be updated")
+
+		// Adding a new salt should trigger a shrinking of the active map as it hits the new
+		// capacity immediately.
+		cache.Add(keyID, salts[0])
+		assert.Len(t, cache.active, 1, "Expected active handshakes length to have shrunk")
+		assert.Len(t, cache.archive, 5, "Expected archive handshakes length to not have shrunk")
+
+		// Adding more new salts should eventually trigger a shrinking of the archive map as well,
+		// when the shrunken active map gets moved to the archive.
+		for _, s := range salts {
+			cache.Add(keyID, s)
+		}
+		assert.Len(t, cache.archive, 3, "Expected archive handshakes length to have shrunk")
+	})
+
+	t.Run("Larger resizes active and archive maps", func(t *testing.T) {
+		salts := makeSalts(10)
+		cache := NewReplayCache(5)
+		for _, s := range salts {
+			cache.Add(keyID, s)
+		}
+
+		err := cache.Resize(10)
+
+		require.NoError(t, err)
+		assert.Equal(t, cache.capacity, 10, "Expected capacity to be updated")
+		assert.Len(t, cache.active, 5, "Expected active handshakes length not to have changed")
+		assert.Len(t, cache.archive, 5, "Expected archive handshakes length not to have changed")
+	})
+
+	t.Run("Still detect salts", func(t *testing.T) {
+		salts := makeSalts(10)
+		cache := NewReplayCache(5)
+		for _, s := range salts {
+			cache.Add(keyID, s)
+		}
+
+		cache.Resize(10)
+
+		for _, s := range salts {
+			if cache.Add(keyID, s) {
+				t.Error("Should still be able to detect the salts after resizing")
+			}
+		}
+
+		cache.Resize(3)
+
+		for _, s := range salts {
+			if cache.Add(keyID, s) {
+				t.Error("Should still be able to detect the salts after resizing")
+			}
+		}
+	})
+
+	t.Run("Exceeding maximum capacity", func(t *testing.T) {
+		cache := &ReplayCache{}
+
+		err := cache.Resize(MaxCapacity + 1)
+
+		require.Error(t, err)
+	})
 }
 
 // Benchmark to determine the memory usage of ReplayCache.
