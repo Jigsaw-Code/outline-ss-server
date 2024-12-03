@@ -70,17 +70,17 @@ func TestMethodsDontPanic(t *testing.T) {
 		TargetProxy: 3,
 		ProxyClient: 4,
 	}
-	addr := fakeAddr("127.0.0.1:9")
 
 	tcpMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
 	tcpMetrics.AddAuthenticated("0")
 	tcpMetrics.AddClosed("OK", proxyMetrics, 10*time.Millisecond)
 	tcpMetrics.AddProbe("ERR_CIPHER", "eof", proxyMetrics.ClientProxy)
 
-	udpMetrics := ssMetrics.AddUDPNatEntry(addr, "key-1")
+	udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})
+	udpMetrics.AddAuthenticated("0")
 	udpMetrics.AddPacketFromClient("OK", 10, 20)
 	udpMetrics.AddPacketFromTarget("OK", 10, 20)
-	udpMetrics.RemoveNatEntry()
+	udpMetrics.AddClosed()
 
 	ssMetrics.tcpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
 	ssMetrics.udpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
@@ -191,9 +191,7 @@ func BenchmarkProbe(b *testing.B) {
 
 func BenchmarkClientUDP(b *testing.B) {
 	ssMetrics, _ := NewServiceMetrics(nil)
-	addr := fakeAddr("127.0.0.1:9")
-	accessKey := "key 1"
-	udpMetrics := ssMetrics.AddUDPNatEntry(addr, accessKey)
+	udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})
 	status := "OK"
 	size := int64(1000)
 	b.ResetTimer()
@@ -204,9 +202,7 @@ func BenchmarkClientUDP(b *testing.B) {
 
 func BenchmarkTargetUDP(b *testing.B) {
 	ssMetrics, _ := NewServiceMetrics(nil)
-	addr := fakeAddr("127.0.0.1:9")
-	accessKey := "key 1"
-	udpMetrics := ssMetrics.AddUDPNatEntry(addr, accessKey)
+	udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})
 	status := "OK"
 	size := int64(1000)
 	b.ResetTimer()
@@ -215,12 +211,12 @@ func BenchmarkTargetUDP(b *testing.B) {
 	}
 }
 
-func BenchmarkNAT(b *testing.B) {
+func BenchmarkClose(b *testing.B) {
 	ssMetrics, _ := NewServiceMetrics(nil)
 	addr := fakeAddr("127.0.0.1:9")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		udpMetrics := ssMetrics.AddUDPNatEntry(addr, "key-0")
-		udpMetrics.RemoveNatEntry()
+		udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})
+		udpMetrics.AddClosed()
 	}
 }
