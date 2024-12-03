@@ -26,8 +26,10 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
+
+	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
 // NATMetrics is used to report NAT related metrics.
@@ -84,8 +86,9 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 }
 
 type associationHandler struct {
-	logger            *slog.Logger
-	bufferPool        sync.Pool
+	logger *slog.Logger
+	// bufPool stores the byte slices used for reading and decrypting packets.
+	bufPool           slicepool.Pool
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
@@ -94,19 +97,14 @@ type associationHandler struct {
 
 var _ AssociationHandler = (*associationHandler)(nil)
 
-// NewAssociationHandler creates a UDPService
+// NewAssociationHandler creates an AssociationHandler
 func NewAssociationHandler(natTimeout time.Duration, cipherList CipherList, ssMetrics ShadowsocksConnMetrics) AssociationHandler {
 	if ssMetrics == nil {
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
 	}
-	bufferPool := sync.Pool{
-		New: func() interface{} {
-			return make([]byte, serverUDPBufferSize)
-		},
-	}
 	return &associationHandler{
 		logger:            noopLogger(),
-		bufferPool:        bufferPool,
+		bufPool:           slicepool.MakePool(serverUDPBufferSize),
 		ciphers:           cipherList,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
@@ -229,18 +227,16 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 		return
 	}
 
-	cipherBuf := h.bufferPool.Get().([]byte)
-	textBuf := h.bufferPool.Get().([]byte)
-	defer func() {
-		h.bufferPool.Put(cipherBuf)
-		h.bufferPool.Put(textBuf)
-	}()
+	cipherLazySlice := h.bufPool.LazySlice()
+	textLazySlice := h.bufPool.LazySlice()
 
 	var cryptoKey *shadowsocks.EncryptionKey
 	var proxyTargetBytes int
 	for {
+		cipherBuf := cipherLazySlice.Acquire()
 		clientProxyBytes, err := clientAssociation.Read(cipherBuf)
 		if errors.Is(err, net.ErrClosed) {
+			cipherLazySlice.Release()
 			return
 		}
 		debugUDPAddr(h.logger, "Outbound packet.", clientAssociation.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
@@ -262,9 +258,11 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 				ip := clientAssociation.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var keyID string
 				var cryptoKey *shadowsocks.EncryptionKey
+				textBuf := textLazySlice.Acquire()
 				unpackStart := time.Now()
 				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
 				timeToCipher := time.Since(unpackStart)
+				textLazySlice.Release()
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
@@ -301,6 +299,8 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 			}
 			return nil
 		}()
+
+		cipherLazySlice.Release()
 
 		status := "OK"
 		if connError != nil {
