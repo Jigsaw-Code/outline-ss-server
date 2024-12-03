@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -57,6 +58,16 @@ func init() {
 		os.Stderr,
 		&tint.Options{NoColor: !term.IsTerminal(int(os.Stderr.Fd())), Level: logLevel},
 	)
+}
+
+type WebSocketStreamListener struct {
+	service.StreamListener
+}
+
+var _ net.Listener = (*WebSocketStreamListener)(nil)
+
+func (t *WebSocketStreamListener) Accept() (net.Conn, error) {
+	return t.StreamListener.AcceptStream()
 }
 
 type OutlineServer struct {
@@ -276,13 +287,16 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
 						go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
 					case listenerTypeWebSocket:
+						ln, err := lnSet.ListenStream(lnConfig.Address)
+						if err != nil {
+							return err
+						}
+						mux := http.NewServeMux()
 						for _, option := range lnConfig.Options {
 							switch option.ConnectionType {
 							case connectionTypeStream:
-								http.HandleFunc(option.Path, func(w http.ResponseWriter, r *http.Request) {
-									fmt.Println("STREAM FOUND")
+								handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 									handler := func(wsConn *websocket.Conn) {
-										//defer wsConn.Close()
 										ctx, contextCancel := context.WithCancel(context.Background())
 										defer contextCancel()
 										raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
@@ -296,9 +310,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 									}
 									websocket.Handler(handler).ServeHTTP(w, r)
 								})
+								mux.Handle(option.Path, http.StripPrefix(option.Path, handler))
 							case connectionTypePacket:
-								http.HandleFunc(option.Path, func(w http.ResponseWriter, r *http.Request) {
-									fmt.Println("PACKET FOUND")
+								handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 									handler := func(wsConn *websocket.Conn) {
 										raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
 										if err != nil {
@@ -311,13 +325,15 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 									}
 									websocket.Handler(handler).ServeHTTP(w, r)
 								})
+								mux.Handle(option.Path, http.StripPrefix(option.Path, handler))
 							}
-
-							slog.Info("WebSocket service started.", "address", lnConfig.Address, "path", option.Path)
+							slog.Info("WebSocket service started.", "address", ln.Addr().String(), "path", option.Path)
 						}
+						server := http.Server{Handler: mux}
 						go func() {
-							err := http.ListenAndServe(lnConfig.Address, nil)
-							if err != nil {
+							defer server.Shutdown(context.Background())
+							err := server.Serve(&WebSocketStreamListener{ln})
+							if err != nil && err != http.ErrServerClosed && !isErrClosing(err) {
 								slog.Error("Failed to run HTTP server.", "err", err)
 							}
 						}()
@@ -360,6 +376,10 @@ func (s *OutlineServer) Stop() error {
 	}
 	slog.Info("Stopped all listeners for running config.")
 	return nil
+}
+
+func isErrClosing(err error) bool {
+	return strings.Contains(err.Error(), "use of closed network connection")
 }
 
 // RunOutlineServer starts an Outline server running, and returns the server or an error.
