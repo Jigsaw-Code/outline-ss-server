@@ -305,7 +305,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 											w.WriteHeader(http.StatusBadGateway)
 											return
 										}
-										conn := &wsToStreamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
+										conn := &streamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
 										ssService.HandleStream(ctx, conn)
 									}
 									websocket.Handler(handler).ServeHTTP(w, r)
@@ -418,19 +418,18 @@ func (c wrappedConn) RemoteAddr() net.Addr {
 	return c.raddr
 }
 
-// wsToStreamConn converts a [websocket.Conn] to a [transport.StreamConn].
-type wsToStreamConn struct {
+type streamConn struct {
 	net.Conn
 }
 
-var _ transport.StreamConn = (*wsToStreamConn)(nil)
+var _ transport.StreamConn = (*streamConn)(nil)
 
-func (c wsToStreamConn) CloseRead() error {
+func (c *streamConn) CloseRead() error {
 	return c.Close()
 }
 
-func (c wsToStreamConn) CloseWrite() error {
-	return nil
+func (c *streamConn) CloseWrite() error {
+	return c.Close()
 }
 
 func main() {
