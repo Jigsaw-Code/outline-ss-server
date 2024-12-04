@@ -213,7 +213,6 @@ func BenchmarkTargetUDP(b *testing.B) {
 
 func BenchmarkClose(b *testing.B) {
 	ssMetrics, _ := NewServiceMetrics(nil)
-	addr := fakeAddr("127.0.0.1:9")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})

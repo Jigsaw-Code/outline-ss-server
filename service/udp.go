@@ -17,7 +17,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -173,7 +172,8 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 		if conn == nil {
 			conn = &natconn{
 				Conn:   &packetConnWrapper{PacketConn: clientConn, raddr: addr},
-				readCh: make(chan []byte, 1),
+				readBufCh: make(chan []byte, 1),
+				bytesReadCh: make(chan int, 1),
 			}
 			metrics.AddNATEntry()
 			deleteEntry := nm.Add(addr, conn)
@@ -186,32 +186,44 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 				handle(conn)
 			}(conn)
 		}
-		conn.readCh <- pkt
+		readBuf, ok := <-conn.readBufCh
+		if !ok {
+			continue
+		}
+		copy(readBuf, pkt)
+		conn.bytesReadCh <- n
 	}
 }
 
+// natconn adapts a [net.Conn] to provide a synchronized reading mechanism for NAT traversal.
+//
+// The application provides the buffer to `Read()` (BYOB: Bring Your Own Buffer!)
+// which minimizes buffer allocations and copying.
 type natconn struct {
 	net.Conn
-	readCh chan []byte
+
+	// readBufCh provides a buffer to copy incoming packet data into.
+	readBufCh chan []byte 
+
+	// bytesReadCh is used to signal the availability of new data and carries
+	// the length of the received packet.
+	bytesReadCh chan int
 }
 
 var _ net.Conn = (*natconn)(nil)
 
 func (c *natconn) Read(p []byte) (int, error) {
-	select {
-	case pkt := <-c.readCh:
-		if pkt == nil {
-			break
-		}
-		return copy(p, pkt), nil
-	case <-time.After(30 * time.Second):
-		break
+	c.readBufCh <- p
+	n, ok := <-c.bytesReadCh
+	if !ok {
+		return 0, net.ErrClosed
 	}
-	return 0, io.EOF
+	return n, nil
 }
 
 func (c *natconn) Close() error {
-	close(c.readCh)
+	close(c.readBufCh)
+	close(c.bytesReadCh)
 	c.Conn.Close()
 	return nil
 }
@@ -228,20 +240,21 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 	}
 
 	cipherLazySlice := h.bufPool.LazySlice()
+	cipherBuf := cipherLazySlice.Acquire()
+	defer cipherLazySlice.Release()
+
 	textLazySlice := h.bufPool.LazySlice()
 
 	var cryptoKey *shadowsocks.EncryptionKey
 	var proxyTargetBytes int
 	for {
-		cipherBuf := cipherLazySlice.Acquire()
 		clientProxyBytes, err := clientAssociation.Read(cipherBuf)
 		if errors.Is(err, net.ErrClosed) {
 			cipherLazySlice.Release()
 			return
 		}
 		debugUDPAddr(h.logger, "Outbound packet.", clientAssociation.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
-		cipherData := cipherBuf[:clientProxyBytes]
-
+		
 		connError := func() *onet.ConnectionError {
 			defer func() {
 				if r := recover(); r != nil {
@@ -251,6 +264,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 				slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAssociation.RemoteAddr().String()))
 			}()
 
+			cipherData := cipherBuf[:clientProxyBytes]
 			var textData []byte
 			var err error
 
@@ -299,8 +313,6 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 			}
 			return nil
 		}()
-
-		cipherLazySlice.Release()
 
 		status := "OK"
 		if connError != nil {
