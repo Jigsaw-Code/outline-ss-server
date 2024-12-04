@@ -16,6 +16,7 @@ package main
 
 import (
 	"container/list"
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,10 +24,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
@@ -34,6 +37,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/net/websocket"
 	"golang.org/x/term"
 )
 
@@ -54,6 +58,16 @@ func init() {
 		os.Stderr,
 		&tint.Options{NoColor: !term.IsTerminal(int(os.Stderr.Fd())), Level: logLevel},
 	)
+}
+
+type WebSocketStreamListener struct {
+	service.StreamListener
+}
+
+var _ net.Listener = (*WebSocketStreamListener)(nil)
+
+func (t *WebSocketStreamListener) Accept() (net.Conn, error) {
+	return t.StreamListener.AcceptStream()
 }
 
 type OutlineServer struct {
@@ -272,6 +286,57 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						}
 						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
 						go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
+					case listenerTypeWebSocket:
+						ln, err := lnSet.ListenStream(lnConfig.Address)
+						if err != nil {
+							return err
+						}
+						mux := http.NewServeMux()
+						for _, option := range lnConfig.Options {
+							switch option.ConnectionType {
+							case connectionTypeStream:
+								handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+									handler := func(wsConn *websocket.Conn) {
+										ctx, contextCancel := context.WithCancel(context.Background())
+										defer contextCancel()
+										raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+										if err != nil {
+											slog.Error("failed to upgrade", "err", err)
+											w.WriteHeader(http.StatusBadGateway)
+											return
+										}
+										conn := &streamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
+										ssService.HandleStream(ctx, conn)
+									}
+									websocket.Handler(handler).ServeHTTP(w, r)
+								})
+								mux.Handle(option.Path, http.StripPrefix(option.Path, handler))
+							case connectionTypePacket:
+								handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+									handler := func(wsConn *websocket.Conn) {
+										raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
+										if err != nil {
+											slog.Error("failed to upgrade", "err", err)
+											w.WriteHeader(http.StatusBadGateway)
+											return
+										}
+										conn := &wrappedConn{Conn: wsConn, raddr: raddr}
+										ssService.HandleAssociation(conn)
+									}
+									websocket.Handler(handler).ServeHTTP(w, r)
+								})
+								mux.Handle(option.Path, http.StripPrefix(option.Path, handler))
+							}
+							slog.Info("WebSocket service started.", "address", ln.Addr().String(), "path", option.Path)
+						}
+						server := http.Server{Handler: mux}
+						go func() {
+							defer server.Shutdown(context.Background())
+							err := server.Serve(&WebSocketStreamListener{ln})
+							if err != nil && err != http.ErrServerClosed && !isErrClosing(err) {
+								slog.Error("Failed to run HTTP server.", "err", err)
+							}
+						}()
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)
@@ -313,6 +378,10 @@ func (s *OutlineServer) Stop() error {
 	return nil
 }
 
+func isErrClosing(err error) bool {
+	return strings.Contains(err.Error(), "use of closed network connection")
+}
+
 // RunOutlineServer starts an Outline server running, and returns the server or an error.
 func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *serverMetrics, serviceMetrics service.ServiceMetrics, replayHistory int) (*OutlineServer, error) {
 	server := &OutlineServer{
@@ -337,6 +406,30 @@ func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *
 		}
 	}()
 	return server, nil
+}
+
+// wrappedConn overrides [websocket.Conn]'s remote address handling.
+type wrappedConn struct {
+	*websocket.Conn
+	raddr net.Addr
+}
+
+func (c wrappedConn) RemoteAddr() net.Addr {
+	return c.raddr
+}
+
+type streamConn struct {
+	net.Conn
+}
+
+var _ transport.StreamConn = (*streamConn)(nil)
+
+func (c *streamConn) CloseRead() error {
+	return c.Close()
+}
+
+func (c *streamConn) CloseWrite() error {
+	return c.Close()
 }
 
 func main() {

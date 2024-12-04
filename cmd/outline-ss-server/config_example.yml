@@ -20,6 +20,15 @@ services:
         address: "[::]:9000"
       - type: udp
         address: "[::]:9000"
+      - type: websocket
+        address: "[::]:8000"
+        options:
+        # TCP over WebSocket
+        - path: "/tcp"
+          connection_type: "stream"
+        # UDP over WebSocket
+        - path: "/udp"
+          connection_type: "packet"
     keys:
         - id: user-0
           cipher: chacha20-ietf-poly1305

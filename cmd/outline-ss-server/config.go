@@ -28,12 +28,30 @@ type ServiceConfig struct {
 
 type ListenerType string
 
-const listenerTypeTCP ListenerType = "tcp"
-const listenerTypeUDP ListenerType = "udp"
+const (
+	listenerTypeTCP       ListenerType = "tcp"
+	listenerTypeUDP       ListenerType = "udp"
+	listenerTypeWebSocket ListenerType = "websocket"
+)
+
+type ConnectionType string
+
+const (
+	connectionTypeStream ConnectionType = "stream"
+	connectionTypePacket ConnectionType = "packet"
+)
+
+type ConfigOption struct {
+	Path           string         `yaml:"path"`
+	ConnectionType ConnectionType `yaml:"connection_type"`
+}
 
 type ListenerConfig struct {
 	Type    ListenerType
 	Address string
+
+	// WebSocket config options
+	Options []ConfigOption `yaml:"options,omitempty"`
 }
 
 type KeyConfig struct {
@@ -60,23 +78,55 @@ func (c *Config) Validate() error {
 	existingListeners := make(map[string]bool)
 	for _, serviceConfig := range c.Services {
 		for _, lnConfig := range serviceConfig.Listeners {
-			// TODO: Support more listener types.
-			if lnConfig.Type != listenerTypeTCP && lnConfig.Type != listenerTypeUDP {
+			var key string
+			switch lnConfig.Type {
+			case listenerTypeTCP, listenerTypeUDP:
+				if err := validateAddress(lnConfig.Address); err != nil {
+					return err
+				}
+				key = fmt.Sprintf("%s/%s", lnConfig.Type, lnConfig.Address)
+				if _, exists := existingListeners[key]; exists {
+					return fmt.Errorf("listener of type `%s` with address `%s` already exists.", lnConfig.Type, lnConfig.Address)
+				}
+
+			case listenerTypeWebSocket:
+				if err := validateAddress(lnConfig.Address); err != nil {
+					return err
+				}
+				if len(lnConfig.Options) == 0 {
+					return fmt.Errorf("listener type `%s` requires at least one option", lnConfig.Type)
+				}
+				for _, option := range lnConfig.Options {
+					if option.Path == "" {
+						return fmt.Errorf("listener type `%s` requires a `path` for each option", lnConfig.Type)
+					}
+					if option.ConnectionType != connectionTypeStream && option.ConnectionType != connectionTypePacket {
+						return fmt.Errorf("unsupported connection type: %s", option.ConnectionType)
+					}
+					key = fmt.Sprintf("%s/%s/%s", lnConfig.Type, lnConfig.Address, option.Path)
+					if _, exists := existingListeners[key]; exists {
+						return fmt.Errorf("listener of type `%s` with address `%s` and path `%s` already exists.", lnConfig.Type, lnConfig.Address, option.Path)
+					}
+					existingListeners[key] = true
+				}
+
+			default:
 				return fmt.Errorf("unsupported listener type: %s", lnConfig.Type)
 			}
-			host, _, err := net.SplitHostPort(lnConfig.Address)
-			if err != nil {
-				return fmt.Errorf("invalid listener address `%s`: %v", lnConfig.Address, err)
-			}
-			if ip := net.ParseIP(host); ip == nil {
-				return fmt.Errorf("address must be IP, found: %s", host)
-			}
-			key := string(lnConfig.Type) + "/" + lnConfig.Address
-			if _, exists := existingListeners[key]; exists {
-				return fmt.Errorf("listener of type %s with address %s already exists.", lnConfig.Type, lnConfig.Address)
-			}
+
 			existingListeners[key] = true
 		}
+	}
+	return nil
+}
+
+func validateAddress(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid listener address `%s`: %v", addr, err)
+	}
+	if ip := net.ParseIP(host); ip == nil {
+		return fmt.Errorf("address must be IP, found: %s", host)
 	}
 	return nil
 }
