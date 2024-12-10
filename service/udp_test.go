@@ -195,6 +195,24 @@ func startTestHandler() (AssociationHandler, func(target net.Addr, payload []byt
 	}, targetConn
 }
 
+func TestNatconnCloseWhileReading(t *testing.T) {
+	nc := &natconn{
+		PacketConn:  makePacketConn(),
+		raddr:       &clientAddr,
+		doneCh:      make(chan struct{}),
+		readBufCh:   make(chan []byte, 1),
+		bytesReadCh: make(chan int, 1),
+	}
+	go func() {
+		buf := make([]byte, 1024)
+		nc.Read(buf)
+	}()
+
+	err := nc.Close()
+
+	assert.NoError(t, err, "Close should not panic or return an error")
+}
+
 func TestAssociationHandler_Handle_IPFilter(t *testing.T) {
 	t.Run("RequirePublicIP blocks localhost", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()

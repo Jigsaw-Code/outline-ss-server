@@ -171,9 +171,10 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 		conn := nm.Get(addr.String())
 		if conn == nil {
 			conn = &natconn{
-				PacketConn: clientConn,
-				raddr: addr,
-				readBufCh: make(chan []byte, 1),
+				PacketConn:  clientConn,
+				raddr:       addr,
+				doneCh:      make(chan struct{}),
+				readBufCh:   make(chan []byte, 1),
 				bytesReadCh: make(chan int, 1),
 			}
 			metrics.AddNATEntry()
@@ -202,10 +203,11 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 // which minimizes buffer allocations and copying.
 type natconn struct {
 	net.PacketConn
-	raddr net.Addr
+	raddr  net.Addr
+	doneCh chan struct{}
 
 	// readBufCh provides a buffer to copy incoming packet data into.
-	readBufCh chan []byte 
+	readBufCh chan []byte
 
 	// bytesReadCh is used to signal the availability of new data and carries
 	// the length of the received packet.
@@ -215,12 +217,16 @@ type natconn struct {
 var _ net.Conn = (*natconn)(nil)
 
 func (c *natconn) Read(p []byte) (int, error) {
-	c.readBufCh <- p
-	n, ok := <-c.bytesReadCh
-	if !ok {
+	select {
+	case c.readBufCh <- p:
+		n, ok := <-c.bytesReadCh
+		if !ok {
+			return 0, net.ErrClosed
+		}
+		return n, nil
+	case <-c.doneCh:
 		return 0, net.ErrClosed
 	}
-	return n, nil
 }
 
 func (c *natconn) Write(b []byte) (n int, err error) {
@@ -228,16 +234,14 @@ func (c *natconn) Write(b []byte) (n int, err error) {
 }
 
 func (c *natconn) Close() error {
+	close(c.doneCh)
 	close(c.readBufCh)
 	close(c.bytesReadCh)
-	c.PacketConn.Close()
-	return nil
+	return c.PacketConn.Close()
 }
-
 func (c *natconn) RemoteAddr() net.Addr {
 	return c.raddr
 }
-
 
 func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPAssocationMetrics) {
 	if connMetrics == nil {
@@ -265,7 +269,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 			return
 		}
 		debugUDPAddr(h.logger, "Outbound packet.", clientAssociation.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
-		
+
 		connError := func() *onet.ConnectionError {
 			defer func() {
 				if r := recover(); r != nil {
