@@ -179,7 +179,7 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 			}
 			metrics.AddNATEntry()
 			deleteEntry := nm.Add(addr, conn)
-			go func(conn *natconn) {
+			go func(conn net.Conn) {
 				defer func() {
 					conn.Close()
 					deleteEntry()
@@ -239,6 +239,7 @@ func (c *natconn) Close() error {
 	close(c.bytesReadCh)
 	return c.PacketConn.Close()
 }
+
 func (c *natconn) RemoteAddr() net.Addr {
 	return c.raddr
 }
@@ -437,33 +438,18 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-func (m *natmap) set(key string, pc *natconn) {
-	m.Lock()
-	defer m.Unlock()
-
-	m.keyConn[key] = pc
-	return
-}
-
-func (m *natmap) del(key string) *natconn {
-	m.Lock()
-	defer m.Unlock()
-
-	entry, ok := m.keyConn[key]
-	if ok {
-		delete(m.keyConn, key)
-		return entry
-	}
-	return nil
-}
-
 // Add adds a new UDP NAT entry to the natmap and returns a closure to delete
 // the entry.
 func (m *natmap) Add(addr net.Addr, pc *natconn) func() {
+	m.Lock()
+	defer m.Unlock()
+
 	key := addr.String()
-	m.set(key, pc)
+	m.keyConn[key] = pc
 	return func() {
-		m.del(key)
+		m.Lock()
+		defer m.Unlock()
+		delete(m.keyConn, key)
 	}
 }
 
