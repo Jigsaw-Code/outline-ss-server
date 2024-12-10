@@ -58,10 +58,12 @@ type LegacyKeyServiceConfig struct {
 	Port      int `yaml:"port"`
 }
 
+type WebConfig struct {
+	Servers []WebServerConfig `yaml:"servers"`
+}
+
 type Config struct {
-	Web struct {
-		Servers []WebServerConfig `yaml:"servers"`
-	} `yaml:"web"`
+	Web WebConfig `yaml:"web"`
 	Services []ServiceConfig `yaml:"services"`
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
@@ -103,14 +105,17 @@ func (c *Config) Validate() error {
 				}
 			case listenerTypeWebsocketStream, listenerTypeWebsocketPacket:
 				if lnConfig.WebServer == "" {
-					return fmt.Errorf("listener type `%s` requires an http server reference", lnConfig.Type)
+					return fmt.Errorf("listener type `%s` requires a `web_server`", lnConfig.Type)
+				}
+				if lnConfig.Path == "" {
+					return fmt.Errorf("listener type `%s` requires a `path`", lnConfig.Type)
 				}
 				if _, exists := existingWebServers[lnConfig.WebServer]; !exists {
 					return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
 				}
 				key = fmt.Sprintf("%s/%s", lnConfig.Type, lnConfig.WebServer)
 				if _, exists := existingListeners[key]; exists {
-					return fmt.Errorf("listener of type `%s` with http server `%s` already exists.", lnConfig.Type, lnConfig.WebServer)
+					return fmt.Errorf("listener of type `%s` with web server `%s` already exists.", lnConfig.Type, lnConfig.WebServer)
 				}
 			default:
 				return fmt.Errorf("unsupported listener type: %s", lnConfig.Type)
