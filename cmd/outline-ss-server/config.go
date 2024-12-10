@@ -22,59 +22,72 @@ import (
 )
 
 type ServiceConfig struct {
-	Listeners []ListenerConfig
-	Keys      []KeyConfig
+	Listeners []ListenerConfig `yaml:"listeners"`
+	Keys      []KeyConfig      `yaml:"keys"`
 }
 
 type ListenerType string
 
 const (
-	listenerTypeTCP       ListenerType = "tcp"
-	listenerTypeUDP       ListenerType = "udp"
-	listenerTypeWebSocket ListenerType = "websocket"
+	listenerTypeTCP             ListenerType = "tcp"
+	listenerTypeUDP             ListenerType = "udp"
+	listenerTypeWebsocketStream ListenerType = "websocket-stream"
+	listenerTypeWebsocketPacket ListenerType = "websocket-packet"
 )
 
-type ConnectionType string
-
-const (
-	connectionTypeStream ConnectionType = "stream"
-	connectionTypePacket ConnectionType = "packet"
-)
-
-type ConfigOption struct {
-	Path           string         `yaml:"path"`
-	ConnectionType ConnectionType `yaml:"connection_type"`
+type WebServerConfig struct {
+	ID        string   `yaml:"id"`
+	Listeners []string `yaml:"listen"`
 }
 
 type ListenerConfig struct {
-	Type    ListenerType
-	Address string
-
-	// WebSocket config options
-	Options []ConfigOption `yaml:"options,omitempty"`
+	Type      ListenerType `yaml:"type"`
+	Address   string       `yaml:"address,omitempty"`
+	WebServer string       `yaml:"web_server,omitempty"`
+	Path      string       `yaml:"path,omitempty"`
 }
 
 type KeyConfig struct {
-	ID     string
-	Cipher string
-	Secret string
+	ID     string `yaml:"id"`
+	Cipher string `yaml:"cipher"`
+	Secret string `yaml:"secret"`
 }
 
 type LegacyKeyServiceConfig struct {
 	KeyConfig `yaml:",inline"`
-	Port      int
+	Port      int `yaml:"port"`
 }
 
 type Config struct {
-	Services []ServiceConfig
+	Web struct {
+		Servers []WebServerConfig `yaml:"servers"`
+	} `yaml:"web"`
+	Services []ServiceConfig `yaml:"services"`
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
 	// using the newer `services` format.
-	Keys []LegacyKeyServiceConfig
+	Keys []LegacyKeyServiceConfig `yaml:"keys"`
 }
 
 // Validate checks that the config is valid.
 func (c *Config) Validate() error {
+	existingWebServers := make(map[string]bool)
+	for _, srv := range c.Web.Servers {
+		if srv.ID == "" {
+			return fmt.Errorf("web server must have an ID")
+		}
+		if _, exists := existingWebServers[srv.ID]; exists {
+			return fmt.Errorf("web server with ID `%s` already exists", srv.ID)
+		}
+		existingWebServers[srv.ID] = true
+
+		for _, addr := range srv.Listeners {
+			if err := validateAddress(addr); err != nil {
+				return fmt.Errorf("invalid listener for web server `%s`: %w", srv.ID, err)
+			}
+		}
+	}
+
 	existingListeners := make(map[string]bool)
 	for _, serviceConfig := range c.Services {
 		for _, lnConfig := range serviceConfig.Listeners {
@@ -88,28 +101,17 @@ func (c *Config) Validate() error {
 				if _, exists := existingListeners[key]; exists {
 					return fmt.Errorf("listener of type `%s` with address `%s` already exists.", lnConfig.Type, lnConfig.Address)
 				}
-
-			case listenerTypeWebSocket:
-				if err := validateAddress(lnConfig.Address); err != nil {
-					return err
+			case listenerTypeWebsocketStream, listenerTypeWebsocketPacket:
+				if lnConfig.WebServer == "" {
+					return fmt.Errorf("listener type `%s` requires an http server reference", lnConfig.Type)
 				}
-				if len(lnConfig.Options) == 0 {
-					return fmt.Errorf("listener type `%s` requires at least one option", lnConfig.Type)
+				if _, exists := existingWebServers[lnConfig.WebServer]; !exists {
+					return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
 				}
-				for _, option := range lnConfig.Options {
-					if option.Path == "" {
-						return fmt.Errorf("listener type `%s` requires a `path` for each option", lnConfig.Type)
-					}
-					if option.ConnectionType != connectionTypeStream && option.ConnectionType != connectionTypePacket {
-						return fmt.Errorf("unsupported connection type: %s", option.ConnectionType)
-					}
-					key = fmt.Sprintf("%s/%s/%s", lnConfig.Type, lnConfig.Address, option.Path)
-					if _, exists := existingListeners[key]; exists {
-						return fmt.Errorf("listener of type `%s` with address `%s` and path `%s` already exists.", lnConfig.Type, lnConfig.Address, option.Path)
-					}
-					existingListeners[key] = true
+				key = fmt.Sprintf("%s/%s", lnConfig.Type, lnConfig.WebServer)
+				if _, exists := existingListeners[key]; exists {
+					return fmt.Errorf("listener of type `%s` with http server `%s` already exists.", lnConfig.Type, lnConfig.WebServer)
 				}
-
 			default:
 				return fmt.Errorf("unsupported listener type: %s", lnConfig.Type)
 			}
