@@ -429,6 +429,7 @@ func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *
 	return server, nil
 }
 
+// TODO: Create a dedicated `ClientConn` struct with `ClientAddr` and `Conn`.
 // wrappedConn overrides [websocket.Conn]'s remote address handling.
 type wrappedConn struct {
 	*websocket.Conn
