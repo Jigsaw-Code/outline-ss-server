@@ -171,7 +171,8 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 		conn := nm.Get(addr.String())
 		if conn == nil {
 			conn = &natconn{
-				Conn:   &packetConnWrapper{PacketConn: clientConn, raddr: addr},
+				PacketConn: clientConn,
+				raddr: addr,
 				readBufCh: make(chan []byte, 1),
 				bytesReadCh: make(chan int, 1),
 			}
@@ -200,7 +201,8 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 // The application provides the buffer to `Read()` (BYOB: Bring Your Own Buffer!)
 // which minimizes buffer allocations and copying.
 type natconn struct {
-	net.Conn
+	net.PacketConn
+	raddr net.Addr
 
 	// readBufCh provides a buffer to copy incoming packet data into.
 	readBufCh chan []byte 
@@ -221,12 +223,21 @@ func (c *natconn) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+func (c *natconn) Write(b []byte) (n int, err error) {
+	return c.PacketConn.WriteTo(b, c.raddr)
+}
+
 func (c *natconn) Close() error {
 	close(c.readBufCh)
 	close(c.bytesReadCh)
-	c.Conn.Close()
+	c.PacketConn.Close()
 	return nil
 }
+
+func (c *natconn) RemoteAddr() net.Addr {
+	return c.raddr
+}
+
 
 func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPAssocationMetrics) {
 	if connMetrics == nil {
@@ -464,31 +475,6 @@ func (m *natmap) Close() error {
 		}
 	}
 	return err
-}
-
-// packetConnWrapper wraps a [net.PacketConn] and provides a [net.Conn] interface
-// with a given remote address.
-type packetConnWrapper struct {
-	net.PacketConn
-	raddr net.Addr
-}
-
-var _ net.Conn = (*packetConnWrapper)(nil)
-
-// ReadFrom reads data from the connection.
-func (pcw *packetConnWrapper) Read(b []byte) (n int, err error) {
-	n, _, err = pcw.PacketConn.ReadFrom(b)
-	return
-}
-
-// WriteTo writes data to the connection.
-func (pcw *packetConnWrapper) Write(b []byte) (n int, err error) {
-	return pcw.PacketConn.WriteTo(b, pcw.raddr)
-}
-
-// RemoteAddr returns the remote network address.
-func (pcw *packetConnWrapper) RemoteAddr() net.Addr {
-	return pcw.raddr
 }
 
 // Get the maximum length of the shadowsocks address header by parsing

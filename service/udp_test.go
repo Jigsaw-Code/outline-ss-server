@@ -508,7 +508,7 @@ func TestNATMap(t *testing.T) {
 		nat := newNATmap()
 		addr1 := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		pc := makePacketConn()
-		conn1 := &natconn{Conn: &packetConnWrapper{PacketConn: pc, raddr: addr1}}
+		conn1 := &natconn{PacketConn: pc, raddr: addr1}
 		nat.Add(addr1, conn1)
 
 		err := nat.Close()
