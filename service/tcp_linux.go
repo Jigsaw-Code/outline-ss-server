@@ -30,18 +30,8 @@ import (
 func MakeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator, fwmark uint) transport.StreamDialer {
 	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
 		if fwmark > 0 {
-			var fwErr error
-			err := c.Control(func(fd uintptr) {
-				err := SetFwmark(fd, fwmark)
-				if err != nil {
-					fwErr = err
-				}
-			})
-			if err != nil {
+			if err := SetFwmark(c, fwmark); err != nil {
 				return err
-			}
-			if fwErr != nil {
-				return fwErr
 			}
 		}
 		ip, _, _ := net.SplitHostPort(address)

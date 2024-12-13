@@ -21,10 +21,13 @@ import (
 	"syscall"
 )
 
-func SetFwmark(fd uintptr, fwmark uint) error {
-	err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
+func SetFwmark(rc syscall.RawConn, fwmark uint) error {
+	var err error
+	rc.Control(func(fd uintptr) {
+		err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, int(fwmark))
+	})
 	if err != nil {
-		os.NewSyscallError("failed to set fwmark for socket", err)
+		return os.NewSyscallError("failed to set fwmark for socket", err)
 	}
 	return nil
 }
