@@ -207,7 +207,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 
 	go func() {
 		lnSet := &listenerSet{
-			manager:             s.lnManager,
+			manager:            s.lnManager,
 			listenerCloseFuncs: make(map[string]func() error),
 		}
 		defer func() {
@@ -283,7 +283,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
 				go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
 			}
-			
+
 			// Start services with listeners.
 			for _, serviceConfig := range config.Services {
 				ciphers, err := newCipherListFromConfig(serviceConfig)
