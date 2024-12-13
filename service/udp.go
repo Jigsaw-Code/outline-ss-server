@@ -294,7 +294,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 
 	targetConn, err := h.targetConnFactory()
 	if err != nil {
-		slog.Error("UDP: failed to create target connection", slog.Any("err", err))
+		h.logger.Error("UDP: failed to create target connection", slog.Any("err", err))
 		return
 	}
 
@@ -317,10 +317,10 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 		connError := func() *onet.ConnectionError {
 			defer func() {
 				if r := recover(); r != nil {
-					slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
+					h.logger.Error("Panic in UDP loop. Continuing to listen.", "err", r)
 					debug.PrintStack()
 				}
-				slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAssociation.RemoteAddr().String()))
+				h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAssociation.RemoteAddr().String()))
 			}()
 
 			cipherData := cipherBuf[:clientProxyBytes]
