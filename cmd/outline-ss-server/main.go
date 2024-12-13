@@ -323,6 +323,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						mux := webServers[lnConfig.WebServer]
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							handler := func(wsConn *websocket.Conn) {
+								defer wsConn.Close()
 								ctx, contextCancel := context.WithCancel(context.Background())
 								defer contextCancel()
 								raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
@@ -344,6 +345,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						mux := webServers[lnConfig.WebServer]
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							handler := func(wsConn *websocket.Conn) {
+								defer wsConn.Close()
 								raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
 								if err != nil {
 									slog.Error("failed to upgrade", "err", err)
