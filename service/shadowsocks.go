@@ -53,15 +53,17 @@ type Service interface {
 type Option func(s *ssService)
 
 type ssService struct {
-	logger      *slog.Logger
-	metrics     ServiceMetrics
-	ciphers     CipherList
-	natTimeout  time.Duration
+	logger            *slog.Logger
+	metrics           ServiceMetrics
+	ciphers           CipherList
+	natTimeout        time.Duration
 	targetIPValidator onet.TargetIPValidator
-	replayCache *ReplayCache
+	replayCache       *ReplayCache
 
-	sh StreamHandler
-	ph PacketHandler
+	streamDialer   transport.StreamDialer
+	sh             StreamHandler
+	packetListener transport.PacketListener
+	ph             PacketHandler
 }
 
 // NewShadowsocksService creates a new Shadowsocks service.
@@ -80,22 +82,22 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	if s.logger == nil {
 		s.logger = noopLogger()
 	}
-	// If no target IP validator is provided, default to standard public IPs.
-	if s.targetIPValidator == nil {
-		s.targetIPValidator = onet.RequirePublicIP
+	if s.streamDialer == nil {
+		s.streamDialer = MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0)
 	}
-	streamDialer := MakeValidatingTCPStreamDialer(s.targetIPValidator, 0)
-	packetDialer := MakeTargetPacketListener(0)
+	if s.packetListener == nil {
+		s.packetListener = MakeTargetUDPListener(0)
+	}
 
 	// TODO: Register initial data metrics at zero.
 	s.sh = NewStreamHandler(
 		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "tcp"}, s.logger),
 		tcpReadTimeout,
-		streamDialer,
+		s.streamDialer,
 	)
 	s.sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"}, packetDialer)
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"}, s.packetListener)
 	s.ph.SetLogger(s.logger)
 
 	return s, nil
@@ -137,10 +139,17 @@ func WithNatTimeout(natTimeout time.Duration) Option {
 	}
 }
 
-// WithNatTimeout option function.
-func WithTargetIPValidator(targetIPValidator onet.TargetIPValidator) Option {
+// WithStreamDialer option function.
+func WithStreamDialer(dialer transport.StreamDialer) Option {
 	return func(s *ssService) {
-		s.targetIPValidator = targetIPValidator
+		s.streamDialer = dialer
+	}
+}
+
+// WithPacketListener option function.
+func WithPacketListener(listener transport.PacketListener) Option {
+	return func(s *ssService) {
+		s.packetListener = listener
 	}
 }
 

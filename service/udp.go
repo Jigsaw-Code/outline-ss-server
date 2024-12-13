@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,13 +25,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
-
-type UDPDialer = func() (net.PacketConn, *onet.ConnectionError)
 
 // UDPConnMetrics is used to report metrics on UDP connections.
 type UDPConnMetrics interface {
@@ -89,11 +89,11 @@ type packetHandler struct {
 	m                 UDPMetrics
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
-	dialer            UDPDialer
+	targetListener    transport.PacketListener
 }
 
 // NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics, dialer UDPDialer) PacketHandler {
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics, targetListener transport.PacketListener) PacketHandler {
 	if m == nil {
 		m = &NoOpUDPMetrics{}
 	}
@@ -107,7 +107,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 		m:                 m,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
-		dialer: dialer,
+		targetListener:    targetListener,
 	}
 }
 
@@ -186,7 +186,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 					return onetErr
 				}
 
-				udpConn, err := h.dialer()
+				udpConn, err := h.targetListener.ListenPacket(context.Background())
 				if err != nil {
 					return nil
 				}

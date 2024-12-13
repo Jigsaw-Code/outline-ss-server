@@ -17,22 +17,14 @@
 package service
 
 import (
-	"net"
-
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 )
 
 // fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
 // Value of 0 disables fwmark (SO_MARK)
-func MakeTargetPacketListener(fwmark uint) UDPDialer {
+func MakeTargetUDPListener(fwmark uint) transport.PacketListener {
 	if fwmark != 0 {
 		panic("fwmark is linux-specific feature and should be 0")
 	}
-	return func() (net.PacketConn, *onet.ConnectionError) {
-		udpConn, err := net.ListenPacket("udp", "")
-		if err != nil {
-			return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
-		}
-		return udpConn, nil
-	}
+	return &transport.UDPListener{Address: ""}
 }

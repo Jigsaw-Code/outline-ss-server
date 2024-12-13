@@ -34,6 +34,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 )
@@ -254,6 +255,8 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
+					service.WithStreamDialer(service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, serviceConfig.Dialer.Fwmark)),
+					service.WithPacketListener(service.MakeTargetUDPListener(serviceConfig.Dialer.Fwmark)),
 					service.WithLogger(slog.Default()),
 				)
 				if err != nil {
