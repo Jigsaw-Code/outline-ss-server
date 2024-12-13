@@ -48,6 +48,9 @@ type UDPAssocationMetrics interface {
 // Max UDP buffer size for the server code.
 const serverUDPBufferSize = 64 * 1024
 
+// Buffer pool used for reading UDP packets.
+var readBufPool = slicepool.MakePool(serverUDPBufferSize)
+
 // Wrapper for slog.Debug during UDP proxying.
 func debugUDP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
@@ -153,48 +156,86 @@ type AssocationHandleFunc func(assocation net.Conn)
 // function for each association. It uses a NAT map to track active associations
 // and handles their lifecycle.
 func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics NATMetrics) {
+	// This goroutine continuously reads from clientConn and sends the received data
+	// to readCh. It uses a buffer pool (readBufPool) to efficiently manage buffers
+	// and minimize allocations. The LazySlice is sent along with the read event
+	// to allow the receiver to release the buffer back to the pool after processing.
+	readCh := make(chan readEvent, 10)
+	go func() {
+		for {
+			lazySlice := readBufPool.LazySlice()
+			buffer := lazySlice.Acquire()
+			n, addr, err := clientConn.ReadFrom(buffer)
+			if err != nil {
+				lazySlice.Release()
+				if errors.Is(err, net.ErrClosed) {
+					readCh <- readEvent{err: err}
+					return
+				}
+				slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
+				continue
+			}
+			readCh <- readEvent{
+				poolSlice: lazySlice,
+				pkt:       buffer[:n],
+				addr:      addr,
+			}
+		}
+	}()
+
 	nm := newNATmap()
 	defer nm.Close()
-	buffer := make([]byte, serverUDPBufferSize)
+	// This loop handles events from closeCh (connection closures) and readCh
+	// (incoming data). It removes NAT entries for closed connections and processes
+	// incoming data packets. The loop also ensures that buffers acquired from
+	// the readBufPool are released back to the pool after processing is complete.
+	closeCh := make(chan net.Addr, 10)
 	for {
-		n, addr, err := clientConn.ReadFrom(buffer)
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				break
+		select {
+		case addr := <-closeCh:
+			metrics.RemoveNATEntry()
+			nm.Del(addr)
+		case read := <-readCh:
+			if read.err != nil {
+				return
 			}
-			slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
-			continue
-		}
-		pkt := buffer[:n]
 
-		// TODO: Include server address in the NAT key as well.
-		conn := nm.Get(addr.String())
-		if conn == nil {
-			conn = &natconn{
-				PacketConn:  clientConn,
-				raddr:       addr,
-				doneCh:      make(chan struct{}),
-				readBufCh:   make(chan []byte, 1),
-				bytesReadCh: make(chan int, 1),
+			poolSlice := read.poolSlice
+			pkt := read.pkt
+			addr := read.addr
+
+			// TODO: Include server address in the NAT key as well.
+			conn := nm.Get(addr.String())
+			if conn == nil {
+				conn = &natconn{
+					PacketConn:  clientConn,
+					raddr:       addr,
+					closeCh:     closeCh,
+					doneCh:      make(chan struct{}),
+					readBufCh:   make(chan []byte, 1),
+					bytesReadCh: make(chan int, 1),
+				}
+				metrics.AddNATEntry()
+				nm.Add(addr, conn)
+				go handle(conn)
 			}
-			metrics.AddNATEntry()
-			deleteEntry := nm.Add(addr, conn)
-			go func(conn net.Conn) {
-				defer func() {
-					conn.Close()
-					deleteEntry()
-					metrics.RemoveNATEntry()
-				}()
-				handle(conn)
-			}(conn)
+			readBuf, ok := <-conn.readBufCh
+			if !ok {
+				poolSlice.Release()
+				continue
+			}
+			copy(readBuf, pkt)
+			poolSlice.Release()
+			conn.bytesReadCh <- len(pkt)
 		}
-		readBuf, ok := <-conn.readBufCh
-		if !ok {
-			continue
-		}
-		copy(readBuf, pkt)
-		conn.bytesReadCh <- n
 	}
+}
+
+type readEvent struct {
+	poolSlice slicepool.LazySlice
+	pkt       []byte
+	addr      net.Addr
+	err       error
 }
 
 // natconn adapts a [net.Conn] to provide a synchronized reading mechanism for NAT traversal.
@@ -203,8 +244,9 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 // which minimizes buffer allocations and copying.
 type natconn struct {
 	net.PacketConn
-	raddr  net.Addr
-	doneCh chan struct{}
+	raddr   net.Addr
+	closeCh chan net.Addr
+	doneCh  chan struct{}
 
 	// readBufCh provides a buffer to copy incoming packet data into.
 	readBufCh chan []byte
@@ -218,14 +260,16 @@ var _ net.Conn = (*natconn)(nil)
 
 func (c *natconn) Read(p []byte) (int, error) {
 	select {
+	case <-c.doneCh:
+		c.closeCh <- c.raddr
+		return 0, net.ErrClosed
 	case c.readBufCh <- p:
 		n, ok := <-c.bytesReadCh
 		if !ok {
+			c.closeCh <- c.raddr
 			return 0, net.ErrClosed
 		}
 		return n, nil
-	case <-c.doneCh:
-		return 0, net.ErrClosed
 	}
 }
 
@@ -235,9 +279,8 @@ func (c *natconn) Write(b []byte) (n int, err error) {
 
 func (c *natconn) Close() error {
 	close(c.doneCh)
-	close(c.readBufCh)
 	close(c.bytesReadCh)
-	return c.PacketConn.Close()
+	return nil
 }
 
 func (c *natconn) RemoteAddr() net.Addr {
@@ -255,9 +298,9 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 		return
 	}
 
-	cipherLazySlice := h.bufPool.LazySlice()
-	cipherBuf := cipherLazySlice.Acquire()
-	defer cipherLazySlice.Release()
+	cipherSlice := h.bufPool.LazySlice()
+	cipherBuf := cipherSlice.Acquire()
+	defer cipherSlice.Release()
 
 	textLazySlice := h.bufPool.LazySlice()
 
@@ -266,7 +309,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 	for {
 		clientProxyBytes, err := clientAssociation.Read(cipherBuf)
 		if errors.Is(err, net.ErrClosed) {
-			cipherLazySlice.Release()
+			cipherSlice.Release()
 			return
 		}
 		debugUDPAddr(h.logger, "Outbound packet.", clientAssociation.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
@@ -301,9 +344,10 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 
 				connMetrics.AddAuthenticated(keyID)
 				go func() {
-					defer connMetrics.AddClosed()
 					timedCopy(clientAssociation, targetConn, cryptoKey, connMetrics, h.logger)
+					connMetrics.AddClosed()
 					targetConn.Close()
+					clientAssociation.Close()
 				}()
 
 			} else {
@@ -438,19 +482,25 @@ func (m *natmap) Get(key string) *natconn {
 	return m.keyConn[key]
 }
 
-// Add adds a new UDP NAT entry to the natmap and returns a closure to delete
-// the entry.
-func (m *natmap) Add(addr net.Addr, pc *natconn) func() {
+func (m *natmap) Del(addr net.Addr) net.PacketConn {
 	m.Lock()
 	defer m.Unlock()
 
-	key := addr.String()
-	m.keyConn[key] = pc
-	return func() {
-		m.Lock()
-		defer m.Unlock()
-		delete(m.keyConn, key)
+	entry, ok := m.keyConn[addr.String()]
+	if ok {
+		delete(m.keyConn, addr.String())
+		return entry
 	}
+	return nil
+}
+
+// Add adds a new UDP NAT entry to the natmap and returns a closure to delete
+// the entry.
+func (m *natmap) Add(addr net.Addr, pc *natconn) {
+	m.Lock()
+	defer m.Unlock()
+
+	m.keyConn[addr.String()] = pc
 }
 
 func (m *natmap) Close() error {

@@ -480,56 +480,56 @@ func TestTimedPacketConn(t *testing.T) {
 
 func TestNATMap(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
-		nat := newNATmap()
-		if nat.Get("foo") != nil {
+		nm := newNATmap()
+		if nm.Get("foo") != nil {
 			t.Error("Expected nil value from empty NAT map")
 		}
 	})
 
 	t.Run("Add", func(t *testing.T) {
-		nat := newNATmap()
-		addr1 := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
+		nm := newNATmap()
+		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		conn1 := &natconn{}
 
-		nat.Add(addr1, conn1)
-		assert.Equal(t, conn1, nat.Get(addr1.String()), "Get should return the correct connection")
+		nm.Add(addr, conn1)
+		assert.Equal(t, conn1, nm.Get(addr.String()), "Get should return the correct connection")
 
 		conn2 := &natconn{}
-		nat.Add(addr1, conn2)
-		assert.Equal(t, conn2, nat.Get(addr1.String()), "Adding with the same address should overwrite the entry")
+		nm.Add(addr, conn2)
+		assert.Equal(t, conn2, nm.Get(addr.String()), "Adding with the same address should overwrite the entry")
 	})
 
 	t.Run("Get", func(t *testing.T) {
-		nat := newNATmap()
-		addr1 := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
-		conn1 := &natconn{}
-		nat.Add(addr1, conn1)
+		nm := newNATmap()
+		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
+		conn := &natconn{}
+		nm.Add(addr, conn)
 
-		assert.Equal(t, conn1, nat.Get(addr1.String()), "Get should return the correct connection for an existing address")
+		assert.Equal(t, conn, nm.Get(addr.String()), "Get should return the correct connection for an existing address")
 
 		addr2 := &net.UDPAddr{IP: net.ParseIP("10.0.0.1"), Port: 5678}
-		assert.Nil(t, nat.Get(addr2.String()), "Get should return nil for a non-existent address")
+		assert.Nil(t, nm.Get(addr2.String()), "Get should return nil for a non-existent address")
 	})
 
-	t.Run("closure_deletes", func(t *testing.T) {
-		nat := newNATmap()
-		addr1 := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
-		conn1 := &natconn{}
-		deleteEntry := nat.Add(addr1, conn1)
+	t.Run("Del", func(t *testing.T) {
+		nm := newNATmap()
+		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
+		conn := &natconn{}
+		nm.Add(addr, conn)
 
-		deleteEntry()
+		nm.Del(addr)
 
-		assert.Nil(t, nat.Get(addr1.String()), "Get should return nil after deleting the entry")
+		assert.Nil(t, nm.Get(addr.String()), "Get should return nil after deleting the entry")
 	})
 
 	t.Run("Close", func(t *testing.T) {
-		nat := newNATmap()
-		addr1 := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
+		nm := newNATmap()
+		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		pc := makePacketConn()
-		conn1 := &natconn{PacketConn: pc, raddr: addr1}
-		nat.Add(addr1, conn1)
+		conn := &natconn{PacketConn: pc, raddr: addr}
+		nm.Add(addr, conn)
 
-		err := nat.Close()
+		err := nm.Close()
 		assert.NoError(t, err, "Close should not return an error")
 
 		// The underlying connection should be scheduled to close immediately.
