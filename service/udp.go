@@ -92,8 +92,8 @@ type packetHandler struct {
 	targetListener    transport.PacketListener
 }
 
-// NewPacketHandler creates a UDPService
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics, targetListener transport.PacketListener) PacketHandler {
+// NewPacketHandler creates a PacketHandler
+func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
 	if m == nil {
 		m = &NoOpUDPMetrics{}
 	}
@@ -107,7 +107,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetr
 		m:                 m,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
-		targetListener:    targetListener,
+		targetListener:    MakeTargetUDPListener(0),
 	}
 }
 
@@ -117,6 +117,8 @@ type PacketHandler interface {
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
+	// SetTargetPacketListener sets the packet listener to use for target connections.
+	SetTargetPacketListener(targetListener transport.PacketListener)
 	// Handle returns after clientConn closes and all the sub goroutines return.
 	Handle(clientConn net.PacketConn)
 }
@@ -130,6 +132,10 @@ func (h *packetHandler) SetLogger(l *slog.Logger) {
 
 func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
 	h.targetIPValidator = targetIPValidator
+}
+
+func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketListener) {
+	h.targetListener = targetListener
 }
 
 // Listen on addr for encrypted packets and basically do UDP NAT.

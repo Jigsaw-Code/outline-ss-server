@@ -41,8 +41,6 @@ var dnsAddr = net.UDPAddr{IP: []byte{192, 0, 2, 3}, Port: 53}
 
 var natCryptoKey *shadowsocks.EncryptionKey
 
-var udpDefaultDialer = MakeTargetPacketListener(0)
-
 func init() {
 	logging.SetLevel(logging.INFO, "")
 	natCryptoKey, _ = shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, "test password")
@@ -143,7 +141,7 @@ func sendToDiscard(payloads [][]byte, validator onet.TargetIPValidator) *natTest
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
 	clientConn := makePacketConn()
 	metrics := &natTestMetrics{}
-	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{}, udpDefaultDialer)
+	handler := NewPacketHandler(timeout, ciphers, metrics, &fakeShadowsocksMetrics{})
 	handler.SetTargetIPValidator(validator)
 	done := make(chan struct{})
 	go func() {
@@ -489,7 +487,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	testMetrics := &natTestMetrics{}
 	const testTimeout = 200 * time.Millisecond
-	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{}, udpDefaultDialer)
+	s := NewPacketHandler(testTimeout, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {

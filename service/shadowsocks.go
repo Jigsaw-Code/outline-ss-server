@@ -82,22 +82,21 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	if s.logger == nil {
 		s.logger = noopLogger()
 	}
-	if s.streamDialer == nil {
-		s.streamDialer = MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0)
-	}
-	if s.packetListener == nil {
-		s.packetListener = MakeTargetUDPListener(0)
-	}
 
 	// TODO: Register initial data metrics at zero.
 	s.sh = NewStreamHandler(
 		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "tcp"}, s.logger),
 		tcpReadTimeout,
-		s.streamDialer,
 	)
+	if s.streamDialer != nil {
+		s.sh.SetTargetDialer(s.streamDialer)
+	}
 	s.sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"}, s.packetListener)
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	if s.packetListener != nil {
+		s.ph.SetTargetPacketListener(s.packetListener)
+	}
 	s.ph.SetLogger(s.logger)
 
 	return s, nil

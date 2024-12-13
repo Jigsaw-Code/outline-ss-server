@@ -31,16 +31,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 )
 
 const maxUDPPacketSize = 64 * 1024
-
-var udpDefaultDialer = service.MakeTargetPacketListener(0)
-
-var tcpDefaultDialer = service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0)
 
 func init() {
 	logging.SetLevel(logging.INFO, "")
@@ -137,14 +132,9 @@ func TestTCPEcho(t *testing.T) {
 	replayCache := service.NewReplayCache(5)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
-<<<<<<< HEAD
-	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(authFunc, testTimeout, &transport.TCPDialer{})
-=======
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{}, nil)
 	handler := service.NewStreamHandler(authFunc, testTimeout)
 	handler.SetTargetDialer(&transport.TCPDialer{})
->>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -221,13 +211,8 @@ func TestRestrictedAddresses(t *testing.T) {
 	require.NoError(t, err)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &statusMetrics{}
-<<<<<<< HEAD
-	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(authFunc, testTimeout, tcpDefaultDialer)
-=======
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := service.NewStreamHandler(authFunc, testTimeout)
->>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -328,7 +313,7 @@ func TestUDPEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	testMetrics := &fakeUDPMetrics{}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics, &fakeShadowsocksMetrics{}, udpDefaultDialer)
+	proxy := service.NewPacketHandler(time.Hour, cipherList, testMetrics, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -417,14 +402,8 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	}
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPConnMetrics{}
-<<<<<<< HEAD
-	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(authFunc, testTimeout, &transport.TCPDialer{})
-=======
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := service.NewStreamHandler(authFunc, testTimeout)
-	handler.SetTargetDialer(&transport.TCPDialer{})
->>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -489,14 +468,8 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	replayCache := service.NewReplayCache(service.MaxCapacity)
 	const testTimeout = 200 * time.Millisecond
 	testMetrics := &service.NoOpTCPConnMetrics{}
-<<<<<<< HEAD
-	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{})
-	handler := service.NewStreamHandler(authFunc, testTimeout, &transport.TCPDialer{})
-=======
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{}, nil)
 	handler := service.NewStreamHandler(authFunc, testTimeout)
-	handler.SetTargetDialer(&transport.TCPDialer{})
->>>>>>> master
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -571,7 +544,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{}, udpDefaultDialer)
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
@@ -615,7 +588,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{}, udpDefaultDialer)
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &service.NoOpUDPMetrics{}, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {

@@ -165,12 +165,12 @@ type streamHandler struct {
 }
 
 // NewStreamHandler creates a StreamHandler
-func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration, dialer transport.StreamDialer) StreamHandler {
+func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration) StreamHandler {
 	return &streamHandler{
 		logger:       noopLogger(),
 		readTimeout:  timeout,
 		authenticate: authenticate,
-		dialer:       dialer,
+		dialer:       MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0),
 	}
 }
 
