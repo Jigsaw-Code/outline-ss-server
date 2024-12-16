@@ -22,7 +22,6 @@ import (
 	"net"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
 type udpListener struct {
@@ -41,7 +40,7 @@ func MakeTargetUDPListener(fwmark uint) transport.PacketListener {
 func (ln *udpListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	conn, err := net.ListenUDP("udp", nil)
 	if err != nil {
-		return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create UDP socket", err)
+		return nil, fmt.Errorf("Failed to create UDP socket: %w", err)
 	}
 
 	if ln.fwmark > 0 {
@@ -54,7 +53,7 @@ func (ln *udpListener) ListenPacket(ctx context.Context) (net.PacketConn, error)
 		err = SetFwmark(rawConn, ln.fwmark)
 		if err != nil {
 			conn.Close()
-			return nil, onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to set `fwmark`", err)
+			return nil, fmt.Errorf("Failed to set `fwmark`: %w", err)
 
 		}
 	}

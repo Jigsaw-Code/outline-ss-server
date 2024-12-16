@@ -194,7 +194,7 @@ func (h *packetHandler) Handle(clientConn net.PacketConn) {
 
 				udpConn, err := h.targetListener.ListenPacket(context.Background())
 				if err != nil {
-					return nil
+					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
 				}
 
 				targetConn = nm.Add(clientAddr, clientConn, cryptoKey, udpConn, keyID)
