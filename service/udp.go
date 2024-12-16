@@ -17,6 +17,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -52,17 +53,11 @@ const serverUDPBufferSize = 64 * 1024
 var readBufPool = slicepool.MakePool(serverUDPBufferSize)
 
 // Wrapper for slog.Debug during UDP proxying.
-func debugUDP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
+func debugUDP(l *slog.Logger, template string, attrs ...slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
 	if l.Enabled(nil, slog.LevelDebug) {
-		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("ID", cipherID), attr)
-	}
-}
-
-func debugUDPAddr(l *slog.Logger, template string, addr net.Addr, attr slog.Attr) {
-	if l.Enabled(nil, slog.LevelDebug) {
-		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("address", addr.String()), attr)
+		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), attrs...)
 	}
 }
 
@@ -76,10 +71,10 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 		id, cryptoKey := entry.Value.(*CipherEntry).ID, entry.Value.(*CipherEntry).CryptoKey
 		buf, err := shadowsocks.Unpack(dst, src, cryptoKey)
 		if err != nil {
-			debugUDP(l, "Failed to unpack.", id, slog.Any("err", err))
+			debugUDP(l, "Failed to unpack.", slog.String("ID", id), slog.Any("err", err))
 			continue
 		}
-		debugUDP(l, "Found cipher.", id, slog.Int("index", ci))
+		debugUDP(l, "Found cipher.", slog.String("ID", id), slog.Int("index", ci))
 		// Move the active cipher to the front, so that the search is quicker next time.
 		cipherList.MarkUsedByClientIP(entry, clientIP)
 		return buf, id, cryptoKey, nil
@@ -300,9 +295,11 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 		connMetrics = &NoOpUDPAssocationMetrics{}
 	}
 
+	clientLogger := h.logger.With(slog.String("client", clientAssociation.RemoteAddr().String()))
+
 	targetConn, err := h.targetConnFactory()
 	if err != nil {
-		h.logger.Error("UDP: failed to create target connection", slog.Any("err", err))
+		clientLogger.Error("UDP: failed to create target connection", slog.Any("err", err))
 		return
 	}
 
@@ -320,15 +317,15 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 			cipherSlice.Release()
 			return
 		}
-		debugUDPAddr(h.logger, "Outbound packet.", clientAssociation.RemoteAddr(), slog.Int("bytes", clientProxyBytes))
+		debugUDP(clientLogger, "Outbound packet.", slog.Int("bytes", clientProxyBytes))
 
 		connError := func() *onet.ConnectionError {
 			defer func() {
 				if r := recover(); r != nil {
-					h.logger.Error("Panic in UDP loop. Continuing to listen.", "err", r)
+					clientLogger.Error("Panic in UDP loop. Continuing to listen.", "err", r)
 					debug.PrintStack()
 				}
-				h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAssociation.RemoteAddr().String()))
+				debugUDP(clientLogger, "Done")
 			}()
 
 			cipherData := cipherBuf[:clientProxyBytes]
@@ -341,7 +338,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 				var cryptoKey *shadowsocks.EncryptionKey
 				textBuf := textLazySlice.Acquire()
 				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
+				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, clientLogger)
 				timeToCipher := time.Since(unpackStart)
 				textLazySlice.Release()
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
@@ -352,7 +349,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 
 				connMetrics.AddAuthenticated(keyID)
 				go func() {
-					timedCopy(clientAssociation, targetConn, cryptoKey, connMetrics, h.logger)
+					timedCopy(clientAssociation, targetConn, cryptoKey, connMetrics, clientLogger)
 					connMetrics.AddClosed()
 					targetConn.Close()
 					clientAssociation.Close()
@@ -374,7 +371,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 				return onetErr
 			}
 
-			debugUDPAddr(h.logger, "Proxy exit.", clientAssociation.RemoteAddr(), slog.Any("target", targetConn.LocalAddr()))
+			debugUDP(clientLogger, "Proxy exit.", slog.Any("target", targetConn.LocalAddr()))
 			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
@@ -384,7 +381,7 @@ func (h *associationHandler) Handle(clientAssociation net.Conn, connMetrics UDPA
 
 		status := "OK"
 		if connError != nil {
-			h.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+			clientLogger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
 		connMetrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
@@ -530,7 +527,7 @@ func (m *natmap) Close() error {
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
-func timedCopy(clientConn net.Conn, targetConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, m UDPAssocationMetrics, l *slog.Logger) {
+func timedCopy(clientConn io.Writer, targetConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, m UDPAssocationMetrics, l *slog.Logger) {
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
@@ -563,7 +560,7 @@ func timedCopy(clientConn net.Conn, targetConn net.PacketConn, cryptoKey *shadow
 				return onet.NewConnectionError("ERR_READ", "Failed to read from target", err)
 			}
 
-			debugUDPAddr(l, "Got response.", clientConn.RemoteAddr(), slog.Any("target", raddr))
+			debugUDP(l, "Got response.", slog.Any("target", raddr))
 			srcAddr := socks.ParseAddr(raddr.String())
 			addrStart := bodyStart - len(srcAddr)
 			// `plainTextBuf` concatenates the SOCKS address and body:
