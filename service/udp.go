@@ -208,7 +208,7 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 			pkt := read.pkt
 			addr := read.addr
 
-			// TODO: Include server address in the NAT key as well.
+			// TODO(#19): Include server address in the NAT key as well.
 			conn := nm.Get(addr.String())
 			if conn == nil {
 				conn = &natconn{
