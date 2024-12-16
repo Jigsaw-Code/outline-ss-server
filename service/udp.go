@@ -160,7 +160,7 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 	// to readCh. It uses a buffer pool (readBufPool) to efficiently manage buffers
 	// and minimize allocations. The LazySlice is sent along with the read event
 	// to allow the receiver to release the buffer back to the pool after processing.
-	readCh := make(chan readEvent, 10)
+	readCh := make(chan readEvent)
 	go func() {
 		for {
 			lazySlice := readBufPool.LazySlice()
@@ -189,7 +189,7 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 	// (incoming data). It removes NAT entries for closed connections and processes
 	// incoming data packets. The loop also ensures that buffers acquired from
 	// the readBufPool are released back to the pool after processing is complete.
-	closeCh := make(chan net.Addr, 10)
+	closeCh := make(chan net.Addr)
 	for {
 		select {
 		case addr := <-closeCh:
