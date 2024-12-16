@@ -27,12 +27,11 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/Jigsaw-Code/outline-ss-server/service"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 )
 
 const maxUDPPacketSize = 64 * 1024
@@ -184,7 +183,8 @@ func TestTCPEcho(t *testing.T) {
 	echoRunning.Wait()
 }
 
-type fakeShadowsocksMetrics struct{}
+type fakeShadowsocksMetrics struct {
+}
 
 var _ service.ShadowsocksConnMetrics = (*fakeShadowsocksMetrics)(nil)
 
@@ -275,11 +275,9 @@ var _ service.UDPConnMetrics = (*fakeUDPConnMetrics)(nil)
 func (m *fakeUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.up = append(m.up, udpRecord{m.clientAddr, m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
-
 func (m *fakeUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 	m.down = append(m.down, udpRecord{m.clientAddr, m.accessKey, status, targetProxyBytes, proxyClientBytes})
 }
-
 func (m *fakeUDPConnMetrics) RemoveNatEntry() {
 	// Not tested because it requires waiting for a long timeout.
 }
@@ -404,6 +402,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	testMetrics := &service.NoOpTCPConnMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := service.NewStreamHandler(authFunc, testTimeout)
+	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
@@ -470,6 +469,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	testMetrics := &service.NoOpTCPConnMetrics{}
 	authFunc := service.NewShadowsocksStreamAuthenticator(cipherList, &replayCache, &fakeShadowsocksMetrics{}, nil)
 	handler := service.NewStreamHandler(authFunc, testTimeout)
+	handler.SetTargetDialer(&transport.TCPDialer{})
 	done := make(chan struct{})
 	go func() {
 		service.StreamServe(
