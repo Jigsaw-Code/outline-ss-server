@@ -165,21 +165,30 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 		for {
 			lazySlice := readBufPool.LazySlice()
 			buffer := lazySlice.Acquire()
-			n, addr, err := clientConn.ReadFrom(buffer)
-			if err != nil {
-				lazySlice.Release()
-				if errors.Is(err, net.ErrClosed) {
-					readCh <- readEvent{err: err}
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
+						lazySlice.Release()
+					}
+				}()
+				n, addr, err := clientConn.ReadFrom(buffer)
+				if err != nil {
+					lazySlice.Release()
+					if errors.Is(err, net.ErrClosed) {
+						readCh <- readEvent{err: err}
+						return
+					}
+					slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
 					return
 				}
-				slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
-				continue
-			}
-			readCh <- readEvent{
-				poolSlice: lazySlice,
-				pkt:       buffer[:n],
-				addr:      addr,
-			}
+				readCh <- readEvent{
+					poolSlice: lazySlice,
+					pkt:       buffer[:n],
+					addr:      addr,
+				}
+			}()
 		}
 	}()
 
