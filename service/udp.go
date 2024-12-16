@@ -177,7 +177,7 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 				if err != nil {
 					lazySlice.Release()
 					if errors.Is(err, net.ErrClosed) {
-						readCh <- readEvent{err: err}
+						close(readCh)
 						return
 					}
 					slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
@@ -204,8 +204,8 @@ func PacketServe(clientConn net.PacketConn, handle AssocationHandleFunc, metrics
 		case addr := <-closeCh:
 			metrics.RemoveNATEntry()
 			nm.Del(addr)
-		case read := <-readCh:
-			if read.err != nil {
+		case read, ok := <-readCh:
+			if !ok {
 				return
 			}
 
@@ -244,7 +244,6 @@ type readEvent struct {
 	poolSlice slicepool.LazySlice
 	pkt       []byte
 	addr      net.Addr
-	err       error
 }
 
 // natconn adapts a [net.Conn] to provide a synchronized reading mechanism for NAT traversal.
