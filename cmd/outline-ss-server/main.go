@@ -16,6 +16,8 @@ package main
 
 import (
 	"container/list"
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,10 +25,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
@@ -34,6 +38,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/net/websocket"
 	"golang.org/x/term"
 )
 
@@ -54,6 +59,16 @@ func init() {
 		os.Stderr,
 		&tint.Options{NoColor: !term.IsTerminal(int(os.Stderr.Fd())), Level: logLevel},
 	)
+}
+
+type HTTPStreamListener struct {
+	service.StreamListener
+}
+
+var _ net.Listener = (*HTTPStreamListener)(nil)
+
+func (t *HTTPStreamListener) Accept() (net.Conn, error) {
+	return t.StreamListener.AcceptStream()
 }
 
 type OutlineServer struct {
@@ -180,6 +195,11 @@ func (ls *listenerSet) Len() int {
 	return len(ls.listenerCloseFuncs)
 }
 
+type connWithDone struct {
+	net.Conn
+	doneCh chan struct{}
+}
+
 func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 	startErrCh := make(chan error)
 	stopErrCh := make(chan error)
@@ -195,6 +215,29 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 		}()
 
 		startErrCh <- func() error {
+			// Start configured web servers.
+			webServers := make(map[string]*http.ServeMux)
+			for _, srvConfig := range config.Web.Servers {
+				mux := http.NewServeMux()
+				for _, addr := range srvConfig.Listeners {
+					server := &http.Server{Addr: addr, Handler: mux}
+					ln, err := lnSet.ListenStream(addr)
+					if err != nil {
+						return fmt.Errorf("failed to listen on %s: %w", addr, err)
+					}
+					go func() {
+						defer server.Shutdown(context.Background())
+						err := server.Serve(&HTTPStreamListener{ln})
+						if err != nil && err != http.ErrServerClosed && !isErrClosing(err) {
+							slog.Error("Failed to run web server.", "err", err, "ID", srvConfig.ID)
+						}
+					}()
+					slog.Info("Web server started.", "ID", srvConfig.ID, "address", addr)
+				}
+				webServers[srvConfig.ID] = mux
+			}
+
+			// Start legacy services.
 			totalCipherCount := len(config.Keys)
 			portCiphers := make(map[int]*list.List) // Values are *List of *CipherEntry.
 			for _, keyConfig := range config.Keys {
@@ -241,6 +284,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
 			}
 
+			// Start services with listeners.
 			for _, serviceConfig := range config.Services {
 				ciphers, err := newCipherListFromConfig(serviceConfig)
 				if err != nil {
@@ -272,6 +316,50 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						}
 						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
 						go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
+					case listenerTypeWebsocketStream:
+						if _, exists := webServers[lnConfig.WebServer]; !exists {
+							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
+						}
+						mux := webServers[lnConfig.WebServer]
+						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							handler := func(wsConn *websocket.Conn) {
+								defer wsConn.Close()
+								ctx, contextCancel := context.WithCancel(context.Background())
+								defer contextCancel()
+								raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+								if err != nil {
+									slog.Error("failed to upgrade", "err", err)
+									w.WriteHeader(http.StatusBadGateway)
+									return
+								}
+								conn := &streamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
+								ssService.HandleStream(ctx, conn)
+							}
+							websocket.Handler(handler).ServeHTTP(w, r)
+						})
+						mux.Handle(lnConfig.Path, http.StripPrefix(lnConfig.Path, handler))
+					case listenerTypeWebsocketPacket:
+						if _, exists := webServers[lnConfig.WebServer]; !exists {
+							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
+						}
+						mux := webServers[lnConfig.WebServer]
+						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							handler := func(wsConn *websocket.Conn) {
+								defer wsConn.Close()
+								raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
+								if err != nil {
+									slog.Error("failed to upgrade", "err", err)
+									w.WriteHeader(http.StatusBadGateway)
+									return
+								}
+								conn := &wrappedConn{Conn: wsConn, raddr: raddr}
+								ssService.HandleAssociation(conn)
+							}
+							websocket.Handler(handler).ServeHTTP(w, r)
+						})
+						mux.Handle(lnConfig.Path, http.StripPrefix(lnConfig.Path, handler))
+					default:
+						return errors.New("unsupported listener configuration")
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)
@@ -313,6 +401,10 @@ func (s *OutlineServer) Stop() error {
 	return nil
 }
 
+func isErrClosing(err error) bool {
+	return strings.Contains(err.Error(), "use of closed network connection")
+}
+
 // RunOutlineServer starts an Outline server running, and returns the server or an error.
 func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *serverMetrics, serviceMetrics service.ServiceMetrics, replayHistory int) (*OutlineServer, error) {
 	server := &OutlineServer{
@@ -337,6 +429,31 @@ func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *
 		}
 	}()
 	return server, nil
+}
+
+// TODO: Create a dedicated `ClientConn` struct with `ClientAddr` and `Conn`.
+// wrappedConn overrides [websocket.Conn]'s remote address handling.
+type wrappedConn struct {
+	*websocket.Conn
+	raddr net.Addr
+}
+
+func (c wrappedConn) RemoteAddr() net.Addr {
+	return c.raddr
+}
+
+type streamConn struct {
+	net.Conn
+}
+
+var _ transport.StreamConn = (*streamConn)(nil)
+
+func (c *streamConn) CloseRead() error {
+	return c.Close()
+}
+
+func (c *streamConn) CloseWrite() error {
+	return c.Close()
 }
 
 func main() {
