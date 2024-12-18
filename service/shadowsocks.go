@@ -136,7 +136,7 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 	s.sh.Handle(ctx, conn, metrics)
 }
 
-// HandleAssociation handles a Shadowsocks packet-based assocation.
+// NewAssociation creates a new Shadowsocks packet-based association.
 func (s *ssService) NewAssociation(conn net.Conn) (Association, error) {
 	var metrics UDPAssocationMetrics
 	if s.metrics != nil {
