@@ -391,6 +391,10 @@ type association struct {
 
 var _ Association = (*association)(nil)
 
+func (a *association) debugLog(template string, attrs ...slog.Attr) {
+	debugUDP(a.logger, template, attrs...)
+}
+
 // Given the decrypted contents of a UDP packet, return
 // the payload and the destination address, or an error if
 // this packet cannot or should not be forwarded.
@@ -414,9 +418,9 @@ func (a *association) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *on
 
 func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
 	defer lazySlice.Release()
-	defer debugUDP(a.logger, "Done")
+	defer a.debugLog("Done")
 
-	debugUDP(a.logger, "Outbound packet.", slog.Int("bytes", len(pkt)))
+	a.debugLog("Outbound packet.", slog.Int("bytes", len(pkt)))
 
 	var proxyTargetBytes int
 	connError := func() *onet.ConnectionError {
@@ -464,7 +468,7 @@ func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
 			return onetErr
 		}
 
-		debugUDP(a.logger, "Proxy exit.")
+		a.debugLog("Proxy exit.")
 		proxyTargetBytes, err = a.targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
 		if err != nil {
 			return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
@@ -533,7 +537,7 @@ func (a *association) timedCopy() {
 				return onet.NewConnectionError("ERR_READ", "Failed to read from target", err)
 			}
 
-			debugUDP(a.logger, "Got response.", slog.Any("rtarget", raddr))
+			a.debugLog("Got response.", slog.Any("rtarget", raddr))
 			srcAddr := socks.ParseAddr(raddr.String())
 			addrStart := bodyStart - len(srcAddr)
 			// `plainTextBuf` concatenates the SOCKS address and body:
@@ -562,7 +566,7 @@ func (a *association) timedCopy() {
 		}()
 		status := "OK"
 		if connError != nil {
-			a.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+			a.debugLog("Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
 		if expired {
