@@ -318,16 +318,14 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := service.NewAssociationHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
 
 	proxy.SetTargetIPValidator(allowAll)
-	done := make(chan struct{})
 	natMetrics := &natTestMetrics{}
 	associationMetrics := &fakeUDPAssocationMetrics{}
-	go func() {
-		service.PacketServe(proxyConn, func(conn net.Conn) { proxy.Handle(conn, associationMetrics) }, natMetrics)
-		done <- struct{}{}
-	}()
+	go service.PacketServe(proxyConn, func(conn net.Conn) (service.Association, error) {
+		return proxy.NewAssociation(conn, associationMetrics)
+	}, natMetrics)
 
 	cryptoKey, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, secrets[0])
 	require.NoError(t, err)
@@ -366,7 +364,6 @@ func TestUDPEcho(t *testing.T) {
 	echoConn.Close()
 	echoRunning.Wait()
 	proxyConn.Close()
-	<-done
 	// Verify that the expected metrics were reported.
 	snapshot := cipherList.SnapshotForClientIP(netip.Addr{})
 	keyID := snapshot[0].Value.(*service.CipherEntry).ID
@@ -549,11 +546,13 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewAssociationHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(server, func(conn net.Conn) { proxy.Handle(conn, &service.NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+		service.PacketServe(server, func(conn net.Conn) (service.Association, error) {
+			return proxy.NewAssociation(conn, nil)
+		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
 
@@ -593,11 +592,13 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewAssociationHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewPacketHandler(time.Hour, cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(proxyConn, func(conn net.Conn) { proxy.Handle(conn, &service.NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+		service.PacketServe(proxyConn, func(conn net.Conn) (service.Association, error) {
+			return proxy.NewAssociation(conn, nil)
+		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
 

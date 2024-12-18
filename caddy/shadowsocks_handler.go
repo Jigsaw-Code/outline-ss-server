@@ -16,16 +16,21 @@ package caddy
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/mholt/caddy-l4/layer4"
+
+	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
+	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 )
+
+const serverUDPBufferSize = 64 * 1024
 
 const ssModuleName = "layer4.handlers.shadowsocks"
 
@@ -116,7 +121,22 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	case transport.StreamConn:
 		h.service.HandleStream(cx.Context, conn)
 	case net.Conn:
-		h.service.HandleAssociation(cx)
+		assoc, err := h.service.NewAssociation(conn)
+		if err != nil {
+			return fmt.Errorf("Failed to handle association: %v", err)
+		}
+		bufPool := slicepool.MakePool(serverUDPBufferSize)
+		for {
+			lazySlice := bufPool.LazySlice()
+			buf := lazySlice.Acquire()
+			n, err := conn.Read(buf)
+			if errors.Is(err, net.ErrClosed) {
+				lazySlice.Release()
+				return err
+			}
+			pkt := buf[:n]
+			go assoc.HandlePacket(pkt, lazySlice)
+		}
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}
