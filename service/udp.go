@@ -357,9 +357,20 @@ func (m *natmap) Close() error {
 	return err
 }
 
+// Association represents a UDP association that handles incoming packets
+// and forwards them to a target connection.
 type Association interface {
+	// HandlePacket processes a single incoming packet.
+	//
+	// pkt contains the raw packet data.
+	// lazySlice is the LazySlice that holds the pkt buffer, which should be
+	// released after the packet is processed.
 	HandlePacket(pkt []byte, lazySlice slicepool.LazySlice)
+
+	// Done returns a channel that is closed when the association is closed.
 	Done() <-chan struct{}
+
+	// Close closes the association and releases any associated resources.
 	Close() error
 }
 
