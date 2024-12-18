@@ -213,13 +213,13 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 				}
 
 				metrics.AddNATEntry()
-				nm.Add(addr, assoc)
+				nm.Add(addr.String(), assoc)
 			}
 			select {
 			case <-assoc.Done():
 				lazySlice.Release()
 				metrics.RemoveNATEntry()
-				nm.Del(addr)
+				nm.Del(addr.String())
 			default:
 				go assoc.HandlePacket(pkt, lazySlice)
 			}
@@ -313,35 +313,35 @@ func (c *timedPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
 // Packet NAT table
 type natmap struct {
 	sync.RWMutex
-	keyConn map[string]Association
+	associations map[string]Association
 }
 
 func newNATmap() *natmap {
-	return &natmap{keyConn: make(map[string]Association)}
+	return &natmap{associations: make(map[string]Association)}
 }
 
-func (m *natmap) Get(key string) Association {
+func (m *natmap) Get(clientAddr string) Association {
 	m.RLock()
 	defer m.RUnlock()
-	return m.keyConn[key]
+	return m.associations[clientAddr]
 }
 
-func (m *natmap) Del(addr net.Addr) {
+func (m *natmap) Del(clientAddr string) {
 	m.Lock()
 	defer m.Unlock()
 
-	if _, ok := m.keyConn[addr.String()]; ok {
-		delete(m.keyConn, addr.String())
+	if _, ok := m.associations[clientAddr]; ok {
+		delete(m.associations, clientAddr)
 	}
 }
 
 // Add adds a new UDP NAT entry to the natmap and returns a closure to delete
 // the entry.
-func (m *natmap) Add(addr net.Addr, assoc Association) {
+func (m *natmap) Add(clientAddr string, assoc Association) {
 	m.Lock()
 	defer m.Unlock()
 
-	m.keyConn[addr.String()] = assoc
+	m.associations[clientAddr] = assoc
 }
 
 func (m *natmap) Close() error {
@@ -349,7 +349,7 @@ func (m *natmap) Close() error {
 	defer m.Unlock()
 
 	var err error
-	for _, assoc := range m.keyConn {
+	for _, assoc := range m.associations {
 		if e := assoc.Close(); e != nil {
 			err = e
 		}
