@@ -168,7 +168,6 @@ func (h *packetHandler) NewAssociation(conn net.Conn, m UDPAssocationMetrics) (A
 	}, nil
 }
 
-
 type NewAssociationFunc func(conn net.Conn) (Association, error)
 
 // PacketServe listens for UDP packets on the provided [net.PacketConn], creates

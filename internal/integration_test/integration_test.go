@@ -262,7 +262,6 @@ func TestRestrictedAddresses(t *testing.T) {
 }
 
 // Stub metrics implementation for testing NAT behaviors.
-
 type natTestMetrics struct {
 	natEntriesAdded int
 }

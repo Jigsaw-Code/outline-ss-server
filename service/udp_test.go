@@ -129,7 +129,6 @@ type udpReport struct {
 }
 
 // Stub metrics implementation for testing NAT behaviors.
-
 type natTestMetrics struct {
 	natEntriesAdded int
 }
@@ -199,8 +198,8 @@ func startTestHandler() (PacketHandler, func(target net.Addr, payload []byte), *
 
 func TestNatconnCloseWhileReading(t *testing.T) {
 	nc := &natconn{
-		PacketConn:  makePacketConn(),
-		raddr:       &clientAddr,
+		PacketConn: makePacketConn(),
+		raddr:      &clientAddr,
 	}
 	go func() {
 		buf := make([]byte, 1024)
