@@ -453,10 +453,14 @@ func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
 			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
 		}
 
-		unpackStart := time.Now()
-		textData, err = shadowsocks.Unpack(nil, pkt, a.cryptoKey)
-		timeToCipher := time.Since(unpackStart)
-		a.ssm.AddCipherSearch(err == nil, timeToCipher)
+		if textData == nil {
+			// This is a subsequent packet. First packets are already decrypted as part of the
+			// initial access key search.
+			unpackStart := time.Now()
+			textData, err = shadowsocks.Unpack(nil, pkt, a.cryptoKey)
+			timeToCipher := time.Since(unpackStart)
+			a.ssm.AddCipherSearch(err == nil, timeToCipher)
+		}
 
 		if err != nil {
 			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
