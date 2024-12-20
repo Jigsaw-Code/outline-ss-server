@@ -16,7 +16,6 @@ package caddy
 
 import (
 	"container/list"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -26,7 +25,6 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	"github.com/mholt/caddy-l4/layer4"
 
-	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 )
 
@@ -125,18 +123,7 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 		if err != nil {
 			return fmt.Errorf("Failed to handle association: %v", err)
 		}
-		bufPool := slicepool.MakePool(serverUDPBufferSize)
-		for {
-			lazySlice := bufPool.LazySlice()
-			buf := lazySlice.Acquire()
-			n, err := conn.Read(buf)
-			if errors.Is(err, net.ErrClosed) {
-				lazySlice.Release()
-				return err
-			}
-			pkt := buf[:n]
-			go assoc.HandlePacket(pkt, lazySlice)
-		}
+		assoc.Handle(conn)
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}

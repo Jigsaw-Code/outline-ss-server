@@ -359,6 +359,9 @@ func (m *natmap) Close() error {
 // Association represents a UDP association that handles incoming packets
 // and forwards them to a target connection.
 type Association interface {
+	// Handle reads data from the given connection and handles incoming packets.
+	Handle(conn net.Conn)
+
 	// HandlePacket processes a single incoming packet.
 	//
 	// pkt contains the raw packet data.
@@ -392,6 +395,26 @@ var _ Association = (*association)(nil)
 
 func (a *association) debugLog(template string, attrs ...slog.Attr) {
 	debugUDP(a.logger, template, attrs...)
+}
+
+func (a *association) Handle(conn net.Conn) {
+	for {
+		lazySlice := a.bufPool.LazySlice()
+		buf := lazySlice.Acquire()
+		n, err := conn.Read(buf)
+		if errors.Is(err, net.ErrClosed) {
+			lazySlice.Release()
+			return
+		}
+		pkt := buf[:n]
+		select {
+		case <-a.Done():
+			lazySlice.Release()
+			return
+		default:
+			go a.HandlePacket(pkt, lazySlice)
+		}
+	}
 }
 
 // Given the decrypted contents of a UDP packet, return
