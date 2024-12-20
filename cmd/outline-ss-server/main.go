@@ -281,7 +281,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					return err
 				}
 				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
-				go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
+				go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
 			}
 
 			// Start services with listeners.
@@ -315,7 +315,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							return err
 						}
 						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
-						go service.PacketServe(pc, ssService.HandleAssociation, s.serverMetrics)
+						go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
 					case listenerTypeWebsocketStream:
 						if _, exists := webServers[lnConfig.WebServer]; !exists {
 							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
@@ -353,7 +353,13 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 									return
 								}
 								conn := &wrappedConn{Conn: wsConn, raddr: raddr}
-								ssService.HandleAssociation(conn)
+								assoc, err := ssService.NewAssociation(conn)
+								if err != nil {
+									slog.Error("failed to upgrade", "err", err)
+									w.WriteHeader(http.StatusBadGateway)
+									return
+								}
+								assoc.Handle(conn)
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
