@@ -270,7 +270,6 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					service.WithCiphers(ciphers),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
-					service.WithStreamDialer(service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0)),
 					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, 0)),
 					service.WithLogger(slog.Default()),
 				)
