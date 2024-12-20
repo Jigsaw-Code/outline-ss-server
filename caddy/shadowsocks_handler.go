@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package caddy
+package outlinecaddy
 
 import (
 	"container/list"
@@ -45,6 +45,7 @@ type KeyConfig struct {
 	Secret string
 }
 
+// ShadowsocksHandler implements a Caddy plugin for Shadowsocks connections.
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
@@ -64,15 +65,6 @@ func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Slogger()
-
-	mod, err := ctx.AppIfConfigured(outlineModuleName)
-	if err != nil {
-		return fmt.Errorf("outline app configure error: %w", err)
-	}
-	app, ok := mod.(*OutlineApp)
-	if !ok {
-		return fmt.Errorf("module `%s` is of type `%T`, expected `OutlineApp`", outlineModuleName, app)
-	}
 
 	if len(h.Keys) == 0 {
 		h.logger.Warn("no keys configured")
@@ -100,11 +92,20 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	ciphers := outline.NewCipherList()
 	ciphers.Update(cipherList)
 
+	replayCache, ok := ctx.Value(replayCacheCtxKey).(outline.ReplayCache)
+	if !ok {
+		h.logger.Warn("Handler configured outside Outline app; replay cache not available.")
+	}
+	metrics, ok := ctx.Value(metricsCtxKey).(outline.ServiceMetrics)
+	if !ok {
+		h.logger.Warn("Handler configured outside Outline app; metrics not available.")
+	}
+
 	service, err := outline.NewShadowsocksService(
 		outline.WithLogger(h.logger),
 		outline.WithCiphers(ciphers),
-		outline.WithMetrics(app.Metrics),
-		outline.WithReplayCache(&app.ReplayCache),
+		outline.WithMetrics(metrics),
+		outline.WithReplayCache(&replayCache),
 	)
 	if err != nil {
 		return err
@@ -125,7 +126,7 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 		}
 		assoc.Handle(conn)
 	default:
-		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
+		return fmt.Errorf("failed to handle unknown connection type: %T", conn)
 	}
 	return nil
 }
