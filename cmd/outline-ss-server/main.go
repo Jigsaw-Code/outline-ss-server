@@ -225,9 +225,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 
 				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
-					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
+					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, 0)),
 					service.WithLogger(slog.Default()),
 				)
 				ln, err := lnSet.ListenStream(addr)
@@ -242,7 +242,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					return err
 				}
 				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
-				go ssService.HandlePacket(pc)
+				go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
 			}
 
 			for _, serviceConfig := range config.Services {
@@ -252,11 +252,10 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				}
 				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
-					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
 					service.WithStreamDialer(service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, serviceConfig.Dialer.Fwmark)),
-					service.WithPacketListener(service.MakeTargetUDPListener(serviceConfig.Dialer.Fwmark)),
+					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, serviceConfig.Dialer.Fwmark)),
 					service.WithLogger(slog.Default()),
 				)
 				if err != nil {
@@ -287,7 +286,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							return serviceConfig.Dialer.Fwmark
 						}())
-						go ssService.HandlePacket(pc)
+						go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)

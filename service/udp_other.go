@@ -17,14 +17,34 @@
 package service
 
 import (
+	"context"
+	"net"
+	"time"
+
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 )
 
+type udpListener struct {
+	*transport.UDPListener
+
+	// NAT mapping timeout is the default time a mapping will stay active
+	// without packets traversing the NAT, applied to non-DNS packets.
+	timeout time.Duration
+}
+
 // fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
 // Value of 0 disables fwmark (SO_MARK)
-func MakeTargetUDPListener(fwmark uint) transport.PacketListener {
+func MakeTargetUDPListener(timeout time.Duration, fwmark uint) transport.PacketListener {
 	if fwmark != 0 {
 		panic("fwmark is linux-specific feature and should be 0")
 	}
-	return &transport.UDPListener{Address: ""}
+	return &udpListener{UDPListener: &transport.UDPListener{Address: ""}}
+}
+
+func (ln *udpListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
+	conn, err := ln.UDPListener.ListenPacket(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &timedPacketConn{PacketConn: conn, defaultTimeout: ln.timeout}, nil
 }

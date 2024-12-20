@@ -28,9 +28,6 @@ import (
 const (
 	// 59 seconds is most common timeout for servers that do not respond to invalid requests
 	tcpReadTimeout time.Duration = 59 * time.Second
-
-	// A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
-	defaultNatTimeout time.Duration = 5 * time.Minute
 )
 
 // ShadowsocksConnMetrics is used to report Shadowsocks related metrics on connections.
@@ -39,14 +36,14 @@ type ShadowsocksConnMetrics interface {
 }
 
 type ServiceMetrics interface {
-	UDPMetrics
+	AddOpenUDPAssociation(conn net.Conn) UDPAssocationMetrics
 	AddOpenTCPConnection(conn net.Conn) TCPConnMetrics
 	AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration)
 }
 
 type Service interface {
 	HandleStream(ctx context.Context, conn transport.StreamConn)
-	HandlePacket(conn net.PacketConn)
+	NewAssociation(conn net.Conn) (Association, error)
 }
 
 // Option is a Shadowsocks service constructor option.
@@ -56,7 +53,6 @@ type ssService struct {
 	logger            *slog.Logger
 	metrics           ServiceMetrics
 	ciphers           CipherList
-	natTimeout        time.Duration
 	targetIPValidator onet.TargetIPValidator
 	replayCache       *ReplayCache
 
@@ -74,10 +70,6 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 		opt(s)
 	}
 
-	// If no NAT timeout is provided via options, use the recommended default.
-	if s.natTimeout == 0 {
-		s.natTimeout = defaultNatTimeout
-	}
 	// If no logger is provided via options, use a noop logger.
 	if s.logger == nil {
 		s.logger = noopLogger()
@@ -93,7 +85,7 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	}
 	s.sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, s.metrics, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	s.ph = NewPacketHandler(s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
 	if s.packetListener != nil {
 		s.ph.SetTargetPacketListener(s.packetListener)
 	}
@@ -131,13 +123,6 @@ func WithReplayCache(replayCache *ReplayCache) Option {
 	}
 }
 
-// WithNatTimeout option function.
-func WithNatTimeout(natTimeout time.Duration) Option {
-	return func(s *ssService) {
-		s.natTimeout = natTimeout
-	}
-}
-
 // WithStreamDialer option function.
 func WithStreamDialer(dialer transport.StreamDialer) Option {
 	return func(s *ssService) {
@@ -154,16 +139,20 @@ func WithPacketListener(listener transport.PacketListener) Option {
 
 // HandleStream handles a Shadowsocks stream-based connection.
 func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	var connMetrics TCPConnMetrics
+	var metrics TCPConnMetrics
 	if s.metrics != nil {
-		connMetrics = s.metrics.AddOpenTCPConnection(conn)
+		metrics = s.metrics.AddOpenTCPConnection(conn)
 	}
-	s.sh.Handle(ctx, conn, connMetrics)
+	s.sh.Handle(ctx, conn, metrics)
 }
 
-// HandlePacket handles a Shadowsocks packet connection.
-func (s *ssService) HandlePacket(conn net.PacketConn) {
-	s.ph.Handle(conn)
+// NewAssociation creates a new Shadowsocks packet-based association.
+func (s *ssService) NewAssociation(conn net.Conn) (Association, error) {
+	var metrics UDPAssocationMetrics
+	if s.metrics != nil {
+		metrics = s.metrics.AddOpenUDPAssociation(conn)
+	}
+	return s.ph.NewAssociation(conn, metrics)
 }
 
 type ssConnMetrics struct {

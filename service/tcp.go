@@ -164,6 +164,8 @@ type streamHandler struct {
 	dialer       transport.StreamDialer
 }
 
+var _ StreamHandler = (*streamHandler)(nil)
+
 // NewStreamHandler creates a StreamHandler
 func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration) StreamHandler {
 	return &streamHandler{

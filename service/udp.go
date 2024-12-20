@@ -29,35 +29,41 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 
+	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
-// UDPConnMetrics is used to report metrics on UDP connections.
-type UDPConnMetrics interface {
+// NATMetrics is used to report NAT related metrics.
+type NATMetrics interface {
+	AddNATEntry()
+	RemoveNATEntry()
+}
+
+// UDPAssocationMetrics is used to report metrics on UDP associations.
+type UDPAssocationMetrics interface {
+	AddAuthenticated(accessKey string)
 	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64)
 	AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64)
-	RemoveNatEntry()
+	AddClosed()
 }
 
-type UDPMetrics interface {
-	AddUDPNatEntry(clientAddr net.Addr, accessKey string) UDPConnMetrics
-}
+const (
+	// A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
+	defaultNatTimeout time.Duration = 5 * time.Minute
 
-// Max UDP buffer size for the server code.
-const serverUDPBufferSize = 64 * 1024
+	// Max UDP buffer size for the server code.
+	serverUDPBufferSize = 64 * 1024
+)
+
+// Buffer pool used for reading UDP packets.
+var readBufPool = slicepool.MakePool(serverUDPBufferSize)
 
 // Wrapper for slog.Debug during UDP proxying.
-func debugUDP(l *slog.Logger, template string, cipherID string, attr slog.Attr) {
+func debugUDP(l *slog.Logger, template string, attrs ...slog.Attr) {
 	// This is an optimization to reduce unnecessary allocations due to an interaction
 	// between Go's inlining/escape analysis and varargs functions like slog.Debug.
 	if l.Enabled(nil, slog.LevelDebug) {
-		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("ID", cipherID), attr)
-	}
-}
-
-func debugUDPAddr(l *slog.Logger, template string, addr net.Addr, attr slog.Attr) {
-	if l.Enabled(nil, slog.LevelDebug) {
-		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), slog.String("address", addr.String()), attr)
+		l.LogAttrs(nil, slog.LevelDebug, fmt.Sprintf("UDP: %s", template), attrs...)
 	}
 }
 
@@ -71,10 +77,10 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 		id, cryptoKey := entry.Value.(*CipherEntry).ID, entry.Value.(*CipherEntry).CryptoKey
 		buf, err := shadowsocks.Unpack(dst, src, cryptoKey)
 		if err != nil {
-			debugUDP(l, "Failed to unpack.", id, slog.Any("err", err))
+			debugUDP(l, "Failed to unpack.", slog.String("ID", id), slog.Any("err", err))
 			continue
 		}
-		debugUDP(l, "Found cipher.", id, slog.Int("index", ci))
+		debugUDP(l, "Found cipher.", slog.String("ID", id), slog.Int("index", ci))
 		// Move the active cipher to the front, so that the search is quicker next time.
 		cipherList.MarkUsedByClientIP(entry, clientIP)
 		return buf, id, cryptoKey, nil
@@ -83,35 +89,33 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 }
 
 type packetHandler struct {
-	logger            *slog.Logger
-	natTimeout        time.Duration
+	logger *slog.Logger
+	// bufPool stores the byte slices used for reading and decrypting packets.
+	bufPool           slicepool.Pool
 	ciphers           CipherList
-	m                 UDPMetrics
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
 	targetListener    transport.PacketListener
 }
 
+var _ PacketHandler = (*packetHandler)(nil)
+
 // NewPacketHandler creates a PacketHandler
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, m UDPMetrics, ssMetrics ShadowsocksConnMetrics) PacketHandler {
-	if m == nil {
-		m = &NoOpUDPMetrics{}
-	}
+func NewPacketHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetrics) PacketHandler {
 	if ssMetrics == nil {
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
 	}
 	return &packetHandler{
 		logger:            noopLogger(),
-		natTimeout:        natTimeout,
+		bufPool:           slicepool.MakePool(serverUDPBufferSize),
 		ciphers:           cipherList,
-		m:                 m,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
-		targetListener:    MakeTargetUDPListener(0),
+		targetListener:    MakeTargetUDPListener(defaultNatTimeout, 0),
 	}
 }
 
-// PacketHandler is a running UDP shadowsocks proxy that can be stopped.
+// PacketHandler is a handler that handles UDP assocations.
 type PacketHandler interface {
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
@@ -119,8 +123,8 @@ type PacketHandler interface {
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// SetTargetPacketListener sets the packet listener to use for target connections.
 	SetTargetPacketListener(targetListener transport.PacketListener)
-	// Handle returns after clientConn closes and all the sub goroutines return.
-	Handle(clientConn net.PacketConn)
+	// NewAssociation creates a new Association instance.
+	NewAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (Association, error)
 }
 
 func (h *packetHandler) SetLogger(l *slog.Logger) {
@@ -138,120 +142,107 @@ func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketL
 	h.targetListener = targetListener
 }
 
-// Listen on addr for encrypted packets and basically do UDP NAT.
-// We take the ciphers as a pointer because it gets replaced on config updates.
-func (h *packetHandler) Handle(clientConn net.PacketConn) {
-	nm := newNATmap(h.natTimeout, h.m, h.logger)
+func (h *packetHandler) NewAssociation(conn net.Conn, m UDPAssocationMetrics) (Association, error) {
+	if m == nil {
+		m = &NoOpUDPAssociationMetrics{}
+	}
+
+	// Create the target connection
+	targetConn, err := h.targetListener.ListenPacket(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create target connection: %w", err)
+	}
+
+	return &association{
+		Conn:              conn,
+		m:                 m,
+		targetConn:        targetConn,
+		logger:            h.logger.With(slog.Any("client", conn.RemoteAddr()), slog.Any("ltarget", targetConn.LocalAddr())),
+		bufPool:           &h.bufPool,
+		ciphers:           h.ciphers,
+		ssm:               h.ssm,
+		targetIPValidator: h.targetIPValidator,
+		doneCh:            make(chan struct{}),
+	}, nil
+}
+
+type NewAssociationFunc func(conn net.Conn) (Association, error)
+
+// PacketServe listens for UDP packets on the provided [net.PacketConn], creates
+// creates and manages NAT associations, and invokes the provided `handle`
+// function for each association. It uses a NAT map to track active associations
+// and handles their lifecycle.
+func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, metrics NATMetrics) {
+	nm := newNATmap()
 	defer nm.Close()
-	cipherBuf := make([]byte, serverUDPBufferSize)
-	textBuf := make([]byte, serverUDPBufferSize)
 
 	for {
-		clientProxyBytes, clientAddr, err := clientConn.ReadFrom(cipherBuf)
-		if errors.Is(err, net.ErrClosed) {
-			break
-		}
+		lazySlice := readBufPool.LazySlice()
+		buffer := lazySlice.Acquire()
 
-		var proxyTargetBytes int
-		var targetConn *natconn
-
-		connError := func() (connError *onet.ConnectionError) {
+		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					slog.Error("Panic in UDP loop: %v. Continuing to listen.", r)
+					slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
 					debug.PrintStack()
+					lazySlice.Release()
 				}
 			}()
-
-			// Error from ReadFrom
+			n, addr, err := clientConn.ReadFrom(buffer)
 			if err != nil {
-				return onet.NewConnectionError("ERR_READ", "Failed to read from client", err)
+				lazySlice.Release()
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
+				slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
+				return
 			}
-			defer slog.LogAttrs(nil, slog.LevelDebug, "UDP: Done", slog.String("address", clientAddr.String()))
-			debugUDPAddr(h.logger, "Outbound packet.", clientAddr, slog.Int("bytes", clientProxyBytes))
+			pkt := buffer[:n]
 
-			cipherData := cipherBuf[:clientProxyBytes]
-			var payload []byte
-			var tgtUDPAddr *net.UDPAddr
-			targetConn = nm.Get(clientAddr.String())
-			if targetConn == nil {
-				ip := clientAddr.(*net.UDPAddr).AddrPort().Addr()
-				var textData []byte
-				var cryptoKey *shadowsocks.EncryptionKey
-				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err := findAccessKeyUDP(ip, textBuf, cipherData, h.ciphers, h.logger)
-				timeToCipher := time.Since(unpackStart)
-				h.ssm.AddCipherSearch(err == nil, timeToCipher)
-
+			// TODO(#19): Include server address in the NAT key as well.
+			assoc := nm.Get(addr.String())
+			if assoc == nil {
+				conn := &natconn{PacketConn: clientConn, raddr: addr}
+				assoc, err = newAssociation(conn)
 				if err != nil {
-					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
+					slog.Error("Failed to handle association", slog.Any("err", err))
+					return
 				}
 
-				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
-					return onetErr
-				}
-
-				udpConn, err := h.targetListener.ListenPacket(context.Background())
-				if err != nil {
-					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
-				}
-
-				targetConn = nm.Add(clientAddr, clientConn, cryptoKey, udpConn, keyID)
-			} else {
-				unpackStart := time.Now()
-				textData, err := shadowsocks.Unpack(nil, cipherData, targetConn.cryptoKey)
-				timeToCipher := time.Since(unpackStart)
-				h.ssm.AddCipherSearch(err == nil, timeToCipher)
-
-				if err != nil {
-					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
-				}
-
-				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
-					return onetErr
-				}
+				metrics.AddNATEntry()
+				nm.Add(addr.String(), assoc)
 			}
-
-			debugUDPAddr(h.logger, "Proxy exit.", clientAddr, slog.Any("target", targetConn.LocalAddr()))
-			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
-			if err != nil {
-				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
+			select {
+			case <-assoc.Done():
+				lazySlice.Release()
+				metrics.RemoveNATEntry()
+				nm.Del(addr.String())
+			default:
+				go assoc.HandlePacket(pkt, lazySlice)
 			}
-			return nil
 		}()
-
-		status := "OK"
-		if connError != nil {
-			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
-			status = connError.Status
-		}
-		if targetConn != nil {
-			targetConn.metrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
-		}
 	}
 }
 
-// Given the decrypted contents of a UDP packet, return
-// the payload and the destination address, or an error if
-// this packet cannot or should not be forwarded.
-func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
-	tgtAddr := socks.SplitAddr(textData)
-	if tgtAddr == nil {
-		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
-	}
+// natconn wraps a [net.PacketConn] with an address into a [net.Conn].
+type natconn struct {
+	net.PacketConn
+	raddr net.Addr
+}
 
-	tgtUDPAddr, err := net.ResolveUDPAddr("udp", tgtAddr.String())
-	if err != nil {
-		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
-	}
-	if err := h.targetIPValidator(tgtUDPAddr.IP); err != nil {
-		return nil, nil, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
-	}
+var _ net.Conn = (*natconn)(nil)
 
-	payload := textData[len(tgtAddr):]
-	return payload, tgtUDPAddr, nil
+func (c *natconn) Read(p []byte) (int, error) {
+	n, _, err := c.PacketConn.ReadFrom(p)
+	return n, err
+}
+
+func (c *natconn) Write(b []byte) (n int, err error) {
+	return c.PacketConn.WriteTo(b, c.raddr)
+}
+
+func (c *natconn) RemoteAddr() net.Addr {
+	return c.raddr
 }
 
 func isDNS(addr net.Addr) bool {
@@ -259,11 +250,9 @@ func isDNS(addr net.Addr) bool {
 	return port == "53"
 }
 
-type natconn struct {
+type timedPacketConn struct {
 	net.PacketConn
-	cryptoKey *shadowsocks.EncryptionKey
-	metrics   UDPConnMetrics
-	// NAT timeout to apply for non-DNS packets.
+	// Connection timeout to apply for non-DNS packets.
 	defaultTimeout time.Duration
 	// Current read deadline of PacketConn.  Used to avoid decreasing the
 	// deadline.  Initially zero.
@@ -273,7 +262,7 @@ type natconn struct {
 	fastClose sync.Once
 }
 
-func (c *natconn) onWrite(addr net.Addr) {
+func (c *timedPacketConn) onWrite(addr net.Addr) {
 	// Fast close is only allowed if there has been exactly one write,
 	// and it was a DNS query.
 	isDNS := isDNS(addr)
@@ -296,7 +285,7 @@ func (c *natconn) onWrite(addr net.Addr) {
 	}
 }
 
-func (c *natconn) onRead(addr net.Addr) {
+func (c *timedPacketConn) onRead(addr net.Addr) {
 	c.fastClose.Do(func() {
 		if isDNS(addr) {
 			// The next ReadFrom() should time out immediately.
@@ -305,12 +294,12 @@ func (c *natconn) onRead(addr net.Addr) {
 	})
 }
 
-func (c *natconn) WriteTo(buf []byte, dst net.Addr) (int, error) {
+func (c *timedPacketConn) WriteTo(buf []byte, dst net.Addr) (int, error) {
 	c.onWrite(dst)
 	return c.PacketConn.WriteTo(buf, dst)
 }
 
-func (c *natconn) ReadFrom(buf []byte) (int, net.Addr, error) {
+func (c *timedPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
 	n, addr, err := c.PacketConn.ReadFrom(buf)
 	if err == nil {
 		c.onRead(addr)
@@ -321,64 +310,35 @@ func (c *natconn) ReadFrom(buf []byte) (int, net.Addr, error) {
 // Packet NAT table
 type natmap struct {
 	sync.RWMutex
-	keyConn map[string]*natconn
-	logger  *slog.Logger
-	timeout time.Duration
-	metrics UDPMetrics
+	associations map[string]Association
 }
 
-func newNATmap(timeout time.Duration, sm UDPMetrics, l *slog.Logger) *natmap {
-	m := &natmap{logger: l, metrics: sm}
-	m.keyConn = make(map[string]*natconn)
-	m.timeout = timeout
-	return m
+func newNATmap() *natmap {
+	return &natmap{associations: make(map[string]Association)}
 }
 
-func (m *natmap) Get(key string) *natconn {
+func (m *natmap) Get(clientAddr string) Association {
 	m.RLock()
 	defer m.RUnlock()
-	return m.keyConn[key]
+	return m.associations[clientAddr]
 }
 
-func (m *natmap) set(key string, pc net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, connMetrics UDPConnMetrics) *natconn {
-	entry := &natconn{
-		PacketConn:     pc,
-		cryptoKey:      cryptoKey,
-		metrics:        connMetrics,
-		defaultTimeout: m.timeout,
-	}
-
+func (m *natmap) Del(clientAddr string) {
 	m.Lock()
 	defer m.Unlock()
 
-	m.keyConn[key] = entry
-	return entry
+	if _, ok := m.associations[clientAddr]; ok {
+		delete(m.associations, clientAddr)
+	}
 }
 
-func (m *natmap) del(key string) net.PacketConn {
+// Add adds a new UDP NAT entry to the natmap and returns a closure to delete
+// the entry.
+func (m *natmap) Add(clientAddr string, assoc Association) {
 	m.Lock()
 	defer m.Unlock()
 
-	entry, ok := m.keyConn[key]
-	if ok {
-		delete(m.keyConn, key)
-		return entry
-	}
-	return nil
-}
-
-func (m *natmap) Add(clientAddr net.Addr, clientConn net.PacketConn, cryptoKey *shadowsocks.EncryptionKey, targetConn net.PacketConn, keyID string) *natconn {
-	connMetrics := m.metrics.AddUDPNatEntry(clientAddr, keyID)
-	entry := m.set(clientAddr.String(), targetConn, cryptoKey, connMetrics)
-
-	go func() {
-		timedCopy(clientAddr, clientConn, entry, m.logger)
-		connMetrics.RemoveNatEntry()
-		if pc := m.del(clientAddr.String()); pc != nil {
-			pc.Close()
-		}
-	}()
-	return entry
+	m.associations[clientAddr] = assoc
 }
 
 func (m *natmap) Close() error {
@@ -386,13 +346,175 @@ func (m *natmap) Close() error {
 	defer m.Unlock()
 
 	var err error
-	now := time.Now()
-	for _, pc := range m.keyConn {
-		if e := pc.SetReadDeadline(now); e != nil {
+	for _, assoc := range m.associations {
+		if e := assoc.Close(); e != nil {
 			err = e
 		}
 	}
 	return err
+}
+
+// Association represents a UDP association that handles incoming packets
+// and forwards them to a target connection.
+type Association interface {
+	// Handle reads data from the given connection and handles incoming packets.
+	Handle(conn net.Conn)
+
+	// HandlePacket processes a single incoming packet.
+	//
+	// pkt contains the raw packet data.
+	// lazySlice is the LazySlice that holds the pkt buffer, which should be
+	// released after the packet is processed.
+	HandlePacket(pkt []byte, lazySlice slicepool.LazySlice)
+
+	// Done returns a channel that is closed when the association is closed.
+	Done() <-chan struct{}
+
+	// Close closes the association and releases any associated resources.
+	Close() error
+}
+
+type association struct {
+	net.Conn
+	raddr             net.UDPAddr
+	m                 UDPAssocationMetrics
+	logger            *slog.Logger
+	targetConn        net.PacketConn
+	cryptoKey         *shadowsocks.EncryptionKey
+	bufPool           *slicepool.Pool
+	ciphers           CipherList
+	ssm               ShadowsocksConnMetrics
+	targetIPValidator onet.TargetIPValidator
+	doneCh            chan struct{}
+	findAccessKeyOnce sync.Once
+}
+
+var _ Association = (*association)(nil)
+
+func (a *association) debugLog(template string, attrs ...slog.Attr) {
+	debugUDP(a.logger, template, attrs...)
+}
+
+func (a *association) Handle(conn net.Conn) {
+	for {
+		lazySlice := a.bufPool.LazySlice()
+		buf := lazySlice.Acquire()
+		n, err := conn.Read(buf)
+		if errors.Is(err, net.ErrClosed) {
+			lazySlice.Release()
+			return
+		}
+		pkt := buf[:n]
+		select {
+		case <-a.Done():
+			lazySlice.Release()
+			return
+		default:
+			go a.HandlePacket(pkt, lazySlice)
+		}
+	}
+}
+
+// Given the decrypted contents of a UDP packet, return
+// the payload and the destination address, or an error if
+// this packet cannot or should not be forwarded.
+func (a *association) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+	tgtAddr := socks.SplitAddr(textData)
+	if tgtAddr == nil {
+		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
+	}
+
+	tgtUDPAddr, err := net.ResolveUDPAddr("udp", tgtAddr.String())
+	if err != nil {
+		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
+	}
+	if err := a.targetIPValidator(tgtUDPAddr.IP); err != nil {
+		return nil, nil, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
+	}
+
+	payload := textData[len(tgtAddr):]
+	return payload, tgtUDPAddr, nil
+}
+
+func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
+	defer lazySlice.Release()
+	defer a.debugLog("Done")
+
+	a.debugLog("Outbound packet.", slog.Int("bytes", len(pkt)))
+
+	var proxyTargetBytes int
+	connError := func() *onet.ConnectionError {
+		var textData []byte
+		var err error
+
+		a.findAccessKeyOnce.Do(func() {
+			ip := a.raddr.AddrPort().Addr()
+			var keyID string
+			textLazySlice := a.bufPool.LazySlice()
+			textBuf := textLazySlice.Acquire()
+			unpackStart := time.Now()
+			textData, keyID, a.cryptoKey, err = findAccessKeyUDP(ip, textBuf, pkt, a.ciphers, a.logger)
+			timeToCipher := time.Since(unpackStart)
+			textLazySlice.Release()
+			a.ssm.AddCipherSearch(err == nil, timeToCipher)
+
+			if err != nil {
+				return
+			}
+
+			a.m.AddAuthenticated(keyID)
+			go a.timedCopy()
+		})
+		if err != nil {
+			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
+		}
+
+		if a.cryptoKey == nil {
+			// This should not happen since findAccessKeyUDP should have set `a.cryptoKey`.
+			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
+		}
+
+		if textData == nil {
+			// This is a subsequent packet. First packets are already decrypted as part of the
+			// initial access key search.
+			unpackStart := time.Now()
+			textData, err = shadowsocks.Unpack(nil, pkt, a.cryptoKey)
+			timeToCipher := time.Since(unpackStart)
+			a.ssm.AddCipherSearch(err == nil, timeToCipher)
+		}
+
+		if err != nil {
+			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
+		}
+
+		payload, tgtUDPAddr, onetErr := a.validatePacket(textData)
+		if onetErr != nil {
+			return onetErr
+		}
+
+		a.debugLog("Proxy exit.")
+		proxyTargetBytes, err = a.targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
+		if err != nil {
+			return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
+		}
+		return nil
+	}()
+
+	status := "OK"
+	if connError != nil {
+		a.logger.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+		status = connError.Status
+	}
+	a.m.AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
+}
+
+func (a *association) Done() <-chan struct{} {
+	return a.doneCh
+}
+
+func (a *association) Close() error {
+	now := time.Now()
+	return a.SetReadDeadline(now)
 }
 
 // Get the maximum length of the shadowsocks address header by parsing
@@ -400,13 +522,19 @@ func (m *natmap) Close() error {
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // copy from target to client until read timeout
-func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natconn, l *slog.Logger) {
+func (a *association) timedCopy() {
+	defer func() {
+		a.m.AddClosed()
+		a.targetConn.Close()
+		close(a.doneCh)
+	}()
+
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
 	// [padding?][salt][address][body][tag][extra]
 	// Padding is only used if the address is IPv4.
 	pkt := make([]byte, serverUDPBufferSize)
 
-	saltSize := targetConn.cryptoKey.SaltSize()
+	saltSize := a.cryptoKey.SaltSize()
 	// Leave enough room at the beginning of the packet for a max-length header (i.e. IPv6).
 	bodyStart := saltSize + maxAddrLen
 
@@ -422,7 +550,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			// [padding?][salt][address][body][tag][unused]
 			// |--     bodyStart     --|[      readBuf    ]
 			readBuf := pkt[bodyStart:]
-			bodyLen, raddr, err = targetConn.ReadFrom(readBuf)
+			bodyLen, raddr, err = a.targetConn.ReadFrom(readBuf)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok {
 					if netErr.Timeout() {
@@ -433,7 +561,7 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 				return onet.NewConnectionError("ERR_READ", "Failed to read from target", err)
 			}
 
-			debugUDPAddr(l, "Got response.", clientAddr, slog.Any("target", raddr))
+			a.debugLog("Got response.", slog.Any("rtarget", raddr))
 			srcAddr := socks.ParseAddr(raddr.String())
 			addrStart := bodyStart - len(srcAddr)
 			// `plainTextBuf` concatenates the SOCKS address and body:
@@ -450,11 +578,11 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 			//           [            packBuf             ]
 			//           [          buf           ]
 			packBuf := pkt[saltStart:]
-			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, targetConn.cryptoKey) // Encrypt in-place
+			buf, err := shadowsocks.Pack(packBuf, plaintextBuf, a.cryptoKey) // Encrypt in-place
 			if err != nil {
 				return onet.NewConnectionError("ERR_PACK", "Failed to pack data to client", err)
 			}
-			proxyClientBytes, err = clientConn.WriteTo(buf, clientAddr)
+			proxyClientBytes, err = a.Write(buf)
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to client", err)
 			}
@@ -462,36 +590,27 @@ func timedCopy(clientAddr net.Addr, clientConn net.PacketConn, targetConn *natco
 		}()
 		status := "OK"
 		if connError != nil {
-			slog.LogAttrs(nil, slog.LevelDebug, "UDP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
+			a.debugLog("Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 			status = connError.Status
 		}
 		if expired {
 			break
 		}
-		targetConn.metrics.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
+		a.m.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
 	}
 }
 
-// NoOpUDPConnMetrics is a [UDPConnMetrics] that doesn't do anything. Useful in tests
+// NoOpUDPAssociationMetrics is a [UDPAssocationMetrics] that doesn't do anything. Useful in tests
 // or if you don't want to track metrics.
-type NoOpUDPConnMetrics struct{}
+type NoOpUDPAssociationMetrics struct{}
 
-var _ UDPConnMetrics = (*NoOpUDPConnMetrics)(nil)
+var _ UDPAssocationMetrics = (*NoOpUDPAssociationMetrics)(nil)
 
-func (m *NoOpUDPConnMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+func (m *NoOpUDPAssociationMetrics) AddAuthenticated(accessKey string) {}
+
+func (m *NoOpUDPAssociationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 }
-
-func (m *NoOpUDPConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+func (m *NoOpUDPAssociationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
-
-func (m *NoOpUDPConnMetrics) RemoveNatEntry() {}
-
-// NoOpUDPMetrics is a [UDPMetrics] that doesn't do anything. Useful in tests
-// or if you don't want to track metrics.
-type NoOpUDPMetrics struct{}
-
-var _ UDPMetrics = (*NoOpUDPMetrics)(nil)
-
-func (m *NoOpUDPMetrics) AddUDPNatEntry(clientAddr net.Addr, accessKey string) UDPConnMetrics {
-	return &NoOpUDPConnMetrics{}
+func (m *NoOpUDPAssociationMetrics) AddClosed() {
 }
