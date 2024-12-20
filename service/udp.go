@@ -397,6 +397,26 @@ func (a *association) debugLog(template string, attrs ...slog.Attr) {
 	debugUDP(a.logger, template, attrs...)
 }
 
+func (a *association) Handle(conn net.Conn) {
+	for {
+		lazySlice := a.bufPool.LazySlice()
+		buf := lazySlice.Acquire()
+		n, err := conn.Read(buf)
+		if errors.Is(err, net.ErrClosed) {
+			lazySlice.Release()
+			return
+		}
+		pkt := buf[:n]
+		select {
+		case <-a.Done():
+			lazySlice.Release()
+			return
+		default:
+			go a.HandlePacket(pkt, lazySlice)
+		}
+	}
+}
+
 // Given the decrypted contents of a UDP packet, return
 // the payload and the destination address, or an error if
 // this packet cannot or should not be forwarded.
@@ -416,26 +436,6 @@ func (a *association) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *on
 
 	payload := textData[len(tgtAddr):]
 	return payload, tgtUDPAddr, nil
-}
-
-func (a *association) Handle(conn net.Conn) {
-	for {
-		lazySlice := a.bufPool.LazySlice()
-		buf := lazySlice.Acquire()
-		n, err := conn.Read(buf)
-		if errors.Is(err, net.ErrClosed) {
-			lazySlice.Release()
-			return
-		}
-		pkt := buf[:n]
-		select {
-		case <-a.Done():
-			lazySlice.Release()
-			return
-		default:
-			go a.HandlePacket(pkt, lazySlice)
-		}
-	}
 }
 
 func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
