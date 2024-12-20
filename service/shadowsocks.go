@@ -21,14 +21,13 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
+
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
 const (
 	// 59 seconds is most common timeout for servers that do not respond to invalid requests
 	tcpReadTimeout time.Duration = 59 * time.Second
-
-	// A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
-	defaultNatTimeout time.Duration = 5 * time.Minute
 )
 
 // ShadowsocksConnMetrics is used to report Shadowsocks related metrics on connections.
@@ -51,14 +50,16 @@ type Service interface {
 type Option func(s *ssService)
 
 type ssService struct {
-	logger      *slog.Logger
-	metrics     ServiceMetrics
-	ciphers     CipherList
-	natTimeout  time.Duration
-	replayCache *ReplayCache
+	logger            *slog.Logger
+	metrics           ServiceMetrics
+	ciphers           CipherList
+	targetIPValidator onet.TargetIPValidator
+	replayCache       *ReplayCache
 
-	sh StreamHandler
-	ph PacketHandler
+	streamDialer   transport.StreamDialer
+	sh             StreamHandler
+	packetListener transport.PacketListener
+	ph             PacketHandler
 }
 
 // NewShadowsocksService creates a new Shadowsocks service.
@@ -69,10 +70,6 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 		opt(s)
 	}
 
-	// If no NAT timeout is provided via options, use the recommended default.
-	if s.natTimeout == 0 {
-		s.natTimeout = defaultNatTimeout
-	}
 	// If no logger is provided via options, use a noop logger.
 	if s.logger == nil {
 		s.logger = noopLogger()
@@ -83,9 +80,15 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "tcp"}, s.logger),
 		tcpReadTimeout,
 	)
+	if s.streamDialer != nil {
+		s.sh.SetTargetDialer(s.streamDialer)
+	}
 	s.sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	s.ph = NewPacketHandler(s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	if s.packetListener != nil {
+		s.ph.SetTargetPacketListener(s.packetListener)
+	}
 	s.ph.SetLogger(s.logger)
 
 	return s, nil
@@ -120,10 +123,17 @@ func WithReplayCache(replayCache *ReplayCache) Option {
 	}
 }
 
-// WithNatTimeout option function.
-func WithNatTimeout(natTimeout time.Duration) Option {
+// WithStreamDialer option function.
+func WithStreamDialer(dialer transport.StreamDialer) Option {
 	return func(s *ssService) {
-		s.natTimeout = natTimeout
+		s.streamDialer = dialer
+	}
+}
+
+// WithPacketListener option function.
+func WithPacketListener(listener transport.PacketListener) Option {
+	return func(s *ssService) {
+		s.packetListener = listener
 	}
 }
 

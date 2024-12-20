@@ -29,10 +29,11 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
 )
 
 func init() {
@@ -215,8 +216,7 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 }
 
 // Stub implementation for shadowsocks authentication metrics.
-type fakeShadowsocksMetrics struct {
-}
+type fakeShadowsocksMetrics struct{}
 
 var _ ShadowsocksConnMetrics = (*fakeShadowsocksMetrics)(nil)
 
@@ -232,6 +232,7 @@ type probeTestMetrics struct {
 }
 
 var _ TCPConnMetrics = (*probeTestMetrics)(nil)
+
 var _ ShadowsocksConnMetrics = (*fakeShadowsocksMetrics)(nil)
 
 func (m *probeTestMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
@@ -367,7 +368,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
+	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
@@ -405,7 +406,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
+	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
@@ -444,7 +445,7 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialer(makeValidatingTCPStreamDialer(allowAll))
+	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(

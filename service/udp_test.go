@@ -16,6 +16,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -25,19 +26,22 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
 const timeout = 5 * time.Minute
 
 var clientAddr = net.UDPAddr{IP: []byte{192, 0, 2, 1}, Port: 12345}
+
 var targetAddr = net.UDPAddr{IP: []byte{192, 0, 2, 2}, Port: 54321}
 var localAddr = net.UDPAddr{IP: []byte{127, 0, 0, 1}, Port: 9}
 var dnsAddr = net.UDPAddr{IP: []byte{192, 0, 2, 3}, Port: 53}
+
 var natCryptoKey *shadowsocks.EncryptionKey
 
 func init() {
@@ -49,6 +53,14 @@ type packet struct {
 	addr    net.Addr
 	payload []byte
 	err     error
+}
+
+type packetListener struct {
+	conn net.PacketConn
+}
+
+func (ln *packetListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
+	return ln.conn, nil
 }
 
 type fakePacketConn struct {
@@ -182,12 +194,10 @@ func sendSSPayload(conn *fakePacketConn, addr net.Addr, cipher *shadowsocks.Encr
 func startTestHandler() (PacketHandler, func(target net.Addr, payload []byte), *fakePacketConn) {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-	handler := NewPacketHandler(10*time.Second, ciphers, nil)
+	handler := NewPacketHandler(ciphers, nil)
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-		return targetConn, nil
-	})
+	handler.SetTargetPacketListener(&packetListener{targetConn})
 	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
 		return handler.NewAssociation(conn, nil)
 	}, &natTestMetrics{})
@@ -242,12 +252,10 @@ func TestPacketHandler_Handle_IPFilter(t *testing.T) {
 func TestUpstreamMetrics(t *testing.T) {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-	handler := NewPacketHandler(10*time.Second, ciphers, nil)
+	handler := NewPacketHandler(ciphers, nil)
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
-	handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-		return targetConn, nil
-	})
+	handler.SetTargetPacketListener(&packetListener{targetConn})
 	metrics := &fakeUDPAssocationMetrics{}
 	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
 		return handler.NewAssociation(conn, metrics)
@@ -302,9 +310,7 @@ func (e *fakeTimeoutError) Temporary() bool {
 func TestTimedPacketConn(t *testing.T) {
 	t.Run("Write", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 
 		buf := []byte{1}
 		sendPayload(&targetAddr, buf)
@@ -319,9 +325,7 @@ func TestTimedPacketConn(t *testing.T) {
 
 	t.Run("WriteDNS", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 
 		// Simulate one DNS query being sent.
 		buf := []byte{1}
@@ -338,9 +342,7 @@ func TestTimedPacketConn(t *testing.T) {
 
 	t.Run("WriteDNSMultiple", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 
 		// Simulate three DNS queries being sent.
 		buf := []byte{1}
@@ -357,9 +359,7 @@ func TestTimedPacketConn(t *testing.T) {
 
 	t.Run("WriteMixed", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 
 		// Simulate both non-DNS and DNS packets being sent.
 		buf := []byte{1}
@@ -375,12 +375,10 @@ func TestTimedPacketConn(t *testing.T) {
 	t.Run("FastClose", func(t *testing.T) {
 		ciphers, _ := MakeTestCiphers([]string{"asdf"})
 		cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-		handler := NewPacketHandler(10*time.Second, ciphers, nil)
+		handler := NewPacketHandler(ciphers, nil)
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
 			return handler.NewAssociation(conn, nil)
 		}, &natTestMetrics{})
@@ -405,12 +403,10 @@ func TestTimedPacketConn(t *testing.T) {
 	t.Run("NoFastClose_NotDNS", func(t *testing.T) {
 		ciphers, _ := MakeTestCiphers([]string{"asdf"})
 		cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-		handler := NewPacketHandler(10*time.Second, ciphers, nil)
+		handler := NewPacketHandler(ciphers, nil)
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
 			return handler.NewAssociation(conn, nil)
 		}, &natTestMetrics{})
@@ -435,12 +431,10 @@ func TestTimedPacketConn(t *testing.T) {
 	t.Run("NoFastClose_MultipleDNS", func(t *testing.T) {
 		ciphers, _ := MakeTestCiphers([]string{"asdf"})
 		cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-		handler := NewPacketHandler(10*time.Second, ciphers, nil)
+		handler := NewPacketHandler(ciphers, nil)
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
 			return handler.NewAssociation(conn, nil)
 		}, &natTestMetrics{})
@@ -463,9 +457,7 @@ func TestTimedPacketConn(t *testing.T) {
 
 	t.Run("Timeout", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
-			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
-		})
+		handler.SetTargetPacketListener(&packetListener{targetConn})
 
 		// Simulate a non-DNS initial packet.
 		sendPayload(&targetAddr, []byte{1})
@@ -497,11 +489,11 @@ func TestNATMap(t *testing.T) {
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		assoc1 := &association{}
 
-		nm.Add(addr, assoc1)
+		nm.Add(addr.String(), assoc1)
 		assert.Equal(t, assoc1, nm.Get(addr.String()), "Get should return the correct connection")
 
 		assoc2 := &association{}
-		nm.Add(addr, assoc2)
+		nm.Add(addr.String(), assoc2)
 		assert.Equal(t, assoc2, nm.Get(addr.String()), "Adding with the same address should overwrite the entry")
 	})
 
@@ -509,7 +501,7 @@ func TestNATMap(t *testing.T) {
 		nm := newNATmap()
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		assoc := &association{}
-		nm.Add(addr, assoc)
+		nm.Add(addr.String(), assoc)
 
 		assert.Equal(t, assoc, nm.Get(addr.String()), "Get should return the correct connection for an existing address")
 
@@ -521,9 +513,9 @@ func TestNATMap(t *testing.T) {
 		nm := newNATmap()
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		assoc := &association{}
-		nm.Add(addr, assoc)
+		nm.Add(addr.String(), assoc)
 
-		nm.Del(addr)
+		nm.Del(addr.String())
 
 		assert.Nil(t, nm.Get(addr.String()), "Get should return nil after deleting the entry")
 	})
@@ -533,7 +525,7 @@ func TestNATMap(t *testing.T) {
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		pc := makePacketConn()
 		assoc := &association{Conn: &natconn{PacketConn: pc, raddr: addr}}
-		nm.Add(addr, assoc)
+		nm.Add(addr.String(), assoc)
 
 		err := nm.Close()
 		assert.NoError(t, err, "Close should not return an error")
@@ -626,7 +618,7 @@ func TestUDPEarlyClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	ph := NewPacketHandler(testTimeout, cipherList, &fakeShadowsocksMetrics{})
+	ph := NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -635,7 +627,7 @@ func TestUDPEarlyClose(t *testing.T) {
 	require.Nil(t, clientConn.Close())
 	// This should return quickly without timing out.
 	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-		return ph.NewAssociation(conn, &NoOpUDPAssocationMetrics{})
+		return ph.NewAssociation(conn, &NoOpUDPAssociationMetrics{})
 	}, &natTestMetrics{})
 }
 

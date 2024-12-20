@@ -25,14 +25,14 @@ import (
 	"net"
 	"net/netip"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/shadowsocks/go-shadowsocks2/socks"
+
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
-	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 // TCPConnMetrics is used to report metrics on TCP connections.
@@ -172,17 +172,8 @@ func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration
 		logger:       noopLogger(),
 		readTimeout:  timeout,
 		authenticate: authenticate,
-		dialer:       defaultDialer,
+		dialer:       MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0),
 	}
-}
-
-var defaultDialer = makeValidatingTCPStreamDialer(onet.RequirePublicIP)
-
-func makeValidatingTCPStreamDialer(targetIPValidator onet.TargetIPValidator) transport.StreamDialer {
-	return &transport.TCPDialer{Dialer: net.Dialer{Control: func(network, address string, c syscall.RawConn) error {
-		ip, _, _ := net.SplitHostPort(address)
-		return targetIPValidator(net.ParseIP(ip))
-	}}}
 }
 
 // StreamHandler is a handler that handles stream connections.
@@ -399,6 +390,8 @@ type NoOpTCPConnMetrics struct{}
 var _ TCPConnMetrics = (*NoOpTCPConnMetrics)(nil)
 
 func (m *NoOpTCPConnMetrics) AddAuthenticated(accessKey string) {}
+
 func (m *NoOpTCPConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
+
 func (m *NoOpTCPConnMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {}

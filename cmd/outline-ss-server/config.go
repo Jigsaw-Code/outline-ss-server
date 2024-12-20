@@ -24,12 +24,14 @@ import (
 type ServiceConfig struct {
 	Listeners []ListenerConfig `yaml:"listeners"`
 	Keys      []KeyConfig      `yaml:"keys"`
+	Dialer    DialerConfig     `yaml:"dialer"`
 }
 
 type ListenerType string
 
 const (
-	listenerTypeTCP             ListenerType = "tcp"
+	listenerTypeTCP ListenerType = "tcp"
+
 	listenerTypeUDP             ListenerType = "udp"
 	listenerTypeWebsocketStream ListenerType = "websocket-stream"
 	listenerTypeWebsocketPacket ListenerType = "websocket-packet"
@@ -45,6 +47,10 @@ type ListenerConfig struct {
 	Address   string       `yaml:"address,omitempty"`
 	WebServer string       `yaml:"web_server,omitempty"`
 	Path      string       `yaml:"path,omitempty"`
+}
+
+type DialerConfig struct {
+	Fwmark uint
 }
 
 type KeyConfig struct {
@@ -63,7 +69,7 @@ type WebConfig struct {
 }
 
 type Config struct {
-	Web WebConfig `yaml:"web"`
+	Web      WebConfig       `yaml:"web"`
 	Services []ServiceConfig `yaml:"services"`
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
