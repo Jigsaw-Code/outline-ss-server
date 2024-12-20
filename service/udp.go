@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 
@@ -45,8 +47,13 @@ type UDPAssocationMetrics interface {
 	AddClosed()
 }
 
-// Max UDP buffer size for the server code.
-const serverUDPBufferSize = 64 * 1024
+const (
+	// A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
+	defaultNatTimeout time.Duration = 5 * time.Minute
+
+	// Max UDP buffer size for the server code.
+	serverUDPBufferSize = 64 * 1024
+)
 
 // Buffer pool used for reading UDP packets.
 var readBufPool = slicepool.MakePool(serverUDPBufferSize)
@@ -88,13 +95,13 @@ type packetHandler struct {
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
-	targetConnFactory func() (net.PacketConn, error)
+	targetListener    transport.PacketListener
 }
 
 var _ PacketHandler = (*packetHandler)(nil)
 
-// NewPacketHandler creates an PacketHandler
-func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, ssMetrics ShadowsocksConnMetrics) PacketHandler {
+// NewPacketHandler creates a PacketHandler
+func NewPacketHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetrics) PacketHandler {
 	if ssMetrics == nil {
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
 	}
@@ -104,16 +111,7 @@ func NewPacketHandler(natTimeout time.Duration, cipherList CipherList, ssMetrics
 		ciphers:           cipherList,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
-		targetConnFactory: func() (net.PacketConn, error) {
-			pc, err := net.ListenPacket("udp", "")
-			if err != nil {
-				return nil, fmt.Errorf("failed to create UDP socket: %v", err)
-			}
-			return &timedPacketConn{
-				PacketConn:     pc,
-				defaultTimeout: natTimeout,
-			}, nil
-		},
+		targetListener:    MakeTargetUDPListener(defaultNatTimeout, 0),
 	}
 }
 
@@ -123,8 +121,8 @@ type PacketHandler interface {
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
-	// SetTargetConnFactory sets the function to be used to create new target connections.
-	SetTargetConnFactory(factory func() (net.PacketConn, error))
+	// SetTargetPacketListener sets the packet listener to use for target connections.
+	SetTargetPacketListener(targetListener transport.PacketListener)
 	// NewAssociation creates a new Association instance.
 	NewAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (Association, error)
 }
@@ -140,17 +138,17 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 	h.targetIPValidator = targetIPValidator
 }
 
-func (h *packetHandler) SetTargetConnFactory(factory func() (net.PacketConn, error)) {
-	h.targetConnFactory = factory
+func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketListener) {
+	h.targetListener = targetListener
 }
 
 func (h *packetHandler) NewAssociation(conn net.Conn, m UDPAssocationMetrics) (Association, error) {
 	if m == nil {
-		m = &NoOpUDPAssocationMetrics{}
+		m = &NoOpUDPAssociationMetrics{}
 	}
 
 	// Create the target connection
-	targetConn, err := h.targetConnFactory()
+	targetConn, err := h.targetListener.ListenPacket(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create target connection: %w", err)
 	}
@@ -602,17 +600,17 @@ func (a *association) timedCopy() {
 	}
 }
 
-// NoOpUDPAssocationMetrics is a [UDPAssocationMetrics] that doesn't do anything. Useful in tests
+// NoOpUDPAssociationMetrics is a [UDPAssocationMetrics] that doesn't do anything. Useful in tests
 // or if you don't want to track metrics.
-type NoOpUDPAssocationMetrics struct{}
+type NoOpUDPAssociationMetrics struct{}
 
-var _ UDPAssocationMetrics = (*NoOpUDPAssocationMetrics)(nil)
+var _ UDPAssocationMetrics = (*NoOpUDPAssociationMetrics)(nil)
 
-func (m *NoOpUDPAssocationMetrics) AddAuthenticated(accessKey string) {}
+func (m *NoOpUDPAssociationMetrics) AddAuthenticated(accessKey string) {}
 
-func (m *NoOpUDPAssocationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+func (m *NoOpUDPAssociationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 }
-func (m *NoOpUDPAssocationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+func (m *NoOpUDPAssociationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
-func (m *NoOpUDPAssocationMetrics) AddClosed() {
+func (m *NoOpUDPAssociationMetrics) AddClosed() {
 }

@@ -28,17 +28,21 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
-	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
-	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
+
+	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 )
 
-var logLevel = new(slog.LevelVar) // Info by default
-var logHandler slog.Handler
+var (
+	logLevel   = new(slog.LevelVar) // Info by default
+	logHandler slog.Handler
+)
 
 // Set by goreleaser default ldflags. See https://goreleaser.com/customization/build/
 var version = "dev"
@@ -221,9 +225,10 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 
 				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
-					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
+					service.WithStreamDialer(service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, 0)),
+					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, 0)),
 					service.WithLogger(slog.Default()),
 				)
 				ln, err := lnSet.ListenStream(addr)
@@ -248,9 +253,10 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				}
 				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
-					service.WithNatTimeout(s.natTimeout),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
+					service.WithStreamDialer(service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, serviceConfig.Dialer.Fwmark)),
+					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, serviceConfig.Dialer.Fwmark)),
 					service.WithLogger(slog.Default()),
 				)
 				if err != nil {
@@ -263,14 +269,24 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						if err != nil {
 							return err
 						}
-						slog.Info("TCP service started.", "address", ln.Addr().String())
+						slog.Info("TCP service started.", "address", ln.Addr().String(), "fwmark", func() any {
+							if serviceConfig.Dialer.Fwmark == 0 {
+								return "disabled"
+							}
+							return serviceConfig.Dialer.Fwmark
+						}())
 						go service.StreamServe(ln.AcceptStream, ssService.HandleStream)
 					case listenerTypeUDP:
 						pc, err := lnSet.ListenPacket(lnConfig.Address)
 						if err != nil {
 							return err
 						}
-						slog.Info("UDP service started.", "address", pc.LocalAddr().String())
+						slog.Info("UDP service started.", "address", pc.LocalAddr().String(), "fwmark", func() any {
+							if serviceConfig.Dialer.Fwmark == 0 {
+								return "disabled"
+							}
+							return serviceConfig.Dialer.Fwmark
+						}())
 						go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
 					}
 				}

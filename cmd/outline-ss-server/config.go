@@ -24,16 +24,22 @@ import (
 type ServiceConfig struct {
 	Listeners []ListenerConfig
 	Keys      []KeyConfig
+	Dialer    DialerConfig
 }
 
 type ListenerType string
 
 const listenerTypeTCP ListenerType = "tcp"
+
 const listenerTypeUDP ListenerType = "udp"
 
 type ListenerConfig struct {
 	Type    ListenerType
 	Address string
+}
+
+type DialerConfig struct {
+	Fwmark uint
 }
 
 type KeyConfig struct {
