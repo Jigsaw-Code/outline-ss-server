@@ -21,19 +21,22 @@ services:
       - type: udp
         address: "[::]:9000"
     keys:
-        - id: user-0
-          cipher: chacha20-ietf-poly1305
-          secret: Secret0
-        - id: user-1
-          cipher: chacha20-ietf-poly1305
-          secret: Secret1
-
+      - id: user-0
+        cipher: chacha20-ietf-poly1305
+        secret: Secret0
+      - id: user-1
+        cipher: chacha20-ietf-poly1305
+        secret: Secret1
+    dialer:
+      # fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
+      # Value of 0 disables fwmark (SO_MARK) (Linux Only)
+      fwmark: 0
   - listeners:
       - type: tcp
         address: "[::]:9001"
       - type: udp
         address: "[::]:9001"
     keys:
-        - id: user-2
-          cipher: chacha20-ietf-poly1305
-          secret: Secret2
+      - id: user-2
+        cipher: chacha20-ietf-poly1305
+        secret: Secret2
