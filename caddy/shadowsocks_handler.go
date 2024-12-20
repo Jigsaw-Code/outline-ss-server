@@ -22,10 +22,13 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/mholt/caddy-l4/layer4"
+
+	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 )
+
+const serverUDPBufferSize = 64 * 1024
 
 const ssModuleName = "layer4.handlers.shadowsocks"
 
@@ -117,7 +120,11 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	case transport.StreamConn:
 		h.service.HandleStream(cx.Context, conn)
 	case net.Conn:
-		h.service.HandleAssociation(cx)
+		assoc, err := h.service.NewAssociation(conn)
+		if err != nil {
+			return fmt.Errorf("Failed to handle association: %v", err)
+		}
+		assoc.Handle(conn)
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %T", conn)
 	}

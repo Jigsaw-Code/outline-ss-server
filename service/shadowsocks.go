@@ -44,7 +44,7 @@ type ServiceMetrics interface {
 
 type Service interface {
 	HandleStream(ctx context.Context, conn transport.StreamConn)
-	HandleAssociation(conn net.Conn)
+	NewAssociation(conn net.Conn) (Association, error)
 }
 
 // Option is a Shadowsocks service constructor option.
@@ -58,7 +58,7 @@ type ssService struct {
 	replayCache *ReplayCache
 
 	sh StreamHandler
-	ah AssociationHandler
+	ph PacketHandler
 }
 
 // NewShadowsocksService creates a new Shadowsocks service.
@@ -85,8 +85,8 @@ func NewShadowsocksService(opts ...Option) (Service, error) {
 	)
 	s.sh.SetLogger(s.logger)
 
-	s.ah = NewAssociationHandler(s.natTimeout, s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
-	s.ah.SetLogger(s.logger)
+	s.ph = NewPacketHandler(s.natTimeout, s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
+	s.ph.SetLogger(s.logger)
 
 	return s, nil
 }
@@ -136,13 +136,13 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 	s.sh.Handle(ctx, conn, metrics)
 }
 
-// HandleAssociation handles a Shadowsocks packet-based assocation.
-func (s *ssService) HandleAssociation(conn net.Conn) {
+// NewAssociation creates a new Shadowsocks packet-based association.
+func (s *ssService) NewAssociation(conn net.Conn) (Association, error) {
 	var metrics UDPAssocationMetrics
 	if s.metrics != nil {
 		metrics = s.metrics.AddOpenUDPAssociation(conn)
 	}
-	s.ah.Handle(conn, metrics)
+	return s.ph.NewAssociation(conn, metrics)
 }
 
 type ssConnMetrics struct {

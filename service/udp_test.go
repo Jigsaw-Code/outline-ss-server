@@ -129,7 +129,6 @@ type udpReport struct {
 }
 
 // Stub metrics implementation for testing NAT behaviors.
-
 type natTestMetrics struct {
 	natEntriesAdded int
 }
@@ -180,16 +179,18 @@ func sendSSPayload(conn *fakePacketConn, addr net.Addr, cipher *shadowsocks.Encr
 // startTestHandler creates a new association handler with a fake
 // client and target connection for testing purposes. It also starts a
 // PacketServe goroutine to handle incoming packets on the client connection.
-func startTestHandler() (AssociationHandler, func(target net.Addr, payload []byte), *fakePacketConn) {
+func startTestHandler() (PacketHandler, func(target net.Addr, payload []byte), *fakePacketConn) {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-	handler := NewAssociationHandler(10*time.Second, ciphers, nil)
+	handler := NewPacketHandler(10*time.Second, ciphers, nil)
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	handler.SetTargetConnFactory(func() (net.PacketConn, error) {
 		return targetConn, nil
 	})
-	go PacketServe(clientConn, func(conn net.Conn) { handler.Handle(conn, &NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
+		return handler.NewAssociation(conn, nil)
+	}, &natTestMetrics{})
 	return handler, func(target net.Addr, payload []byte) {
 		sendSSPayload(clientConn, target, cipher, payload)
 	}, targetConn
@@ -197,11 +198,8 @@ func startTestHandler() (AssociationHandler, func(target net.Addr, payload []byt
 
 func TestNatconnCloseWhileReading(t *testing.T) {
 	nc := &natconn{
-		PacketConn:  makePacketConn(),
-		raddr:       &clientAddr,
-		doneCh:      make(chan struct{}),
-		readBufCh:   make(chan []byte, 1),
-		bytesReadCh: make(chan int, 1),
+		PacketConn: makePacketConn(),
+		raddr:      &clientAddr,
 	}
 	go func() {
 		buf := make([]byte, 1024)
@@ -213,7 +211,7 @@ func TestNatconnCloseWhileReading(t *testing.T) {
 	assert.NoError(t, err, "Close should not panic or return an error")
 }
 
-func TestAssociationHandler_Handle_IPFilter(t *testing.T) {
+func TestPacketHandler_Handle_IPFilter(t *testing.T) {
 	t.Run("RequirePublicIP blocks localhost", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
 		handler.SetTargetIPValidator(onet.RequirePublicIP)
@@ -244,14 +242,16 @@ func TestAssociationHandler_Handle_IPFilter(t *testing.T) {
 func TestUpstreamMetrics(t *testing.T) {
 	ciphers, _ := MakeTestCiphers([]string{"asdf"})
 	cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-	handler := NewAssociationHandler(10*time.Second, ciphers, nil)
+	handler := NewPacketHandler(10*time.Second, ciphers, nil)
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	handler.SetTargetConnFactory(func() (net.PacketConn, error) {
 		return targetConn, nil
 	})
 	metrics := &fakeUDPAssocationMetrics{}
-	go PacketServe(clientConn, func(conn net.Conn) { handler.Handle(conn, metrics) }, &natTestMetrics{})
+	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
+		return handler.NewAssociation(conn, metrics)
+	}, &natTestMetrics{})
 
 	// Test both the first-packet and subsequent-packet cases.
 	const N = 10
@@ -375,13 +375,15 @@ func TestTimedPacketConn(t *testing.T) {
 	t.Run("FastClose", func(t *testing.T) {
 		ciphers, _ := MakeTestCiphers([]string{"asdf"})
 		cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-		handler := NewAssociationHandler(10*time.Second, ciphers, nil)
+		handler := NewPacketHandler(10*time.Second, ciphers, nil)
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
 		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
 			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
 		})
-		go PacketServe(clientConn, func(conn net.Conn) { handler.Handle(conn, &NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
+			return handler.NewAssociation(conn, nil)
+		}, &natTestMetrics{})
 
 		// Send one DNS query.
 		sendSSPayload(clientConn, &dnsAddr, cipher, []byte{1})
@@ -403,13 +405,15 @@ func TestTimedPacketConn(t *testing.T) {
 	t.Run("NoFastClose_NotDNS", func(t *testing.T) {
 		ciphers, _ := MakeTestCiphers([]string{"asdf"})
 		cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-		handler := NewAssociationHandler(10*time.Second, ciphers, nil)
+		handler := NewPacketHandler(10*time.Second, ciphers, nil)
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
 		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
 			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
 		})
-		go PacketServe(clientConn, func(conn net.Conn) { handler.Handle(conn, &NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
+			return handler.NewAssociation(conn, nil)
+		}, &natTestMetrics{})
 
 		// Send one non-DNS packet.
 		sendSSPayload(clientConn, &targetAddr, cipher, []byte{1})
@@ -431,13 +435,15 @@ func TestTimedPacketConn(t *testing.T) {
 	t.Run("NoFastClose_MultipleDNS", func(t *testing.T) {
 		ciphers, _ := MakeTestCiphers([]string{"asdf"})
 		cipher := ciphers.SnapshotForClientIP(netip.Addr{})[0].Value.(*CipherEntry).CryptoKey
-		handler := NewAssociationHandler(10*time.Second, ciphers, nil)
+		handler := NewPacketHandler(10*time.Second, ciphers, nil)
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
 		handler.SetTargetConnFactory(func() (net.PacketConn, error) {
 			return &timedPacketConn{PacketConn: targetConn, defaultTimeout: timeout}, nil
 		})
-		go PacketServe(clientConn, func(conn net.Conn) { handler.Handle(conn, &NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
+			return handler.NewAssociation(conn, nil)
+		}, &natTestMetrics{})
 
 		// Send two DNS packets.
 		sendSSPayload(clientConn, &dnsAddr, cipher, []byte{1})
@@ -489,23 +495,23 @@ func TestNATMap(t *testing.T) {
 	t.Run("Add", func(t *testing.T) {
 		nm := newNATmap()
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
-		conn1 := &natconn{}
+		assoc1 := &association{}
 
-		nm.Add(addr, conn1)
-		assert.Equal(t, conn1, nm.Get(addr.String()), "Get should return the correct connection")
+		nm.Add(addr, assoc1)
+		assert.Equal(t, assoc1, nm.Get(addr.String()), "Get should return the correct connection")
 
-		conn2 := &natconn{}
-		nm.Add(addr, conn2)
-		assert.Equal(t, conn2, nm.Get(addr.String()), "Adding with the same address should overwrite the entry")
+		assoc2 := &association{}
+		nm.Add(addr, assoc2)
+		assert.Equal(t, assoc2, nm.Get(addr.String()), "Adding with the same address should overwrite the entry")
 	})
 
 	t.Run("Get", func(t *testing.T) {
 		nm := newNATmap()
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
-		conn := &natconn{}
-		nm.Add(addr, conn)
+		assoc := &association{}
+		nm.Add(addr, assoc)
 
-		assert.Equal(t, conn, nm.Get(addr.String()), "Get should return the correct connection for an existing address")
+		assert.Equal(t, assoc, nm.Get(addr.String()), "Get should return the correct connection for an existing address")
 
 		addr2 := &net.UDPAddr{IP: net.ParseIP("10.0.0.1"), Port: 5678}
 		assert.Nil(t, nm.Get(addr2.String()), "Get should return nil for a non-existent address")
@@ -514,8 +520,8 @@ func TestNATMap(t *testing.T) {
 	t.Run("Del", func(t *testing.T) {
 		nm := newNATmap()
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
-		conn := &natconn{}
-		nm.Add(addr, conn)
+		assoc := &association{}
+		nm.Add(addr, assoc)
 
 		nm.Del(addr)
 
@@ -526,8 +532,8 @@ func TestNATMap(t *testing.T) {
 		nm := newNATmap()
 		addr := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1234}
 		pc := makePacketConn()
-		conn := &natconn{PacketConn: pc, raddr: addr}
-		nm.Add(addr, conn)
+		assoc := &association{Conn: &natconn{PacketConn: pc, raddr: addr}}
+		nm.Add(addr, assoc)
 
 		err := nm.Close()
 		assert.NoError(t, err, "Close should not return an error")
@@ -620,7 +626,7 @@ func TestUDPEarlyClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	const testTimeout = 200 * time.Millisecond
-	ph := NewAssociationHandler(testTimeout, cipherList, &fakeShadowsocksMetrics{})
+	ph := NewPacketHandler(testTimeout, cipherList, &fakeShadowsocksMetrics{})
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -628,7 +634,9 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	require.Nil(t, clientConn.Close())
 	// This should return quickly without timing out.
-	PacketServe(clientConn, func(conn net.Conn) { ph.Handle(conn, &NoOpUDPAssocationMetrics{}) }, &natTestMetrics{})
+	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
+		return ph.NewAssociation(conn, &NoOpUDPAssocationMetrics{})
+	}, &natTestMetrics{})
 }
 
 // Makes sure the UDP listener returns [io.ErrClosed] on reads and writes after Close().
