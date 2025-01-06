@@ -201,7 +201,7 @@ type statusMetrics struct {
 	statuses []string
 }
 
-func (m *statusMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *statusMetrics) AddClose(status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.Lock()
 	m.statuses = append(m.statuses, status)
 	m.Unlock()
@@ -287,7 +287,7 @@ type fakeUDPAssocationMetrics struct {
 
 var _ service.UDPAssocationMetrics = (*fakeUDPAssocationMetrics)(nil)
 
-func (m *fakeUDPAssocationMetrics) AddAuthenticated(key string) {
+func (m *fakeUDPAssocationMetrics) AddAuthentication(key string) {
 	m.accessKey = key
 }
 
@@ -303,7 +303,7 @@ func (m *fakeUDPAssocationMetrics) AddPacketFromTarget(status string, targetProx
 	m.down = append(m.down, udpRecord{m.accessKey, status, targetProxyBytes, proxyClientBytes})
 }
 
-func (m *fakeUDPAssocationMetrics) AddClosed() {}
+func (m *fakeUDPAssocationMetrics) AddClose() {}
 
 func TestUDPEcho(t *testing.T) {
 	echoConn, echoRunning := startUDPEchoServer(t)

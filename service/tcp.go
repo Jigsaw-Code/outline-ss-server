@@ -37,8 +37,8 @@ import (
 
 // TCPConnMetrics is used to report metrics on TCP connections.
 type TCPConnMetrics interface {
-	AddAuthenticated(accessKey string)
-	AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration)
+	AddAuthentication(accessKey string)
+	AddClose(status string, data metrics.ProxyMetrics, duration time.Duration)
 	AddProbe(status, drainResult string, clientProxyBytes int64)
 }
 
@@ -266,7 +266,7 @@ func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamC
 		status = connError.Status
 		h.logger.LogAttrs(nil, slog.LevelDebug, "TCP: Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 	}
-	connMetrics.AddClosed(status, proxyMetrics, connDuration)
+	connMetrics.AddClose(status, proxyMetrics, connDuration)
 	measuredClientConn.Close() // Closing after the metrics are added aids integration testing.
 	h.logger.LogAttrs(nil, slog.LevelDebug, "TCP: Done.", slog.String("status", status), slog.Duration("duration", connDuration))
 }
@@ -338,7 +338,7 @@ func (h *streamHandler) handleConnection(ctx context.Context, outerConn transpor
 		h.absorbProbe(outerConn, connMetrics, authErr.Status, proxyMetrics)
 		return authErr
 	}
-	connMetrics.AddAuthenticated(id)
+	connMetrics.AddAuthentication(id)
 
 	// Read target address and dial it.
 	tgtAddr, err := getProxyRequest(innerConn)
@@ -389,9 +389,9 @@ type NoOpTCPConnMetrics struct{}
 
 var _ TCPConnMetrics = (*NoOpTCPConnMetrics)(nil)
 
-func (m *NoOpTCPConnMetrics) AddAuthenticated(accessKey string) {}
+func (m *NoOpTCPConnMetrics) AddAuthentication(accessKey string) {}
 
-func (m *NoOpTCPConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *NoOpTCPConnMetrics) AddClose(status string, data metrics.ProxyMetrics, duration time.Duration) {
 }
 
 func (m *NoOpTCPConnMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {}

@@ -41,10 +41,10 @@ type NATMetrics interface {
 
 // UDPAssocationMetrics is used to report metrics on UDP associations.
 type UDPAssocationMetrics interface {
-	AddAuthenticated(accessKey string)
+	AddAuthentication(accessKey string)
 	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64)
 	AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64)
-	AddClosed()
+	AddClose()
 }
 
 const (
@@ -462,7 +462,7 @@ func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
 				return
 			}
 
-			a.m.AddAuthenticated(keyID)
+			a.m.AddAuthentication(keyID)
 			go a.timedCopy()
 		})
 		if err != nil {
@@ -524,7 +524,7 @@ var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 // copy from target to client until read timeout
 func (a *association) timedCopy() {
 	defer func() {
-		a.m.AddClosed()
+		a.m.AddClose()
 		a.targetConn.Close()
 		close(a.doneCh)
 	}()
@@ -606,11 +606,11 @@ type NoOpUDPAssociationMetrics struct{}
 
 var _ UDPAssocationMetrics = (*NoOpUDPAssociationMetrics)(nil)
 
-func (m *NoOpUDPAssociationMetrics) AddAuthenticated(accessKey string) {}
+func (m *NoOpUDPAssociationMetrics) AddAuthentication(accessKey string) {}
 
 func (m *NoOpUDPAssociationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 }
 func (m *NoOpUDPAssociationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
-func (m *NoOpUDPAssociationMetrics) AddClosed() {
+func (m *NoOpUDPAssociationMetrics) AddClose() {
 }

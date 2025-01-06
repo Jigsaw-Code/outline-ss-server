@@ -117,7 +117,7 @@ func newTCPConnMetrics(tcpServiceMetrics *tcpServiceMetrics, tunnelTimeMetrics *
 	}
 }
 
-func (cm *tcpConnMetrics) AddAuthenticated(accessKey string) {
+func (cm *tcpConnMetrics) AddAuthentication(accessKey string) {
 	cm.accessKey = accessKey
 	ipKey, err := toIPKey(cm.clientAddr, accessKey)
 	if err == nil {
@@ -125,7 +125,7 @@ func (cm *tcpConnMetrics) AddAuthenticated(accessKey string) {
 	}
 }
 
-func (cm *tcpConnMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (cm *tcpConnMetrics) AddClose(status string, data metrics.ProxyMetrics, duration time.Duration) {
 	cm.tcpServiceMetrics.proxyCollector.addClientTarget(data.ClientProxy, data.ProxyTarget, cm.accessKey, cm.clientInfo)
 	cm.tcpServiceMetrics.proxyCollector.addTargetClient(data.TargetProxy, data.ProxyClient, cm.accessKey, cm.clientInfo)
 	cm.tcpServiceMetrics.closeConnection(status, duration, cm.accessKey, cm.clientInfo)
@@ -261,7 +261,7 @@ func newUDPAssocationMetrics(udpServiceMetrics *udpServiceMetrics, tunnelTimeMet
 	}
 }
 
-func (cm *udpConnMetrics) AddAuthenticated(accessKey string) {
+func (cm *udpConnMetrics) AddAuthentication(accessKey string) {
 	cm.accessKey = accessKey
 	ipKey, err := toIPKey(cm.clientAddr, accessKey)
 	if err == nil {
@@ -277,7 +277,7 @@ func (cm *udpConnMetrics) AddPacketFromTarget(status string, targetProxyBytes, p
 	cm.udpServiceMetrics.addPacketFromTarget(status, targetProxyBytes, proxyClientBytes, cm.accessKey, cm.clientInfo)
 }
 
-func (cm *udpConnMetrics) AddClosed() {
+func (cm *udpConnMetrics) AddClose() {
 	// We only track authenticated connections, so ignore unauthenticated closed connections
 	// when calculating tunneltime.
 	if cm.accessKey != "" {

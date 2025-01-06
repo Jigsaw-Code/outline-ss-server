@@ -160,7 +160,7 @@ type fakeUDPAssocationMetrics struct {
 
 var _ UDPAssocationMetrics = (*fakeUDPAssocationMetrics)(nil)
 
-func (m *fakeUDPAssocationMetrics) AddAuthenticated(key string) {
+func (m *fakeUDPAssocationMetrics) AddAuthentication(key string) {
 	m.accessKey = key
 }
 
@@ -173,7 +173,7 @@ func (m *fakeUDPAssocationMetrics) AddPacketFromClient(status string, clientProx
 func (m *fakeUDPAssocationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
 
-func (m *fakeUDPAssocationMetrics) AddClosed() {}
+func (m *fakeUDPAssocationMetrics) AddClose() {}
 
 // sendSSPayload sends a single Shadowsocks packet to the provided connection.
 // The packet is constructed with the given address, cipher, and payload.
