@@ -152,28 +152,28 @@ func (m *natTestMetrics) AddNATEntry() {
 }
 func (m *natTestMetrics) RemoveNATEntry() {}
 
-type fakeUDPAssocationMetrics struct {
+type fakeUDPAssociationMetrics struct {
 	accessKey       string
 	upstreamPackets []udpReport
 	mu              sync.Mutex
 }
 
-var _ UDPAssocationMetrics = (*fakeUDPAssocationMetrics)(nil)
+var _ UDPAssociationMetrics = (*fakeUDPAssociationMetrics)(nil)
 
-func (m *fakeUDPAssocationMetrics) AddAuthentication(key string) {
+func (m *fakeUDPAssociationMetrics) AddAuthentication(key string) {
 	m.accessKey = key
 }
 
-func (m *fakeUDPAssocationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+func (m *fakeUDPAssociationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
 
-func (m *fakeUDPAssocationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+func (m *fakeUDPAssociationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
 
-func (m *fakeUDPAssocationMetrics) AddClose() {}
+func (m *fakeUDPAssociationMetrics) AddClose() {}
 
 // sendSSPayload sends a single Shadowsocks packet to the provided connection.
 // The packet is constructed with the given address, cipher, and payload.
@@ -256,7 +256,7 @@ func TestUpstreamMetrics(t *testing.T) {
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	handler.SetTargetPacketListener(&packetListener{targetConn})
-	metrics := &fakeUDPAssocationMetrics{}
+	metrics := &fakeUDPAssociationMetrics{}
 	go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
 		return handler.NewPacketAssociation(conn, metrics)
 	}, &natTestMetrics{})

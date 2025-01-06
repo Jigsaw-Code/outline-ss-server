@@ -39,8 +39,8 @@ type NATMetrics interface {
 	RemoveNATEntry()
 }
 
-// UDPAssocationMetrics is used to report metrics on UDP associations.
-type UDPAssocationMetrics interface {
+// UDPAssociationMetrics is used to report metrics on UDP associations.
+type UDPAssociationMetrics interface {
 	AddAuthentication(accessKey string)
 	AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64)
 	AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64)
@@ -124,9 +124,9 @@ type PacketHandler interface {
 	// SetTargetPacketListener sets the packet listener to use for target connections.
 	SetTargetPacketListener(targetListener transport.PacketListener)
 	// NewConnAssociation creates a new ConnAssociation.
-	NewConnAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (ConnAssociation, error)
+	NewConnAssociation(conn net.Conn, connMetrics UDPAssociationMetrics) (ConnAssociation, error)
 	// NewPacketAssociation creates a new PacketAssociation.
-	NewPacketAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (PacketAssociation, error)
+	NewPacketAssociation(conn net.Conn, connMetrics UDPAssociationMetrics) (PacketAssociation, error)
 }
 
 func (h *packetHandler) SetLogger(l *slog.Logger) {
@@ -144,7 +144,7 @@ func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketL
 	h.targetListener = targetListener
 }
 
-func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssocationMetrics) (*association, error) {
+func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssociationMetrics) (*association, error) {
 	if m == nil {
 		m = &NoOpUDPAssociationMetrics{}
 	}
@@ -168,11 +168,11 @@ func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssocationMetrics) (*
 	}, nil
 }
 
-func (h *packetHandler) NewConnAssociation(conn net.Conn, m UDPAssocationMetrics) (ConnAssociation, error) {
+func (h *packetHandler) NewConnAssociation(conn net.Conn, m UDPAssociationMetrics) (ConnAssociation, error) {
 	return h.newAssociation(conn, m)
 }
 
-func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssocationMetrics) (PacketAssociation, error) {
+func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetrics) (PacketAssociation, error) {
 	return h.newAssociation(conn, m)
 }
 
@@ -393,7 +393,7 @@ type PacketAssociation interface {
 type association struct {
 	net.Conn
 	raddr             net.UDPAddr
-	m                 UDPAssocationMetrics
+	m                 UDPAssociationMetrics
 	logger            *slog.Logger
 	targetConn        net.PacketConn
 	cryptoKey         *shadowsocks.EncryptionKey
@@ -617,11 +617,11 @@ func (a *association) timedCopy() {
 	}
 }
 
-// NoOpUDPAssociationMetrics is a [UDPAssocationMetrics] that doesn't do anything. Useful in tests
+// NoOpUDPAssociationMetrics is a [UDPAssociationMetrics] that doesn't do anything. Useful in tests
 // or if you don't want to track metrics.
 type NoOpUDPAssociationMetrics struct{}
 
-var _ UDPAssocationMetrics = (*NoOpUDPAssociationMetrics)(nil)
+var _ UDPAssociationMetrics = (*NoOpUDPAssociationMetrics)(nil)
 
 func (m *NoOpUDPAssociationMetrics) AddAuthentication(accessKey string) {}
 
