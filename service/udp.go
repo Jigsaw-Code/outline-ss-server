@@ -327,12 +327,14 @@ func newNATmap() *natmap {
 	return &natmap{associations: make(map[string]PacketAssociation)}
 }
 
+// Get returns a UDP NAT entry from the natmap.
 func (m *natmap) Get(clientAddr string) PacketAssociation {
 	m.RLock()
 	defer m.RUnlock()
 	return m.associations[clientAddr]
 }
 
+// Del deletes a UDP NAT entry from the natmap.
 func (m *natmap) Del(clientAddr string) {
 	m.Lock()
 	defer m.Unlock()
@@ -342,8 +344,7 @@ func (m *natmap) Del(clientAddr string) {
 	}
 }
 
-// Add adds a new UDP NAT entry to the natmap and returns a closure to delete
-// the entry.
+// Add adds a new UDP NAT entry to the natmap.
 func (m *natmap) Add(clientAddr string, assoc PacketAssociation) {
 	m.Lock()
 	defer m.Unlock()
