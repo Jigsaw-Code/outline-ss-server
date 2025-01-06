@@ -364,13 +364,13 @@ func (m *natmap) Close() error {
 	return err
 }
 
-// ConnAssociation represents a UDP association that handles incoming packets
-// from a [net.Conn] and forwards them to a target connection, and vice versa.
-// Used by Caddy.
+// ConnAssociation represents a UDP association that handles incoming and
+// outgoing packets from a [net.Conn] and forwards them to a target connection,
+// and vice versa. Used by Caddy.
 type ConnAssociation interface {
-	// Handle reads data from the given connection and handles incoming and
-	// outgoing packets.
-	Handle(conn net.Conn)
+	// Handle reads data from the association and handles incoming and outgoing
+	// packets.
+	Handle()
 }
 
 // PacketAssociation represents a UDP association that handles individual
@@ -412,11 +412,11 @@ func (a *association) debugLog(template string, attrs ...slog.Attr) {
 	debugUDP(a.logger, template, attrs...)
 }
 
-func (a *association) Handle(conn net.Conn) {
+func (a *association) Handle() {
 	for {
 		lazySlice := a.bufPool.LazySlice()
 		buf := lazySlice.Acquire()
-		n, err := conn.Read(buf)
+		n, err := a.Conn.Read(buf)
 		if errors.Is(err, net.ErrClosed) {
 			lazySlice.Release()
 			return

@@ -123,7 +123,7 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 		if err != nil {
 			return fmt.Errorf("Failed to handle association: %v", err)
 		}
-		assoc.Handle(conn)
+		assoc.Handle()
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}
