@@ -72,15 +72,15 @@ func TestMethodsDontPanic(t *testing.T) {
 	}
 
 	tcpMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
-	tcpMetrics.AddAuthenticated("0")
-	tcpMetrics.AddClosed("OK", proxyMetrics, 10*time.Millisecond)
+	tcpMetrics.AddAuthentication("0")
+	tcpMetrics.AddClose("OK", proxyMetrics, 10*time.Millisecond)
 	tcpMetrics.AddProbe("ERR_CIPHER", "eof", proxyMetrics.ClientProxy)
 
 	udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})
-	udpMetrics.AddAuthenticated("0")
+	udpMetrics.AddAuthentication("0")
 	udpMetrics.AddPacketFromClient("OK", 10, 20)
 	udpMetrics.AddPacketFromTarget("OK", 10, 20)
-	udpMetrics.AddClosed()
+	udpMetrics.AddClose()
 
 	ssMetrics.tcpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
 	ssMetrics.udpServiceMetrics.AddCipherSearch(true, 10*time.Millisecond)
@@ -99,7 +99,7 @@ func TestTunnelTime(t *testing.T) {
 		reg.MustRegister(ssMetrics)
 
 		connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
-		connMetrics.AddAuthenticated("key-1")
+		connMetrics.AddAuthentication("key-1")
 		setNow(time.Date(2010, 1, 2, 3, 4, 20, .0, time.Local))
 
 		expected := strings.NewReader(`
@@ -122,7 +122,7 @@ func TestTunnelTime(t *testing.T) {
 		reg.MustRegister(ssMetrics)
 
 		connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
-		connMetrics.AddAuthenticated("key-1")
+		connMetrics.AddAuthentication("key-1")
 		setNow(time.Date(2010, 1, 2, 3, 4, 10, .0, time.Local))
 
 		expected := strings.NewReader(`
@@ -144,7 +144,7 @@ func TestTunnelTimePerKeyDoesNotPanicOnUnknownClosedConnection(t *testing.T) {
 	ssMetrics, _ := NewServiceMetrics(nil)
 
 	connMetrics := ssMetrics.AddOpenTCPConnection(&fakeConn{})
-	connMetrics.AddClosed("OK", metrics.ProxyMetrics{}, time.Minute)
+	connMetrics.AddClose("OK", metrics.ProxyMetrics{}, time.Minute)
 
 	err := promtest.GatherAndCompare(
 		reg,
@@ -172,8 +172,8 @@ func BenchmarkCloseTCP(b *testing.B) {
 	duration := time.Minute
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		connMetrics.AddAuthenticated(accessKey)
-		connMetrics.AddClosed(status, data, duration)
+		connMetrics.AddAuthentication(accessKey)
+		connMetrics.AddClose(status, data, duration)
 	}
 }
 
@@ -216,6 +216,6 @@ func BenchmarkClose(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		udpMetrics := ssMetrics.AddOpenUDPAssociation(&fakeConn{})
-		udpMetrics.AddClosed()
+		udpMetrics.AddClose()
 	}
 }

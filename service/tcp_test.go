@@ -235,13 +235,13 @@ var _ TCPConnMetrics = (*probeTestMetrics)(nil)
 
 var _ ShadowsocksConnMetrics = (*fakeShadowsocksMetrics)(nil)
 
-func (m *probeTestMetrics) AddClosed(status string, data metrics.ProxyMetrics, duration time.Duration) {
+func (m *probeTestMetrics) AddClose(status string, data metrics.ProxyMetrics, duration time.Duration) {
 	m.mu.Lock()
 	m.closeStatus = append(m.closeStatus, status)
 	m.mu.Unlock()
 }
 
-func (m *probeTestMetrics) AddAuthenticated(accessKey string) {
+func (m *probeTestMetrics) AddAuthentication(accessKey string) {
 }
 
 func (m *probeTestMetrics) AddProbe(status, drainResult string, clientProxyBytes int64) {

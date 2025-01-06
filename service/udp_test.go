@@ -152,28 +152,28 @@ func (m *natTestMetrics) AddNATEntry() {
 }
 func (m *natTestMetrics) RemoveNATEntry() {}
 
-type fakeUDPAssocationMetrics struct {
+type fakeUDPAssociationMetrics struct {
 	accessKey       string
 	upstreamPackets []udpReport
 	mu              sync.Mutex
 }
 
-var _ UDPAssocationMetrics = (*fakeUDPAssocationMetrics)(nil)
+var _ UDPAssociationMetrics = (*fakeUDPAssociationMetrics)(nil)
 
-func (m *fakeUDPAssocationMetrics) AddAuthenticated(key string) {
+func (m *fakeUDPAssociationMetrics) AddAuthentication(key string) {
 	m.accessKey = key
 }
 
-func (m *fakeUDPAssocationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
+func (m *fakeUDPAssociationMetrics) AddPacketFromClient(status string, clientProxyBytes, proxyTargetBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.upstreamPackets = append(m.upstreamPackets, udpReport{m.accessKey, status, clientProxyBytes, proxyTargetBytes})
 }
 
-func (m *fakeUDPAssocationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
+func (m *fakeUDPAssociationMetrics) AddPacketFromTarget(status string, targetProxyBytes, proxyClientBytes int64) {
 }
 
-func (m *fakeUDPAssocationMetrics) AddClosed() {}
+func (m *fakeUDPAssociationMetrics) AddClose() {}
 
 // sendSSPayload sends a single Shadowsocks packet to the provided connection.
 // The packet is constructed with the given address, cipher, and payload.
@@ -198,8 +198,8 @@ func startTestHandler() (PacketHandler, func(target net.Addr, payload []byte), *
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	handler.SetTargetPacketListener(&packetListener{targetConn})
-	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-		return handler.NewAssociation(conn, nil)
+	go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
+		return handler.NewPacketAssociation(conn, nil)
 	}, &natTestMetrics{})
 	return handler, func(target net.Addr, payload []byte) {
 		sendSSPayload(clientConn, target, cipher, payload)
@@ -256,9 +256,9 @@ func TestUpstreamMetrics(t *testing.T) {
 	clientConn := makePacketConn()
 	targetConn := makePacketConn()
 	handler.SetTargetPacketListener(&packetListener{targetConn})
-	metrics := &fakeUDPAssocationMetrics{}
-	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-		return handler.NewAssociation(conn, metrics)
+	metrics := &fakeUDPAssociationMetrics{}
+	go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
+		return handler.NewPacketAssociation(conn, metrics)
 	}, &natTestMetrics{})
 
 	// Test both the first-packet and subsequent-packet cases.
@@ -379,8 +379,8 @@ func TestTimedPacketConn(t *testing.T) {
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
 		handler.SetTargetPacketListener(&packetListener{targetConn})
-		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-			return handler.NewAssociation(conn, nil)
+		go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
+			return handler.NewPacketAssociation(conn, nil)
 		}, &natTestMetrics{})
 
 		// Send one DNS query.
@@ -407,8 +407,8 @@ func TestTimedPacketConn(t *testing.T) {
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
 		handler.SetTargetPacketListener(&packetListener{targetConn})
-		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-			return handler.NewAssociation(conn, nil)
+		go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
+			return handler.NewPacketAssociation(conn, nil)
 		}, &natTestMetrics{})
 
 		// Send one non-DNS packet.
@@ -435,8 +435,8 @@ func TestTimedPacketConn(t *testing.T) {
 		clientConn := makePacketConn()
 		targetConn := makePacketConn()
 		handler.SetTargetPacketListener(&packetListener{targetConn})
-		go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-			return handler.NewAssociation(conn, nil)
+		go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
+			return handler.NewPacketAssociation(conn, nil)
 		}, &natTestMetrics{})
 
 		// Send two DNS packets.
@@ -626,8 +626,8 @@ func TestUDPEarlyClose(t *testing.T) {
 	}
 	require.Nil(t, clientConn.Close())
 	// This should return quickly without timing out.
-	go PacketServe(clientConn, func(conn net.Conn) (Association, error) {
-		return ph.NewAssociation(conn, &NoOpUDPAssociationMetrics{})
+	go PacketServe(clientConn, func(conn net.Conn) (PacketAssociation, error) {
+		return ph.NewPacketAssociation(conn, &NoOpUDPAssociationMetrics{})
 	}, &natTestMetrics{})
 }
 
