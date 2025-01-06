@@ -179,8 +179,8 @@ func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetr
 type NewAssociationFunc func(conn net.Conn) (PacketAssociation, error)
 
 // PacketServe listens for UDP packets on the provided [net.PacketConn], creates
-// and manages NAT associations, and invokes the provided `handle` function for
-// each association. It uses a NAT map to track active associations and handles
+// and manages NAT associations, and invokes the `HandlePacket` function for
+// each packet. It uses a NAT map to track active associations and handles
 // their lifecycle.
 func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, metrics NATMetrics) {
 	nm := newNATmap()
