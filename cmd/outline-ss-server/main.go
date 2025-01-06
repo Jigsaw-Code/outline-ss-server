@@ -242,7 +242,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					return err
 				}
 				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
-				go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
+				go service.PacketServe(pc, ssService.NewPacketAssociation, s.serverMetrics)
 			}
 
 			for _, serviceConfig := range config.Services {
@@ -286,7 +286,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							return serviceConfig.Dialer.Fwmark
 						}())
-						go service.PacketServe(pc, ssService.NewAssociation, s.serverMetrics)
+						go service.PacketServe(pc, ssService.NewPacketAssociation, s.serverMetrics)
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)
