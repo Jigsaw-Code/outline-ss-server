@@ -357,7 +357,8 @@ func (m *natmap) Close() error {
 // Association represents a UDP association that handles incoming packets
 // and forwards them to a target connection.
 type Association interface {
-	// Handle reads data from the given connection and handles incoming packets.
+	// Handle reads data from the given connection and handles incoming and
+	// outgoing packets.
 	Handle(conn net.Conn)
 
 	// HandlePacket processes a single incoming packet.
