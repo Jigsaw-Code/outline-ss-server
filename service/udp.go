@@ -123,8 +123,10 @@ type PacketHandler interface {
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// SetTargetPacketListener sets the packet listener to use for target connections.
 	SetTargetPacketListener(targetListener transport.PacketListener)
-	// NewAssociation creates a new Association instance.
-	NewAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (Association, error)
+	// NewConnAssociation creates a new ConnAssociation.
+	NewConnAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (ConnAssociation, error)
+	// NewPacketAssociation creates a new PacketAssociation.
+	NewPacketAssociation(conn net.Conn, connMetrics UDPAssocationMetrics) (PacketAssociation, error)
 }
 
 func (h *packetHandler) SetLogger(l *slog.Logger) {
@@ -142,7 +144,7 @@ func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketL
 	h.targetListener = targetListener
 }
 
-func (h *packetHandler) NewAssociation(conn net.Conn, m UDPAssocationMetrics) (Association, error) {
+func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssocationMetrics) (*association, error) {
 	if m == nil {
 		m = &NoOpUDPAssociationMetrics{}
 	}
@@ -166,12 +168,20 @@ func (h *packetHandler) NewAssociation(conn net.Conn, m UDPAssocationMetrics) (A
 	}, nil
 }
 
-type NewAssociationFunc func(conn net.Conn) (Association, error)
+func (h *packetHandler) NewConnAssociation(conn net.Conn, m UDPAssocationMetrics) (ConnAssociation, error) {
+	return h.newAssociation(conn, m)
+}
+
+func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssocationMetrics) (PacketAssociation, error) {
+	return h.newAssociation(conn, m)
+}
+
+type NewAssociationFunc func(conn net.Conn) (PacketAssociation, error)
 
 // PacketServe listens for UDP packets on the provided [net.PacketConn], creates
-// creates and manages NAT associations, and invokes the provided `handle`
-// function for each association. It uses a NAT map to track active associations
-// and handles their lifecycle.
+// and manages NAT associations, and invokes the provided `handle` function for
+// each association. It uses a NAT map to track active associations and handles
+// their lifecycle.
 func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, metrics NATMetrics) {
 	nm := newNATmap()
 	defer nm.Close()
@@ -310,14 +320,14 @@ func (c *timedPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
 // Packet NAT table
 type natmap struct {
 	sync.RWMutex
-	associations map[string]Association
+	associations map[string]PacketAssociation
 }
 
 func newNATmap() *natmap {
-	return &natmap{associations: make(map[string]Association)}
+	return &natmap{associations: make(map[string]PacketAssociation)}
 }
 
-func (m *natmap) Get(clientAddr string) Association {
+func (m *natmap) Get(clientAddr string) PacketAssociation {
 	m.RLock()
 	defer m.RUnlock()
 	return m.associations[clientAddr]
@@ -334,7 +344,7 @@ func (m *natmap) Del(clientAddr string) {
 
 // Add adds a new UDP NAT entry to the natmap and returns a closure to delete
 // the entry.
-func (m *natmap) Add(clientAddr string, assoc Association) {
+func (m *natmap) Add(clientAddr string, assoc PacketAssociation) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -354,13 +364,18 @@ func (m *natmap) Close() error {
 	return err
 }
 
-// Association represents a UDP association that handles incoming packets
-// and forwards them to a target connection.
-type Association interface {
+// ConnAssociation represents a UDP association that handles incoming packets
+// from a [net.Conn] and forwards them to a target connection, and vice versa.
+// Used by Caddy.
+type ConnAssociation interface {
 	// Handle reads data from the given connection and handles incoming and
 	// outgoing packets.
 	Handle(conn net.Conn)
+}
 
+// PacketAssociation represents a UDP association that handles individual
+// incoming packets. Used by outline-ss-server.
+type PacketAssociation interface {
 	// HandlePacket processes a single incoming packet.
 	//
 	// pkt contains the raw packet data.
@@ -390,7 +405,8 @@ type association struct {
 	findAccessKeyOnce sync.Once
 }
 
-var _ Association = (*association)(nil)
+var _ ConnAssociation = (*association)(nil)
+var _ PacketAssociation = (*association)(nil)
 
 func (a *association) debugLog(template string, attrs ...slog.Attr) {
 	debugUDP(a.logger, template, attrs...)

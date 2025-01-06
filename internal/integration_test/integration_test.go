@@ -322,8 +322,8 @@ func TestUDPEcho(t *testing.T) {
 	proxy.SetTargetIPValidator(allowAll)
 	natMetrics := &natTestMetrics{}
 	associationMetrics := &fakeUDPAssocationMetrics{}
-	go service.PacketServe(proxyConn, func(conn net.Conn) (service.Association, error) {
-		return proxy.NewAssociation(conn, associationMetrics)
+	go service.PacketServe(proxyConn, func(conn net.Conn) (service.PacketAssociation, error) {
+		return proxy.NewPacketAssociation(conn, associationMetrics)
 	}, natMetrics)
 
 	cryptoKey, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, secrets[0])
@@ -549,8 +549,8 @@ func BenchmarkUDPEcho(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(server, func(conn net.Conn) (service.Association, error) {
-			return proxy.NewAssociation(conn, nil)
+		service.PacketServe(server, func(conn net.Conn) (service.PacketAssociation, error) {
+			return proxy.NewPacketAssociation(conn, nil)
 		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
@@ -595,8 +595,8 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(proxyConn, func(conn net.Conn) (service.Association, error) {
-			return proxy.NewAssociation(conn, nil)
+		service.PacketServe(proxyConn, func(conn net.Conn) (service.PacketAssociation, error) {
+			return proxy.NewPacketAssociation(conn, nil)
 		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
