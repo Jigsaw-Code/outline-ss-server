@@ -22,9 +22,9 @@ import (
 )
 
 type ServiceConfig struct {
-	Listeners []ListenerConfig `yaml:"listeners"`
-	Keys      []KeyConfig      `yaml:"keys"`
-	Dialer    DialerConfig     `yaml:"dialer"`
+	Listeners []ListenerConfig
+	Keys      []KeyConfig
+	Dialer    DialerConfig
 }
 
 type ListenerType string
@@ -38,15 +38,15 @@ const (
 )
 
 type WebServerConfig struct {
-	ID        string   `yaml:"id"`
+	ID        string   
 	Listeners []string `yaml:"listen"`
 }
 
 type ListenerConfig struct {
-	Type      ListenerType `yaml:"type"`
-	Address   string       `yaml:"address,omitempty"`
+	Type      ListenerType
+	Address   string       `yaml:",omitempty"`
 	WebServer string       `yaml:"web_server,omitempty"`
-	Path      string       `yaml:"path,omitempty"`
+	Path      string       `yaml:",omitempty"`
 }
 
 type DialerConfig struct {
@@ -54,14 +54,14 @@ type DialerConfig struct {
 }
 
 type KeyConfig struct {
-	ID     string `yaml:"id"`
-	Cipher string `yaml:"cipher"`
-	Secret string `yaml:"secret"`
+	ID     string
+	Cipher string
+	Secret string
 }
 
 type LegacyKeyServiceConfig struct {
 	KeyConfig `yaml:",inline"`
-	Port      int `yaml:"port"`
+	Port      int
 }
 
 type WebConfig struct {
@@ -69,12 +69,12 @@ type WebConfig struct {
 }
 
 type Config struct {
-	Web      WebConfig       `yaml:"web"`
-	Services []ServiceConfig `yaml:"services"`
+	Web      WebConfig       
+	Services []ServiceConfig 
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
 	// using the newer `services` format.
-	Keys []LegacyKeyServiceConfig `yaml:"keys"`
+	Keys []LegacyKeyServiceConfig 
 }
 
 // Validate checks that the config is valid.

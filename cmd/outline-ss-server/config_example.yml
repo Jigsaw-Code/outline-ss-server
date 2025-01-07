@@ -16,7 +16,7 @@ web:
   servers:
     - id: my_web_server
       listen:
-        - "[::]:8000"
+        - "127.0.0.1:8000"
 
 services:
   - listeners:
@@ -28,10 +28,10 @@ services:
         address: "[::]:9000"
       - type: websocket-stream
         web_server: my_web_server
-        path: "/tcp"
+        path: "/SECRET/tcp"  # Prevent probing by serving under a secret path.
       - type: websocket-packet
         web_server: my_web_server
-        path: "/udp"
+        path: "/SECRET/udp"  # Prevent probing by serving under a secret path.
     keys:
       - id: user-0
         cipher: chacha20-ietf-poly1305

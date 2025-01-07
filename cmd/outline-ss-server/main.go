@@ -353,6 +353,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
 						mux.Handle(lnConfig.Path, http.StripPrefix(lnConfig.Path, handler))
+						slog.Info("WebSocket stream service started.", "ID", lnConfig.WebServer, "path", lnConfig.Path)
 					case listenerTypeWebsocketPacket:
 						if _, exists := webServers[lnConfig.WebServer]; !exists {
 							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
@@ -379,6 +380,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
 						mux.Handle(lnConfig.Path, http.StripPrefix(lnConfig.Path, handler))
+						slog.Info("WebSocket packet service started.", "ID", lnConfig.WebServer, "path", lnConfig.Path)
 					default:
 						return errors.New("unsupported listener configuration")
 					}
