@@ -355,11 +355,11 @@ func (m *natmap) Close() error {
 	return err
 }
 
-func HandleAssociation(conn net.Conn, assoc PacketAssociation) { 
+func HandleAssociation(assoc PacketAssociation) { 
 	for {
 		lazySlice := readBufPool.LazySlice()
 		buf := lazySlice.Acquire()
-		n, err := conn.Read(buf)
+		n, err := assoc.Read(buf)
 		if errors.Is(err, net.ErrClosed) {
 			lazySlice.Release()
 			return
@@ -384,8 +384,12 @@ type PacketAssociation interface {
 	// released after the packet is processed.
 	HandlePacket(pkt []byte, lazySlice slicepool.LazySlice)
 
+	// Read reads data from the association.
+	Read(b []byte) (n int, err error)
+
 	// Done returns a channel that is closed when the association is closed.
 	Done() <-chan struct{}
+
 
 	// Close closes the association and releases any associated resources.
 	Close() error

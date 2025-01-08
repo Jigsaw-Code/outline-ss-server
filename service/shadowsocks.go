@@ -148,7 +148,7 @@ func (s *ssService) HandleAssociation(conn net.Conn) error {
 	if err != nil {
 		return fmt.Errorf("failed to handle association: %v", err)
 	}
-	HandleAssociation(conn, assoc)
+	HandleAssociation(assoc)
 	return nil
 }
 
