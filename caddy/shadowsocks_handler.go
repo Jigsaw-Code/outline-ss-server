@@ -16,6 +16,7 @@ package caddy
 
 import (
 	"container/list"
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -31,6 +32,11 @@ import (
 const serverUDPBufferSize = 64 * 1024
 
 const ssModuleName = "layer4.handlers.shadowsocks"
+
+type OutlineService interface {
+	HandleStream(ctx context.Context, conn transport.StreamConn)
+	HandleAssociation(conn net.Conn) error
+}
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -48,7 +54,7 @@ type KeyConfig struct {
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
-	service outline.Service
+	service OutlineService
 	logger  *slog.Logger
 }
 
@@ -119,11 +125,9 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	case transport.StreamConn:
 		h.service.HandleStream(cx.Context, conn)
 	case net.Conn:
-		assoc, err := h.service.NewPacketAssociation(conn)
-		if err != nil {
-			return fmt.Errorf("failed to handle association: %v", err)
+		if err := h.service.HandleAssociation(conn); err != nil {
+			return err
 		}
-		outline.HandleAssociation(conn, assoc)
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}

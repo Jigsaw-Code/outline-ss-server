@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -41,11 +42,6 @@ type ServiceMetrics interface {
 	AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration)
 }
 
-type Service interface {
-	HandleStream(ctx context.Context, conn transport.StreamConn)
-	NewPacketAssociation(conn net.Conn) (PacketAssociation, error)
-}
-
 // Option is a Shadowsocks service constructor option.
 type Option func(s *ssService)
 
@@ -63,7 +59,7 @@ type ssService struct {
 }
 
 // NewShadowsocksService creates a new Shadowsocks service.
-func NewShadowsocksService(opts ...Option) (Service, error) {
+func NewShadowsocksService(opts ...Option) (*ssService, error) {
 	s := &ssService{}
 
 	for _, opt := range opts {
@@ -145,6 +141,17 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 	}
 	s.sh.Handle(ctx, conn, metrics)
 }
+
+// HandleAssociation handles a Shadowsocks packet-based connection.
+func (s *ssService) HandleAssociation(conn net.Conn) error {
+	assoc, err := s.NewPacketAssociation(conn)
+	if err != nil {
+		return fmt.Errorf("failed to handle association: %v", err)
+	}
+	HandleAssociation(conn, assoc)
+	return nil
+}
+
 
 // NewPacketAssociation creates a new Shadowsocks packet-based association.
 func (s *ssService) NewPacketAssociation(conn net.Conn) (PacketAssociation, error) {
