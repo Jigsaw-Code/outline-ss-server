@@ -29,8 +29,6 @@ import (
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 )
 
-const serverUDPBufferSize = 64 * 1024
-
 const ssModuleName = "layer4.handlers.shadowsocks"
 
 type OutlineService interface {
