@@ -119,11 +119,11 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	case transport.StreamConn:
 		h.service.HandleStream(cx.Context, conn)
 	case net.Conn:
-		assoc, err := h.service.NewConnAssociation(conn)
+		assoc, err := h.service.NewPacketAssociation(conn)
 		if err != nil {
-			return fmt.Errorf("Failed to handle association: %v", err)
+			return fmt.Errorf("failed to handle association: %v", err)
 		}
-		assoc.Handle()
+		outline.HandleAssociation(conn, assoc)
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}

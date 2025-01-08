@@ -43,7 +43,6 @@ type ServiceMetrics interface {
 
 type Service interface {
 	HandleStream(ctx context.Context, conn transport.StreamConn)
-	NewConnAssociation(conn net.Conn) (ConnAssociation, error)
 	NewPacketAssociation(conn net.Conn) (PacketAssociation, error)
 }
 
@@ -147,18 +146,7 @@ func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn)
 	s.sh.Handle(ctx, conn, metrics)
 }
 
-// NewConnAssociation creates a new Shadowsocks packet-based association that
-// handles incoming packets. Used by Caddy.
-func (s *ssService) NewConnAssociation(conn net.Conn) (ConnAssociation, error) {
-	var metrics UDPAssociationMetrics
-	if s.metrics != nil {
-		metrics = s.metrics.AddOpenUDPAssociation(conn)
-	}
-	return s.ph.NewConnAssociation(conn, metrics)
-}
-
 // NewPacketAssociation creates a new Shadowsocks packet-based association.
-// Used by outline-ss-server.
 func (s *ssService) NewPacketAssociation(conn net.Conn) (PacketAssociation, error) {
 	var metrics UDPAssociationMetrics
 	if s.metrics != nil {

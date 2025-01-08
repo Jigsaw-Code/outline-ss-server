@@ -123,8 +123,6 @@ type PacketHandler interface {
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// SetTargetPacketListener sets the packet listener to use for target connections.
 	SetTargetPacketListener(targetListener transport.PacketListener)
-	// NewConnAssociation creates a new ConnAssociation.
-	NewConnAssociation(conn net.Conn, connMetrics UDPAssociationMetrics) (ConnAssociation, error)
 	// NewPacketAssociation creates a new PacketAssociation.
 	NewPacketAssociation(conn net.Conn, connMetrics UDPAssociationMetrics) (PacketAssociation, error)
 }
@@ -144,7 +142,7 @@ func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketL
 	h.targetListener = targetListener
 }
 
-func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssociationMetrics) (*association, error) {
+func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetrics) (PacketAssociation, error) {
 	if m == nil {
 		m = &NoOpUDPAssociationMetrics{}
 	}
@@ -166,14 +164,6 @@ func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssociationMetrics) (
 		targetIPValidator: h.targetIPValidator,
 		doneCh:            make(chan struct{}),
 	}, nil
-}
-
-func (h *packetHandler) NewConnAssociation(conn net.Conn, m UDPAssociationMetrics) (ConnAssociation, error) {
-	return h.newAssociation(conn, m)
-}
-
-func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetrics) (PacketAssociation, error) {
-	return h.newAssociation(conn, m)
 }
 
 type NewAssociationFunc func(conn net.Conn) (PacketAssociation, error)
@@ -365,17 +355,27 @@ func (m *natmap) Close() error {
 	return err
 }
 
-// ConnAssociation represents a UDP association that handles incoming and
-// outgoing packets from a [net.Conn] and forwards them to a target connection,
-// and vice versa. Used by Caddy.
-type ConnAssociation interface {
-	// Handle reads data from the association and handles incoming and outgoing
-	// packets.
-	Handle()
+func HandleAssociation(conn net.Conn, assoc PacketAssociation) { 
+	for {
+		lazySlice := readBufPool.LazySlice()
+		buf := lazySlice.Acquire()
+		n, err := conn.Read(buf)
+		if errors.Is(err, net.ErrClosed) {
+			lazySlice.Release()
+			return
+		}
+		pkt := buf[:n]
+		select {
+		case <-assoc.Done():
+			lazySlice.Release()
+			return
+		default:
+			go assoc.HandlePacket(pkt, lazySlice)
+		}
+	}
 }
 
-// PacketAssociation represents a UDP association that handles individual
-// incoming packets. Used by outline-ss-server.
+// PacketAssociation represents a UDP association that handles individual packets.
 type PacketAssociation interface {
 	// HandlePacket processes a single incoming packet.
 	//
@@ -406,31 +406,10 @@ type association struct {
 	findAccessKeyOnce sync.Once
 }
 
-var _ ConnAssociation = (*association)(nil)
 var _ PacketAssociation = (*association)(nil)
 
 func (a *association) debugLog(template string, attrs ...slog.Attr) {
 	debugUDP(a.logger, template, attrs...)
-}
-
-func (a *association) Handle() {
-	for {
-		lazySlice := a.bufPool.LazySlice()
-		buf := lazySlice.Acquire()
-		n, err := a.Conn.Read(buf)
-		if errors.Is(err, net.ErrClosed) {
-			lazySlice.Release()
-			return
-		}
-		pkt := buf[:n]
-		select {
-		case <-a.Done():
-			lazySlice.Release()
-			return
-		default:
-			go a.HandlePacket(pkt, lazySlice)
-		}
-	}
 }
 
 // Given the decrypted contents of a UDP packet, return
