@@ -180,7 +180,7 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 		lazySlice := readBufPool.LazySlice()
 		buffer := lazySlice.Acquire()
 
-		func() {
+		isClosed := func() bool {
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
@@ -192,10 +192,10 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 			if err != nil {
 				lazySlice.Release()
 				if errors.Is(err, net.ErrClosed) {
-					return
+					return true
 				}
 				slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
-				return
+				return false
 			}
 			pkt := buffer[:n]
 
@@ -206,7 +206,7 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 				assoc, err = newAssociation(conn)
 				if err != nil {
 					slog.Error("Failed to handle association", slog.Any("err", err))
-					return
+					return false
 				}
 
 				metrics.AddNATEntry()
@@ -220,7 +220,11 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 			default:
 				go assoc.HandlePacket(pkt, lazySlice)
 			}
+			return false
 		}()
+		if isClosed {
+			return
+		}
 	}
 }
 
@@ -389,7 +393,6 @@ type PacketAssociation interface {
 
 	// Done returns a channel that is closed when the association is closed.
 	Done() <-chan struct{}
-
 
 	// Close closes the association and releases any associated resources.
 	Close() error
