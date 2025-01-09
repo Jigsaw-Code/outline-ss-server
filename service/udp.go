@@ -123,8 +123,6 @@ type PacketHandler interface {
 	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// SetTargetPacketListener sets the packet listener to use for target connections.
 	SetTargetPacketListener(targetListener transport.PacketListener)
-	// NewConnAssociation creates a new ConnAssociation.
-	NewConnAssociation(conn net.Conn, connMetrics UDPAssociationMetrics) (ConnAssociation, error)
 	// NewPacketAssociation creates a new PacketAssociation.
 	NewPacketAssociation(conn net.Conn, connMetrics UDPAssociationMetrics) (PacketAssociation, error)
 }
@@ -144,7 +142,7 @@ func (h *packetHandler) SetTargetPacketListener(targetListener transport.PacketL
 	h.targetListener = targetListener
 }
 
-func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssociationMetrics) (*association, error) {
+func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetrics) (PacketAssociation, error) {
 	if m == nil {
 		m = &NoOpUDPAssociationMetrics{}
 	}
@@ -168,14 +166,6 @@ func (h *packetHandler) newAssociation(conn net.Conn, m UDPAssociationMetrics) (
 	}, nil
 }
 
-func (h *packetHandler) NewConnAssociation(conn net.Conn, m UDPAssociationMetrics) (ConnAssociation, error) {
-	return h.newAssociation(conn, m)
-}
-
-func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetrics) (PacketAssociation, error) {
-	return h.newAssociation(conn, m)
-}
-
 type NewAssociationFunc func(conn net.Conn) (PacketAssociation, error)
 
 // PacketServe listens for UDP packets on the provided [net.PacketConn], creates
@@ -190,7 +180,7 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 		lazySlice := readBufPool.LazySlice()
 		buffer := lazySlice.Acquire()
 
-		func() {
+		isClosed := func() bool {
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("Panic in UDP loop. Continuing to listen.", "err", r)
@@ -202,10 +192,10 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 			if err != nil {
 				lazySlice.Release()
 				if errors.Is(err, net.ErrClosed) {
-					return
+					return true
 				}
 				slog.Warn("Failed to read from client. Continuing to listen.", "err", err)
-				return
+				return false
 			}
 			pkt := buffer[:n]
 
@@ -216,7 +206,7 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 				assoc, err = newAssociation(conn)
 				if err != nil {
 					slog.Error("Failed to handle association", slog.Any("err", err))
-					return
+					return false
 				}
 
 				metrics.AddNATEntry()
@@ -230,7 +220,11 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, m
 			default:
 				go assoc.HandlePacket(pkt, lazySlice)
 			}
+			return false
 		}()
+		if isClosed {
+			return
+		}
 	}
 }
 
@@ -365,17 +359,27 @@ func (m *natmap) Close() error {
 	return err
 }
 
-// ConnAssociation represents a UDP association that handles incoming and
-// outgoing packets from a [net.Conn] and forwards them to a target connection,
-// and vice versa. Used by Caddy.
-type ConnAssociation interface {
-	// Handle reads data from the association and handles incoming and outgoing
-	// packets.
-	Handle()
+func HandleAssociation(assoc PacketAssociation) { 
+	for {
+		lazySlice := readBufPool.LazySlice()
+		buf := lazySlice.Acquire()
+		n, err := assoc.Read(buf)
+		if errors.Is(err, net.ErrClosed) {
+			lazySlice.Release()
+			return
+		}
+		pkt := buf[:n]
+		select {
+		case <-assoc.Done():
+			lazySlice.Release()
+			return
+		default:
+			go assoc.HandlePacket(pkt, lazySlice)
+		}
+	}
 }
 
-// PacketAssociation represents a UDP association that handles individual
-// incoming packets. Used by outline-ss-server.
+// PacketAssociation represents a UDP association that handles individual packets.
 type PacketAssociation interface {
 	// HandlePacket processes a single incoming packet.
 	//
@@ -383,6 +387,9 @@ type PacketAssociation interface {
 	// lazySlice is the LazySlice that holds the pkt buffer, which should be
 	// released after the packet is processed.
 	HandlePacket(pkt []byte, lazySlice slicepool.LazySlice)
+
+	// Read reads data from the association.
+	Read(b []byte) (n int, err error)
 
 	// Done returns a channel that is closed when the association is closed.
 	Done() <-chan struct{}
@@ -406,31 +413,10 @@ type association struct {
 	findAccessKeyOnce sync.Once
 }
 
-var _ ConnAssociation = (*association)(nil)
 var _ PacketAssociation = (*association)(nil)
 
 func (a *association) debugLog(template string, attrs ...slog.Attr) {
 	debugUDP(a.logger, template, attrs...)
-}
-
-func (a *association) Handle() {
-	for {
-		lazySlice := a.bufPool.LazySlice()
-		buf := lazySlice.Acquire()
-		n, err := a.Conn.Read(buf)
-		if errors.Is(err, net.ErrClosed) {
-			lazySlice.Release()
-			return
-		}
-		pkt := buf[:n]
-		select {
-		case <-a.Done():
-			lazySlice.Release()
-			return
-		default:
-			go a.HandlePacket(pkt, lazySlice)
-		}
-	}
 }
 
 // Given the decrypted contents of a UDP packet, return
