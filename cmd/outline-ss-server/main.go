@@ -16,7 +16,6 @@ package main
 
 import (
 	"container/list"
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -28,7 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
@@ -60,11 +58,6 @@ func init() {
 		os.Stderr,
 		&tint.Options{NoColor: !term.IsTerminal(int(os.Stderr.Fd())), Level: logLevel},
 	)
-}
-
-type OutlineService interface {
-	HandleStream(ctx context.Context, conn transport.StreamConn)
-	NewPacketAssociation(conn net.Conn) (service.PacketAssociation, error)
 }
 
 type OutlineServer struct {
@@ -230,7 +223,6 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				ciphers := service.NewCipherList()
 				ciphers.Update(cipherList)
 
-				var ssService OutlineService
 				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
 					service.WithMetrics(s.serviceMetrics),
@@ -258,8 +250,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				if err != nil {
 					return fmt.Errorf("failed to create cipher list from config: %v", err)
 				}
-				var ssService OutlineService
-				ssService, err = service.NewShadowsocksService(
+				ssService, err := service.NewShadowsocksService(
 					service.WithCiphers(ciphers),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
