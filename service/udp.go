@@ -89,9 +89,7 @@ func findAccessKeyUDP(clientIP netip.Addr, dst, src []byte, cipherList CipherLis
 }
 
 type packetHandler struct {
-	logger *slog.Logger
-	// bufPool stores the byte slices used for reading and decrypting packets.
-	bufPool           slicepool.Pool
+	logger            *slog.Logger
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
@@ -107,7 +105,6 @@ func NewPacketHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetrics) P
 	}
 	return &packetHandler{
 		logger:            noopLogger(),
-		bufPool:           slicepool.MakePool(serverUDPBufferSize),
 		ciphers:           cipherList,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
@@ -158,7 +155,6 @@ func (h *packetHandler) NewPacketAssociation(conn net.Conn, m UDPAssociationMetr
 		m:                 m,
 		targetConn:        targetConn,
 		logger:            h.logger.With(slog.Any("client", conn.RemoteAddr()), slog.Any("ltarget", targetConn.LocalAddr())),
-		bufPool:           &h.bufPool,
 		ciphers:           h.ciphers,
 		ssm:               h.ssm,
 		targetIPValidator: h.targetIPValidator,
@@ -359,7 +355,7 @@ func (m *natmap) Close() error {
 	return err
 }
 
-func HandleAssociation(assoc PacketAssociation) { 
+func HandleAssociation(assoc PacketAssociation) {
 	for {
 		lazySlice := readBufPool.LazySlice()
 		buf := lazySlice.Acquire()
@@ -405,7 +401,6 @@ type association struct {
 	logger            *slog.Logger
 	targetConn        net.PacketConn
 	cryptoKey         *shadowsocks.EncryptionKey
-	bufPool           *slicepool.Pool
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
@@ -454,7 +449,7 @@ func (a *association) HandlePacket(pkt []byte, lazySlice slicepool.LazySlice) {
 		a.findAccessKeyOnce.Do(func() {
 			ip := a.raddr.AddrPort().Addr()
 			var keyID string
-			textLazySlice := a.bufPool.LazySlice()
+			textLazySlice := readBufPool.LazySlice()
 			textBuf := textLazySlice.Acquire()
 			unpackStart := time.Now()
 			textData, keyID, a.cryptoKey, err = findAccessKeyUDP(ip, textBuf, pkt, a.ciphers, a.logger)
