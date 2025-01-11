@@ -15,7 +15,6 @@
 package service
 
 import (
-	"context"
 	"log/slog"
 	"net"
 	"time"
@@ -38,12 +37,8 @@ type ShadowsocksConnMetrics interface {
 type ServiceMetrics interface {
 	AddOpenUDPAssociation(conn net.Conn) UDPAssociationMetrics
 	AddOpenTCPConnection(conn net.Conn) TCPConnMetrics
-	AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration)
-}
-
-type Service interface {
-	HandleStream(ctx context.Context, conn transport.StreamConn)
-	NewPacketAssociation(conn net.Conn) (PacketAssociation, error)
+	AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
+	AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration)
 }
 
 // Option is a Shadowsocks service constructor option.
@@ -51,47 +46,38 @@ type Option func(s *ssService)
 
 type ssService struct {
 	logger            *slog.Logger
-	metrics           ServiceMetrics
 	ciphers           CipherList
+	metrics           ServiceMetrics
 	targetIPValidator onet.TargetIPValidator
 	replayCache       *ReplayCache
 
-	streamDialer   transport.StreamDialer
-	sh             StreamHandler
-	packetListener transport.PacketListener
-	ph             PacketHandler
+	streamDialer transport.StreamDialer
 }
 
-// NewShadowsocksService creates a new Shadowsocks service.
-func NewShadowsocksService(opts ...Option) (*ssService, error) {
-	s := &ssService{}
+// NewShadowsocksHandlers creates new Shadowsocks stream and packet handlers.
+func NewShadowsocksHandlers(opts ...Option) (StreamHandler, PacketHandler) {
+	s := &ssService{
+		logger: noopLogger(),
+	}
 
 	for _, opt := range opts {
 		opt(s)
 	}
 
-	// If no logger is provided via options, use a noop logger.
-	if s.logger == nil {
-		s.logger = noopLogger()
-	}
-
 	// TODO: Register initial data metrics at zero.
-	s.sh = NewStreamHandler(
-		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "tcp"}, s.logger),
+	sh := NewStreamHandler(
+		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{s.metrics.AddTCPCipherSearch}, s.logger),
 		tcpReadTimeout,
 	)
 	if s.streamDialer != nil {
-		s.sh.SetTargetDialer(s.streamDialer)
+		sh.SetTargetDialer(s.streamDialer)
 	}
-	s.sh.SetLogger(s.logger)
+	sh.SetLogger(s.logger)
 
-	s.ph = NewPacketHandler(s.ciphers, &ssConnMetrics{ServiceMetrics: s.metrics, proto: "udp"})
-	if s.packetListener != nil {
-		s.ph.SetTargetPacketListener(s.packetListener)
-	}
-	s.ph.SetLogger(s.logger)
+	ph := NewPacketHandler(s.ciphers, &ssConnMetrics{s.metrics.AddUDPCipherSearch})
+	ph.SetLogger(s.logger)
 
-	return s, nil
+	return sh, ph
 }
 
 // WithLogger can be used to provide a custom log target. If not provided,
@@ -109,7 +95,6 @@ func WithCiphers(ciphers CipherList) Option {
 	}
 }
 
-// WithMetrics option function.
 func WithMetrics(metrics ServiceMetrics) Option {
 	return func(s *ssService) {
 		s.metrics = metrics
@@ -130,41 +115,15 @@ func WithStreamDialer(dialer transport.StreamDialer) Option {
 	}
 }
 
-// WithPacketListener option function.
-func WithPacketListener(listener transport.PacketListener) Option {
-	return func(s *ssService) {
-		s.packetListener = listener
-	}
-}
-
-// HandleStream handles a Shadowsocks stream-based connection.
-func (s *ssService) HandleStream(ctx context.Context, conn transport.StreamConn) {
-	var metrics TCPConnMetrics
-	if s.metrics != nil {
-		metrics = s.metrics.AddOpenTCPConnection(conn)
-	}
-	s.sh.Handle(ctx, conn, metrics)
-}
-
-// NewPacketAssociation creates a new Shadowsocks packet-based association.
-func (s *ssService) NewPacketAssociation(conn net.Conn) (PacketAssociation, error) {
-	var metrics UDPAssociationMetrics
-	if s.metrics != nil {
-		metrics = s.metrics.AddOpenUDPAssociation(conn)
-	}
-	return s.ph.NewPacketAssociation(conn, metrics)
-}
-
 type ssConnMetrics struct {
-	ServiceMetrics
-	proto string
+	metricFunc func(accessKeyFound bool, timeToCipher time.Duration)
 }
 
 var _ ShadowsocksConnMetrics = (*ssConnMetrics)(nil)
 
 func (cm *ssConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
-	if cm.ServiceMetrics != nil {
-		cm.ServiceMetrics.AddCipherSearch(cm.proto, accessKeyFound, timeToCipher)
+	if cm.metricFunc != nil {
+		cm.metricFunc(accessKeyFound, timeToCipher)
 	}
 }
 
