@@ -136,7 +136,7 @@ func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice sl
 	connError := func() *onet.ConnectionError {
 		var textData []byte
 
-		cryptoKey, err := assoc.Authenticate(func() (keyID string, cryptoKey *shadowsocks.EncryptionKey, keyErr error) {
+		authenticate := func() (keyID string, cryptoKey *shadowsocks.EncryptionKey, keyErr error) {
 			ip := assoc.ClientAddr().AddrPort().Addr()
 			textLazySlice := readBufPool.LazySlice()
 			textBuf := textLazySlice.Acquire()
@@ -145,10 +145,24 @@ func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice sl
 			timeToCipher := time.Since(unpackStart)
 			textLazySlice.Release()
 			h.ssm.AddCipherSearch(keyErr == nil, timeToCipher)
-			return keyID, cryptoKey, keyErr
-		}, h.handleTargetPacket)
+			return
+		}
 
+		key, err := assoc.DoOnce(func() (any, error) {
+			keyID, key, authErr := authenticate()
+			assoc.Metrics().AddAuthentication(keyID)
+			if authErr == nil {
+				go HandleAssociationTimedCopy(assoc, func(pkt []byte, assoc PacketAssociation) *packetMetrics {
+					return h.handleTarget(pkt, key, assoc)
+				})
+			}
+			return key, authErr
+		})
 		if err != nil {
+			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
+		}
+		cryptoKey, ok := key.(*shadowsocks.EncryptionKey)
+		if !ok {
 			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
 		}
 
@@ -215,7 +229,7 @@ func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *
 // and serializing an IPv6 address from the example range.
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
-func (h *packetHandler) handleTargetPacket(pkt []byte, cryptoKey *shadowsocks.EncryptionKey, assoc PacketAssociation) *packetMetrics {
+func (h *packetHandler) handleTarget(pkt []byte, cryptoKey *shadowsocks.EncryptionKey, assoc PacketAssociation) *packetMetrics {
 	l := h.logger.With(slog.Any("association", assoc))
 
 	expired := false
@@ -492,7 +506,6 @@ type PacketHandleFunc func(pkt []byte, assoc PacketAssociation) *packetMetrics
 
 // PacketHandleFuncWithLazySlice processes a single incoming packet.
 //
-
 // lazySlice is the LazySlice that holds the pkt buffer, which should be
 // released after the packet is processed.
 type PacketHandleFuncWithLazySlice func(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) *packetMetrics
@@ -552,11 +565,11 @@ type PacketAssociation interface {
 	// WriteToTarget writes data to the target side of the association.
 	WriteToTarget(b []byte, addr net.Addr) (int, error)
 
-	// Authenticate authenticates the association.
-	Authenticate(authenticate PacketAuthenticateFunc, handleTarget func(pkt []byte, cryptoKey *shadowsocks.EncryptionKey, assoc PacketAssociation) *packetMetrics) (*shadowsocks.EncryptionKey, error)
-
 	// ClientAddr returns the remote network address of the client connection, if known.
 	ClientAddr() *net.UDPAddr
+
+	// DoOnce executes the provided function only once and caches the result.
+	DoOnce(f func() (any, error)) (any, error)
 
 	// Done returns a channel that is closed when the association is closed.
 	Done() <-chan struct{}
@@ -573,12 +586,14 @@ type PacketAssociation interface {
 }
 
 type association struct {
-	clientConn       net.Conn
-	targetConn       net.PacketConn
-	authenticateOnce sync.Once
-	cryptoKey        *shadowsocks.EncryptionKey
-	m                UDPAssociationMetrics
-	doneCh           chan struct{}
+	clientConn net.Conn
+	targetConn net.PacketConn
+
+	once         sync.Once
+	cachedResult any
+
+	m      UDPAssociationMetrics
+	doneCh chan struct{}
 }
 
 var _ PacketAssociation = (*association)(nil)
@@ -620,24 +635,15 @@ func (a *association) ClientAddr() *net.UDPAddr {
 	return a.clientConn.RemoteAddr().(*net.UDPAddr)
 }
 
-type PacketAuthenticateFunc func() (string, *shadowsocks.EncryptionKey, error)
-
-func (a *association) Authenticate(authenticate PacketAuthenticateFunc, handleTarget func(pkt []byte, cryptoKey *shadowsocks.EncryptionKey, assoc PacketAssociation) *packetMetrics) (*shadowsocks.EncryptionKey, error) {
+func (a *association) DoOnce(f func() (any, error)) (any, error) {
 	var err error
-	a.authenticateOnce.Do(func() {
-		var keyID string
-		keyID, a.cryptoKey, err = authenticate()
-		a.m.AddAuthentication(keyID)
-
-		if err != nil {
-			return
+	a.once.Do(func() {
+		result, err := f()
+		if err == nil {
+			a.cachedResult = result
 		}
-
-		go HandleAssociationTimedCopy(a, func(pkt []byte, assoc PacketAssociation) *packetMetrics {
-			return handleTarget(pkt, a.cryptoKey, assoc)
-		})
 	})
-	return a.cryptoKey, err
+	return a.cachedResult, err
 }
 
 func (a *association) Done() <-chan struct{} {
