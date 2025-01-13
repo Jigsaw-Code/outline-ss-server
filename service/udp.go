@@ -88,7 +88,6 @@ type packetHandler struct {
 	ciphers           CipherList
 	ssm               ShadowsocksConnMetrics
 	targetIPValidator onet.TargetIPValidator
-	onces             map[string]*sync.Once
 }
 
 var _ PacketHandler = (*packetHandler)(nil)
