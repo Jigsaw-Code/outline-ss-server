@@ -252,7 +252,7 @@ func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, crypto
 		// [padding?][salt][address][body][tag][unused]
 		// |--     bodyStart     --|[      readBuf    ]
 		readBuf := pkt[bodyStart:]
-		bodyLen, raddr, err := assoc.ReadFromTarget(readBuf)
+		bodyLen, raddr, err = assoc.ReadFromTarget(readBuf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok {
 				if netErr.Timeout() {
@@ -295,10 +295,10 @@ func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, crypto
 		debugUDP(l, "Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 		status = connError.Status
 	}
-	assoc.Metrics().AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
 	if expired {
 		return errors.New("target connection has expired")
 	}
+	assoc.Metrics().AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
 	return nil
 }
 
@@ -590,6 +590,9 @@ var _ slog.LogValuer = (*association)(nil)
 
 // NewPacketAssociation creates a new packet-based association.
 func NewPacketAssociation(conn net.Conn, listener transport.PacketListener, m UDPAssociationMetrics) (PacketAssociation, error) {
+	if m == nil {
+		m = &NoOpUDPAssociationMetrics{}
+	}
 	// Create the target connection
 	targetConn, err := listener.ListenPacket(context.Background())
 	if err != nil {
