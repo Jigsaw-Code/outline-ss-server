@@ -107,7 +107,7 @@ func NewPacketHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetrics) P
 
 // PacketHandler is a handler that handles UDP assocations.
 type PacketHandler interface {
-	Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) *packetMetrics
+	Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
@@ -146,8 +146,8 @@ func (h *packetHandler) authenticate(pkt []byte, assoc PacketAssociation) ([]byt
 		if keyErr != nil {
 			return nil, keyErr
 		}
-		go HandleAssociationTimedCopy(assoc, func(pkt []byte, assoc PacketAssociation) *packetMetrics {
-			return h.handleTarget(pkt, key, assoc)
+		go HandleAssociationTimedCopy(assoc, func(pkt []byte, assoc PacketAssociation) error {
+			return h.handleTarget(pkt, assoc, key)
 		})
 		return key, nil
 	})
@@ -173,9 +173,8 @@ func (h *packetHandler) authenticate(pkt []byte, assoc PacketAssociation) ([]byt
 	return textData, nil
 }
 
-func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) *packetMetrics {
+func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) {
 	l := h.logger.With(slog.Any("association", assoc))
-	defer lazySlice.Release()
 	defer debugUDP(l, "Done")
 
 	debugUDP(l, "Outbound packet.", slog.Int("bytes", len(pkt)))
@@ -183,7 +182,7 @@ func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice sl
 	var proxyTargetBytes int
 	connError := func() *onet.ConnectionError {
 		textData, err := h.authenticate(pkt, assoc)
-
+		lazySlice.Release()
 		if err != nil {
 			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
 		}
@@ -206,11 +205,7 @@ func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice sl
 		debugUDP(l, "Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 		status = connError.Status
 	}
-	return &packetMetrics{
-		status:   status,
-		bytesIn:  int64(len(pkt)),
-		bytesOut: int64(proxyTargetBytes),
-	}
+	assoc.Metrics().AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
 }
 
 // Given the decrypted contents of a UDP packet, return
@@ -238,7 +233,7 @@ func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *
 // and serializing an IPv6 address from the example range.
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
-func (h *packetHandler) handleTarget(pkt []byte, cryptoKey *shadowsocks.EncryptionKey, assoc PacketAssociation) *packetMetrics {
+func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, cryptoKey *shadowsocks.EncryptionKey) error {
 	l := h.logger.With(slog.Any("association", assoc))
 
 	expired := false
@@ -300,18 +295,11 @@ func (h *packetHandler) handleTarget(pkt []byte, cryptoKey *shadowsocks.Encrypti
 		debugUDP(l, "Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 		status = connError.Status
 	}
-	return &packetMetrics{
-		status:   status,
-		expired:  expired,
-		bytesIn:  int64(bodyLen),
-		bytesOut: int64(proxyClientBytes),
+	assoc.Metrics().AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
+	if expired {
+		return errors.New("target connection has expired")
 	}
-}
-
-type packetMetrics struct {
-	status            string
-	expired           bool
-	bytesIn, bytesOut int64
+	return nil
 }
 
 type NewAssociationFunc func(conn net.Conn) (PacketAssociation, error)
@@ -366,10 +354,7 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, h
 				metrics.RemoveNATEntry()
 				nm.Del(addr.String())
 			default:
-				go func() {
-					metrics := handle(pkt, assoc, lazySlice)
-					assoc.Metrics().AddPacketFromClient(metrics.status, metrics.bytesIn, metrics.bytesOut)
-				}()
+				go handle(pkt, assoc, lazySlice)
 			}
 			return false
 		}()
@@ -511,13 +496,13 @@ func (m *natmap) Close() error {
 }
 
 // PacketHandleFunc processes a single incoming packet.
-type PacketHandleFunc func(pkt []byte, assoc PacketAssociation) *packetMetrics
+type PacketHandleFunc func(pkt []byte, assoc PacketAssociation) error
 
 // PacketHandleFuncWithLazySlice processes a single incoming packet.
 //
 // lazySlice is the LazySlice that holds the pkt buffer, which should be
-// released after the packet is processed.
-type PacketHandleFuncWithLazySlice func(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) *packetMetrics
+// released as soon as the packet is processed.
+type PacketHandleFuncWithLazySlice func(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice)
 
 func HandleAssociation(assoc PacketAssociation, handle PacketHandleFuncWithLazySlice) {
 	for {
@@ -534,10 +519,7 @@ func HandleAssociation(assoc PacketAssociation, handle PacketHandleFuncWithLazyS
 			lazySlice.Release()
 			return
 		default:
-			go func() {
-				metrics := handle(pkt, assoc, lazySlice)
-				assoc.Metrics().AddPacketFromClient(metrics.status, metrics.bytesIn, metrics.bytesOut)
-			}()
+			go handle(pkt, assoc, lazySlice)
 		}
 	}
 }
@@ -552,11 +534,9 @@ func HandleAssociationTimedCopy(assoc PacketAssociation, handle PacketHandleFunc
 	pkt := make([]byte, serverUDPBufferSize)
 
 	for {
-		metrics := handle(pkt, assoc)
-		if metrics.expired {
+		if err := handle(pkt, assoc); err != nil {
 			break
 		}
-		assoc.Metrics().AddPacketFromTarget(metrics.status, metrics.bytesIn, metrics.bytesOut)
 	}
 }
 
