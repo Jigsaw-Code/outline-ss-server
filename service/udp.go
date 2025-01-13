@@ -142,7 +142,7 @@ func (h *packetHandler) authenticate(pkt []byte, assoc PacketAssociation) ([]byt
 		textLazySlice.Release()
 		h.ssm.AddCipherSearch(keyErr == nil, timeToCipher)
 
-		assoc.Metrics().AddAuthentication(keyID)
+		assoc.AddAuthentication(keyID)
 		if keyErr != nil {
 			return nil, keyErr
 		}
@@ -205,7 +205,7 @@ func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice sl
 		debugUDP(l, "Error", slog.String("msg", connError.Message), slog.Any("cause", connError.Cause))
 		status = connError.Status
 	}
-	assoc.Metrics().AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
+	assoc.AddPacketFromClient(status, int64(len(pkt)), int64(proxyTargetBytes))
 }
 
 // Given the decrypted contents of a UDP packet, return
@@ -298,7 +298,7 @@ func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, crypto
 	if expired {
 		return errors.New("target connection has expired")
 	}
-	assoc.Metrics().AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
+	assoc.AddPacketFromTarget(status, int64(bodyLen), int64(proxyClientBytes))
 	return nil
 }
 
@@ -542,6 +542,9 @@ func HandleAssociationTimedCopy(assoc PacketAssociation, handle PacketHandleFunc
 
 // PacketAssociation represents a UDP association.
 type PacketAssociation interface {
+	// TODO(sbruens): Decouple the metrics from the association.
+	UDPAssociationMetrics
+
 	// ReadFromClient reads data from the client side of the association.
 	ReadFromClient(b []byte) (n int, err error)
 
@@ -568,10 +571,6 @@ type PacketAssociation interface {
 
 	// Closes the target side of the association.
 	CloseTarget() error
-
-	// Returns association metrics.
-	// TODO(sbruens): Refactor so this isn't needed.
-	Metrics() UDPAssociationMetrics
 }
 
 type association struct {
@@ -581,11 +580,12 @@ type association struct {
 	once         sync.Once
 	cachedResult any
 
-	m      UDPAssociationMetrics
+	UDPAssociationMetrics
 	doneCh chan struct{}
 }
 
 var _ PacketAssociation = (*association)(nil)
+var _ UDPAssociationMetrics = (*association)(nil)
 var _ slog.LogValuer = (*association)(nil)
 
 // NewPacketAssociation creates a new packet-based association.
@@ -600,10 +600,10 @@ func NewPacketAssociation(conn net.Conn, listener transport.PacketListener, m UD
 	}
 
 	return &association{
-		clientConn: conn,
-		targetConn: targetConn,
-		m:          m,
-		doneCh:     make(chan struct{}),
+		clientConn:            conn,
+		targetConn:            targetConn,
+		UDPAssociationMetrics: m,
+		doneCh:                make(chan struct{}),
 	}, nil
 }
 
@@ -648,17 +648,13 @@ func (a *association) Close() error {
 }
 
 func (a *association) CloseTarget() error {
-	a.m.AddClose()
+	a.UDPAssociationMetrics.AddClose()
 	err := a.targetConn.Close()
 	if err != nil {
 		return err
 	}
 	close(a.doneCh)
 	return nil
-}
-
-func (a *association) Metrics() UDPAssociationMetrics {
-	return a.m
 }
 
 func (a *association) LogValue() slog.Value {
