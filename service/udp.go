@@ -125,6 +125,54 @@ func (h *packetHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPVali
 	h.targetIPValidator = targetIPValidator
 }
 
+func (h *packetHandler) authenticate(pkt []byte, assoc PacketAssociation) ([]byte, error) {
+	var textData []byte
+	keyResult, err := assoc.DoOnce(func() (any, error) {
+		var (
+			keyID  string
+			key    *shadowsocks.EncryptionKey
+			keyErr error
+		)
+		ip := assoc.ClientAddr().AddrPort().Addr()
+		textLazySlice := readBufPool.LazySlice()
+		textBuf := textLazySlice.Acquire()
+		unpackStart := time.Now()
+		textData, keyID, key, keyErr = findAccessKeyUDP(ip, textBuf, pkt, h.ciphers, h.logger)
+		timeToCipher := time.Since(unpackStart)
+		textLazySlice.Release()
+		h.ssm.AddCipherSearch(keyErr == nil, timeToCipher)
+
+		assoc.Metrics().AddAuthentication(keyID)
+		if keyErr != nil {
+			return nil, keyErr
+		}
+		go HandleAssociationTimedCopy(assoc, func(pkt []byte, assoc PacketAssociation) *packetMetrics {
+			return h.handleTarget(pkt, key, assoc)
+		})
+		return key, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	cryptoKey, ok := keyResult.(*shadowsocks.EncryptionKey)
+	if !ok {
+		// This should never happen in practice. We return a `shadowsocks.EncrypTionKey`
+		// in the `authenticate` anonymous function above.
+		return nil, errors.New("authentication result is not an encryption key")
+	}
+
+	if textData == nil {
+		// This is a subsequent packet. First packets are already decrypted as part of the
+		// initial access key search.
+		unpackStart := time.Now()
+		textData, err = shadowsocks.Unpack(nil, pkt, cryptoKey)
+		timeToCipher := time.Since(unpackStart)
+		h.ssm.AddCipherSearch(err == nil, timeToCipher)
+	}
+
+	return textData, nil
+}
+
 func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) *packetMetrics {
 	l := h.logger.With(slog.Any("association", assoc))
 	defer lazySlice.Release()
@@ -134,46 +182,7 @@ func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice sl
 
 	var proxyTargetBytes int
 	connError := func() *onet.ConnectionError {
-		var textData []byte
-
-		authenticate := func() (keyID string, cryptoKey *shadowsocks.EncryptionKey, keyErr error) {
-			ip := assoc.ClientAddr().AddrPort().Addr()
-			textLazySlice := readBufPool.LazySlice()
-			textBuf := textLazySlice.Acquire()
-			unpackStart := time.Now()
-			textData, keyID, cryptoKey, keyErr = findAccessKeyUDP(ip, textBuf, pkt, h.ciphers, h.logger)
-			timeToCipher := time.Since(unpackStart)
-			textLazySlice.Release()
-			h.ssm.AddCipherSearch(keyErr == nil, timeToCipher)
-			return
-		}
-
-		key, err := assoc.DoOnce(func() (any, error) {
-			keyID, key, authErr := authenticate()
-			assoc.Metrics().AddAuthentication(keyID)
-			if authErr == nil {
-				go HandleAssociationTimedCopy(assoc, func(pkt []byte, assoc PacketAssociation) *packetMetrics {
-					return h.handleTarget(pkt, key, assoc)
-				})
-			}
-			return key, authErr
-		})
-		if err != nil {
-			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
-		}
-		cryptoKey, ok := key.(*shadowsocks.EncryptionKey)
-		if !ok {
-			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
-		}
-
-		if textData == nil {
-			// This is a subsequent packet. First packets are already decrypted as part of the
-			// initial access key search.
-			unpackStart := time.Now()
-			textData, err = shadowsocks.Unpack(nil, pkt, cryptoKey)
-			timeToCipher := time.Since(unpackStart)
-			h.ssm.AddCipherSearch(err == nil, timeToCipher)
-		}
+		textData, err := h.authenticate(pkt, assoc)
 
 		if err != nil {
 			return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack data from client", err)
