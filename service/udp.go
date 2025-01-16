@@ -237,13 +237,12 @@ func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, crypto
 	l := h.logger.With(slog.Any("association", assoc))
 
 	expired := false
-
-	saltSize := cryptoKey.SaltSize()
-	// Leave enough room at the beginning of the packet for a max-length header (i.e. IPv6).
-	bodyStart := saltSize + maxAddrLen
-
 	var bodyLen, proxyClientBytes int
 	connError := func() *onet.ConnectionError {
+		saltSize := cryptoKey.SaltSize()
+		// Leave enough room at the beginning of the packet for a max-length header (i.e. IPv6).
+		bodyStart := saltSize + maxAddrLen
+
 		var (
 			raddr net.Addr
 			err   error
