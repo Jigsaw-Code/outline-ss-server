@@ -120,13 +120,13 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
 	switch conn := cx.Conn.(type) {
 	case transport.StreamConn:
-		h.streamHandler.Handle(cx.Context, conn, h.metrics.AddOpenTCPConnection(conn))
+		h.streamHandler.HandleStream(cx.Context, conn, h.metrics.AddOpenTCPConnection(conn))
 	case net.Conn:
 		assoc, err := outline.NewPacketAssociation(conn, h.tgtListener, h.metrics.AddOpenUDPAssociation(conn))
 		if err != nil {
 			return fmt.Errorf("failed to handle association: %v", err)
 		}
-		outline.HandleAssociation(assoc, h.packetHandler.Handle)
+		outline.HandleAssociation(assoc, h.packetHandler.HandlePacket)
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}

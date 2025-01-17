@@ -142,7 +142,7 @@ func TestTCPEcho(t *testing.T) {
 	go func() {
 		service.StreamServe(
 			func() (transport.StreamConn, error) { return proxyListener.AcceptTCP() },
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -221,7 +221,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -409,7 +409,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -476,7 +476,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()

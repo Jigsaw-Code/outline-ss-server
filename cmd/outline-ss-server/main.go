@@ -237,7 +237,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				}
 				slog.Info("TCP service started.", "address", ln.Addr().String())
 				go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
-					streamHandler.Handle(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
+					streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 				})
 
 				pc, err := lnSet.ListenPacket(addr)
@@ -253,7 +253,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						return nil, fmt.Errorf("failed to handle association: %v", err)
 					}
 					return assoc, nil
-				}, packetHandler.Handle, s.serverMetrics)
+				}, packetHandler.HandlePacket, s.serverMetrics)
 			}
 
 			for _, serviceConfig := range config.Services {
@@ -285,7 +285,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							return serviceConfig.Dialer.Fwmark
 						}())
 						go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
-							streamHandler.Handle(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
+							streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 						})
 					case listenerTypeUDP:
 						pc, err := lnSet.ListenPacket(lnConfig.Address)
@@ -306,7 +306,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								return nil, fmt.Errorf("failed to handle association: %v", err)
 							}
 							return assoc, nil
-						}, packetHandler.Handle, s.serverMetrics)
+						}, packetHandler.HandlePacket, s.serverMetrics)
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)

@@ -178,7 +178,7 @@ func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration
 
 // StreamHandler is a handler that handles stream connections.
 type StreamHandler interface {
-	Handle(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
+	HandleStream(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
@@ -250,7 +250,7 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 	}
 }
 
-func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamConn, connMetrics TCPConnMetrics) {
+func (h *streamHandler) HandleStream(ctx context.Context, clientConn transport.StreamConn, connMetrics TCPConnMetrics) {
 	if connMetrics == nil {
 		connMetrics = &NoOpTCPConnMetrics{}
 	}

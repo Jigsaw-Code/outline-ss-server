@@ -292,7 +292,7 @@ func TestProbeRandom(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -368,12 +368,12 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
+	handler.SetTargetDialerStream(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -406,12 +406,12 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
+	handler.SetTargetDialerStream(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -445,12 +445,12 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
+	handler.SetTargetDialerStream(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -495,7 +495,7 @@ func TestProbeServerBytesModified(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -551,7 +551,7 @@ func TestReplayDefense(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -624,7 +624,7 @@ func TestReverseReplayDefense(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -686,7 +686,7 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -747,7 +747,7 @@ func TestStreamServeEarlyClose(t *testing.T) {
 	err = tcpListener.Close()
 	require.NoError(t, err)
 	// This should return quickly, without timing out or calling the handler.
-	StreamServe(WrapStreamAcceptFunc(tcpListener.AcceptTCP), nil)
+	StreamServeStream(WrapStreamAcceptFunc(tcpListener.AcceptTCP), nil)
 }
 
 // Makes sure the TCP listener returns [io.ErrClosed] on Close().

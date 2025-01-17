@@ -107,7 +107,7 @@ func NewPacketHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetrics) P
 
 // PacketHandler is a handler that handles UDP assocations.
 type PacketHandler interface {
-	Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice)
+	HandlePacket(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
 	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
@@ -173,7 +173,7 @@ func (h *packetHandler) authenticate(pkt []byte, assoc PacketAssociation) ([]byt
 	return textData, nil
 }
 
-func (h *packetHandler) Handle(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) {
+func (h *packetHandler) HandlePacket(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice) {
 	l := h.logger.With(slog.Any("association", assoc))
 	defer debugUDP(l, "Done")
 
