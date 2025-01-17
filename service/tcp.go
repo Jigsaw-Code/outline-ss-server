@@ -221,7 +221,7 @@ type StreamHandleFunc func(ctx context.Context, conn transport.StreamConn)
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
 // via their [context.Context]. StreamServe will return after all pending handlers return.
-func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
+func StreamServe(accept StreamAcceptFunc, streamHandle StreamHandleFunc) {
 	var running sync.WaitGroup
 	defer running.Wait()
 	ctx, contextCancel := context.WithCancel(context.Background())
@@ -245,7 +245,7 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 					slog.Warn("Panic in TCP handler. Continuing to listen.", "err", r)
 				}
 			}()
-			handle(ctx, clientConn)
+			streamHandle(ctx, clientConn)
 		}()
 	}
 }

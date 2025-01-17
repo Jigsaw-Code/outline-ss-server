@@ -146,8 +146,8 @@ func (h *packetHandler) authenticate(pkt []byte, assoc PacketAssociation) ([]byt
 		if keyErr != nil {
 			return nil, keyErr
 		}
-		go HandleAssociationTimedCopy(assoc, func(pkt []byte, assoc PacketAssociation) error {
-			return h.handleTarget(pkt, assoc, key)
+		go relayTargetToClient(assoc, func(pkt []byte, assoc PacketAssociation) error {
+			return h.handlePacketFromTarget(pkt, assoc, key)
 		})
 		return key, nil
 	})
@@ -233,7 +233,7 @@ func (h *packetHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *
 // and serializing an IPv6 address from the example range.
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
-func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, cryptoKey *shadowsocks.EncryptionKey) error {
+func (h *packetHandler) handlePacketFromTarget(pkt []byte, assoc PacketAssociation, cryptoKey *shadowsocks.EncryptionKey) error {
 	l := h.logger.With(slog.Any("association", assoc))
 
 	expired := false
@@ -304,10 +304,10 @@ func (h *packetHandler) handleTarget(pkt []byte, assoc PacketAssociation, crypto
 type NewAssociationFunc func(conn net.Conn) (PacketAssociation, error)
 
 // PacketServe listens for UDP packets on the provided [net.PacketConn], creates
-// and manages NAT associations, and invokes the `handle` function for each
-// packet. It uses a NAT map to track active associations and handles their
-// lifecycle.
-func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, handle PacketHandleFuncWithLazySlice, metrics NATMetrics) {
+// and manages NAT associations, and invokes the provided `handlePacket`
+// function for each packet. It uses a NAT map to track active associations and
+// handles their lifecycle.
+func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, handlePacket PacketHandleFuncWithLazySlice, metrics NATMetrics) {
 	nm := newNATmap()
 	defer nm.Close()
 
@@ -353,7 +353,7 @@ func PacketServe(clientConn net.PacketConn, newAssociation NewAssociationFunc, h
 				metrics.RemoveNATEntry()
 				nm.Del(addr.String())
 			default:
-				go handle(pkt, assoc, lazySlice)
+				go handlePacket(pkt, assoc, lazySlice)
 			}
 			return false
 		}()
@@ -503,7 +503,7 @@ type PacketHandleFunc func(pkt []byte, assoc PacketAssociation) error
 // released as soon as the packet is processed.
 type PacketHandleFuncWithLazySlice func(pkt []byte, assoc PacketAssociation, lazySlice slicepool.LazySlice)
 
-func HandleAssociation(assoc PacketAssociation, handle PacketHandleFuncWithLazySlice) {
+func HandleAssociation(assoc PacketAssociation, handlePacket PacketHandleFuncWithLazySlice) {
 	for {
 		lazySlice := readBufPool.LazySlice()
 		buf := lazySlice.Acquire()
@@ -518,14 +518,14 @@ func HandleAssociation(assoc PacketAssociation, handle PacketHandleFuncWithLazyS
 			lazySlice.Release()
 			return
 		default:
-			go handle(pkt, assoc, lazySlice)
+			go handlePacket(pkt, assoc, lazySlice)
 		}
 	}
 }
 
-// HandleAssociationTimedCopy handles the target-side of the association by
+// relayTargetToClient handles the target-side of the association by
 // copying from target to client until read timeout.
-func HandleAssociationTimedCopy(assoc PacketAssociation, handle PacketHandleFunc) {
+func relayTargetToClient(assoc PacketAssociation, handlePacket PacketHandleFunc) {
 	defer assoc.CloseTarget()
 
 	// pkt is used for in-place encryption of downstream UDP packets.
@@ -533,7 +533,7 @@ func HandleAssociationTimedCopy(assoc PacketAssociation, handle PacketHandleFunc
 	pkt := make([]byte, serverUDPBufferSize)
 
 	for {
-		if err := handle(pkt, assoc); err != nil {
+		if err := handlePacket(pkt, assoc); err != nil {
 			break
 		}
 	}
