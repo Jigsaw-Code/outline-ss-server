@@ -297,12 +297,15 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 				}
 
 				metrics.AddNATEntry()
-				nm.Add(addr.String(), assoc)
-				go func() {
-					assocHandle(ctx, assoc)
-					metrics.RemoveNATEntry()
-					nm.Del(addr.String())
-				}()
+				var existing bool
+				assoc, existing = nm.Add(addr.String(), assoc)
+				if !existing {
+					go func() {
+						assocHandle(ctx, assoc)
+						metrics.RemoveNATEntry()
+						nm.Del(addr.String())
+					}()
+				}
 			}
 			select {
 			case assoc.readCh <- pkt:
@@ -466,12 +469,18 @@ func (m *natmap) Del(clientAddr string) {
 	}
 }
 
-// Add adds a new UDP NAT entry to the natmap.
-func (m *natmap) Add(clientAddr string, assoc *association) {
+// Add adds a UDP NAT entry to the natmap and returns it. If it already existed,
+// in the natmap, the existing entry is returned instead.
+func (m *natmap) Add(clientAddr string, assoc *association) (*association, bool) {
 	m.Lock()
 	defer m.Unlock()
 
+	if existing, ok := m.associations[clientAddr]; ok {
+		return existing, true
+	}
+
 	m.associations[clientAddr] = assoc
+	return assoc, false
 }
 
 // Get the maximum length of the shadowsocks address header by parsing
