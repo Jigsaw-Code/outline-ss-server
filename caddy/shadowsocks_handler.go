@@ -51,9 +51,8 @@ type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
 	streamHandler outline.StreamHandler
-	packetHandler outline.PacketHandler
+	associationHandler outline.AssociationHandler
 	metrics       outline.ServiceMetrics
-	tgtListener   transport.PacketListener
 	logger        *slog.Logger
 }
 
@@ -106,13 +105,12 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	ciphers := outline.NewCipherList()
 	ciphers.Update(cipherList)
 
-	h.streamHandler, h.packetHandler = outline.NewShadowsocksHandlers(
+	h.streamHandler, h.associationHandler = outline.NewShadowsocksHandlers(
 		outline.WithLogger(h.logger),
 		outline.WithCiphers(ciphers),
 		outline.WithMetrics(h.metrics),
 		outline.WithReplayCache(&app.ReplayCache),
 	)
-	h.tgtListener = outline.MakeTargetUDPListener(defaultNatTimeout, 0)
 	return nil
 }
 
@@ -122,11 +120,7 @@ func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) err
 	case transport.StreamConn:
 		h.streamHandler.HandleStream(cx.Context, conn, h.metrics.AddOpenTCPConnection(conn))
 	case net.Conn:
-		assoc, err := outline.NewPacketAssociation(conn, h.tgtListener, h.metrics.AddOpenUDPAssociation(conn))
-		if err != nil {
-			return fmt.Errorf("failed to handle association: %v", err)
-		}
-		outline.HandleAssociation(assoc, h.packetHandler.HandlePacket)
+		h.associationHandler.HandleAssociation(cx.Context, conn, h.metrics.AddOpenUDPAssociation(conn))
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}

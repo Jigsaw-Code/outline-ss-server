@@ -368,7 +368,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialerStream(MakeValidatingTCPStreamDialer(allowAll, 0))
+	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
@@ -406,7 +406,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialerStream(MakeValidatingTCPStreamDialer(allowAll, 0))
+	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
@@ -445,7 +445,7 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	testMetrics := &probeTestMetrics{}
 	authFunc := NewShadowsocksStreamAuthenticator(cipherList, nil, &fakeShadowsocksMetrics{}, nil)
 	handler := NewStreamHandler(authFunc, 200*time.Millisecond)
-	handler.SetTargetDialerStream(MakeValidatingTCPStreamDialer(allowAll, 0))
+	handler.SetTargetDialer(MakeValidatingTCPStreamDialer(allowAll, 0))
 	done := make(chan struct{})
 	go func() {
 		StreamServe(
@@ -747,7 +747,7 @@ func TestStreamServeEarlyClose(t *testing.T) {
 	err = tcpListener.Close()
 	require.NoError(t, err)
 	// This should return quickly, without timing out or calling the handler.
-	StreamServeStream(WrapStreamAcceptFunc(tcpListener.AcceptTCP), nil)
+	StreamServe(WrapStreamAcceptFunc(tcpListener.AcceptTCP), nil)
 }
 
 // Makes sure the TCP listener returns [io.ErrClosed] on Close().

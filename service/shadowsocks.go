@@ -24,10 +24,8 @@ import (
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
-const (
-	// 59 seconds is most common timeout for servers that do not respond to invalid requests
-	tcpReadTimeout time.Duration = 59 * time.Second
-)
+// 59 seconds is most common timeout for servers that do not respond to invalid requests
+const tcpReadTimeout time.Duration = 59 * time.Second
 
 // ShadowsocksConnMetrics is used to report Shadowsocks related metrics on connections.
 type ShadowsocksConnMetrics interface {
@@ -51,11 +49,12 @@ type ssService struct {
 	targetIPValidator onet.TargetIPValidator
 	replayCache       *ReplayCache
 
-	streamDialer transport.StreamDialer
+	streamDialer   transport.StreamDialer
+	packetListener transport.PacketListener
 }
 
 // NewShadowsocksHandlers creates new Shadowsocks stream and packet handlers.
-func NewShadowsocksHandlers(opts ...Option) (StreamHandler, PacketHandler) {
+func NewShadowsocksHandlers(opts ...Option) (StreamHandler, AssociationHandler) {
 	s := &ssService{
 		logger: noopLogger(),
 	}
@@ -74,10 +73,13 @@ func NewShadowsocksHandlers(opts ...Option) (StreamHandler, PacketHandler) {
 	}
 	sh.SetLogger(s.logger)
 
-	ph := NewPacketHandler(s.ciphers, &ssConnMetrics{s.metrics.AddUDPCipherSearch})
-	ph.SetLogger(s.logger)
+	ah := NewAssociationHandler(s.ciphers, &ssConnMetrics{s.metrics.AddUDPCipherSearch})
+	if s.packetListener != nil {
+		ah.SetTargetPacketListener(s.packetListener)
+	}
+	ah.SetLogger(s.logger)
 
-	return sh, ph
+	return sh, ah
 }
 
 // WithLogger can be used to provide a custom log target. If not provided,
@@ -112,6 +114,13 @@ func WithReplayCache(replayCache *ReplayCache) Option {
 func WithStreamDialer(dialer transport.StreamDialer) Option {
 	return func(s *ssService) {
 		s.streamDialer = dialer
+	}
+}
+
+// WithPacketListener option function.
+func WithPacketListener(listener transport.PacketListener) Option {
+	return func(s *ssService) {
+		s.packetListener = listener
 	}
 }
 

@@ -317,15 +317,14 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 
 	proxy.SetTargetIPValidator(allowAll)
 	natMetrics := &natTestMetrics{}
 	associationMetrics := &fakeUDPAssociationMetrics{}
-	go service.PacketServe(proxyConn, func(conn net.Conn) (service.PacketAssociation, error) {
-		assoc, _ := service.NewPacketAssociation(conn, &transport.UDPListener{Address: ""}, associationMetrics)
-		return assoc, nil
-	}, proxy.Handle, natMetrics)
+	go service.PacketServe(proxyConn, func(ctx context.Context, conn net.Conn) {
+		proxy.HandleAssociation(ctx, conn, associationMetrics)
+	}, natMetrics)
 
 	cryptoKey, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, secrets[0])
 	require.NoError(t, err)
@@ -546,14 +545,13 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(server, func(conn net.Conn) (service.PacketAssociation, error) {
-			assoc, _ := service.NewPacketAssociation(conn, &transport.UDPListener{Address: ""}, nil)
-			return assoc, nil
-		}, proxy.Handle, &natTestMetrics{})
+		service.PacketServe(server, func(ctx context.Context, conn net.Conn) {
+			proxy.HandleAssociation(ctx, conn, &fakeUDPAssociationMetrics{})
+		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
 
@@ -593,14 +591,13 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(proxyConn, func(conn net.Conn) (service.PacketAssociation, error) {
-			assoc, _ := service.NewPacketAssociation(conn, &transport.UDPListener{Address: ""}, nil)
-			return assoc, nil
-		}, proxy.Handle, &natTestMetrics{})
+		service.PacketServe(proxyConn, func(ctx context.Context, conn net.Conn) {
+			proxy.HandleAssociation(ctx, conn, &fakeUDPAssociationMetrics{})
+		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
 
