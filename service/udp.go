@@ -296,10 +296,10 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 					return
 				}
 
-				metrics.AddNATEntry()
 				var existing bool
 				assoc, existing = nm.Add(addr.String(), assoc)
 				if !existing {
+					metrics.AddNATEntry()
 					go func() {
 						assocHandle(ctx, assoc)
 						metrics.RemoveNATEntry()
