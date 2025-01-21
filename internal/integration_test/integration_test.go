@@ -288,6 +288,8 @@ type fakeUDPAssociationMetrics struct {
 var _ service.UDPAssociationMetrics = (*fakeUDPAssociationMetrics)(nil)
 
 func (m *fakeUDPAssociationMetrics) AddAuthentication(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.accessKey = key
 }
 
