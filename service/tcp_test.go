@@ -292,7 +292,7 @@ func TestProbeRandom(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -373,7 +373,7 @@ func TestProbeClientBytesBasicTruncated(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -411,7 +411,7 @@ func TestProbeClientBytesBasicModified(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -450,7 +450,7 @@ func TestProbeClientBytesCoalescedModified(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -495,7 +495,7 @@ func TestProbeServerBytesModified(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -551,7 +551,7 @@ func TestReplayDefense(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -624,7 +624,7 @@ func TestReverseReplayDefense(t *testing.T) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -686,7 +686,7 @@ func probeExpectTimeout(t *testing.T, payloadSize int) {
 	go func() {
 		StreamServe(
 			WrapStreamAcceptFunc(listener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()

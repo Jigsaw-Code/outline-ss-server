@@ -509,6 +509,8 @@ func (m *serviceMetrics) getIPInfoFromAddr(addr net.Addr) ipinfo.IPInfo {
 	return ipInfo
 }
 
+// TODO: Split TCP and UDP metrics.
+
 func (m *serviceMetrics) AddOpenTCPConnection(clientConn net.Conn) service.TCPConnMetrics {
 	clientAddr := clientConn.RemoteAddr()
 	clientInfo := m.getIPInfoFromAddr(clientAddr)
@@ -521,12 +523,12 @@ func (m *serviceMetrics) AddOpenUDPAssociation(clientConn net.Conn) service.UDPA
 	return newUDPAssociationMetrics(m.udpServiceMetrics, m.tunnelTimeMetrics, clientAddr, clientInfo)
 }
 
-func (m *serviceMetrics) AddCipherSearch(proto string, accessKeyFound bool, timeToCipher time.Duration) {
-	if proto == "tcp" {
-		m.tcpServiceMetrics.AddCipherSearch(accessKeyFound, timeToCipher)
-	} else if proto == "udp" {
-		m.udpServiceMetrics.AddCipherSearch(accessKeyFound, timeToCipher)
-	}
+func (m *serviceMetrics) AddTCPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+	m.tcpServiceMetrics.AddCipherSearch(accessKeyFound, timeToCipher)
+}
+
+func (m *serviceMetrics) AddUDPCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
+	m.udpServiceMetrics.AddCipherSearch(accessKeyFound, timeToCipher)
 }
 
 // addIfNonZero helps avoid the creation of series that are always zero.

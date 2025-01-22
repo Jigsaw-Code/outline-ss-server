@@ -142,7 +142,7 @@ func TestTCPEcho(t *testing.T) {
 	go func() {
 		service.StreamServe(
 			func() (transport.StreamConn, error) { return proxyListener.AcceptTCP() },
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -221,7 +221,7 @@ func TestRestrictedAddresses(t *testing.T) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -288,6 +288,8 @@ type fakeUDPAssociationMetrics struct {
 var _ service.UDPAssociationMetrics = (*fakeUDPAssociationMetrics)(nil)
 
 func (m *fakeUDPAssociationMetrics) AddAuthentication(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.accessKey = key
 }
 
@@ -317,13 +319,13 @@ func TestUDPEcho(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 
 	proxy.SetTargetIPValidator(allowAll)
 	natMetrics := &natTestMetrics{}
 	associationMetrics := &fakeUDPAssociationMetrics{}
-	go service.PacketServe(proxyConn, func(conn net.Conn) (service.PacketAssociation, error) {
-		return proxy.NewPacketAssociation(conn, associationMetrics)
+	go service.PacketServe(proxyConn, func(ctx context.Context, conn net.Conn) {
+		proxy.HandleAssociation(ctx, conn, associationMetrics)
 	}, natMetrics)
 
 	cryptoKey, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, secrets[0])
@@ -408,7 +410,7 @@ func BenchmarkTCPThroughput(b *testing.B) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -475,7 +477,7 @@ func BenchmarkTCPMultiplexing(b *testing.B) {
 	go func() {
 		service.StreamServe(
 			service.WrapStreamAcceptFunc(proxyListener.AcceptTCP),
-			func(ctx context.Context, conn transport.StreamConn) { handler.Handle(ctx, conn, testMetrics) },
+			func(ctx context.Context, conn transport.StreamConn) { handler.HandleStream(ctx, conn, testMetrics) },
 		)
 		done <- struct{}{}
 	}()
@@ -545,12 +547,12 @@ func BenchmarkUDPEcho(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(server, func(conn net.Conn) (service.PacketAssociation, error) {
-			return proxy.NewPacketAssociation(conn, nil)
+		service.PacketServe(server, func(ctx context.Context, conn net.Conn) {
+			proxy.HandleAssociation(ctx, conn, &fakeUDPAssociationMetrics{})
 		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
@@ -591,12 +593,12 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	proxy := service.NewPacketHandler(cipherList, &fakeShadowsocksMetrics{})
+	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 	proxy.SetTargetIPValidator(allowAll)
 	done := make(chan struct{})
 	go func() {
-		service.PacketServe(proxyConn, func(conn net.Conn) (service.PacketAssociation, error) {
-			return proxy.NewPacketAssociation(conn, nil)
+		service.PacketServe(proxyConn, func(ctx context.Context, conn net.Conn) {
+			proxy.HandleAssociation(ctx, conn, &fakeUDPAssociationMetrics{})
 		}, &natTestMetrics{})
 		done <- struct{}{}
 	}()
