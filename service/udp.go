@@ -164,7 +164,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 
 		connError := func() *onet.ConnectionError {
 			var payload []byte
-			var tgtUDPAddr *net.UDPAddr
+			var tgtAddr net.Addr
 			if targetConn == nil {
 				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var textData []byte
@@ -182,7 +182,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 				assocMetrics.AddAuthentication(keyID)
 
 				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+				if payload, tgtAddr, onetErr = h.extractPayloadAndDestination(textData); onetErr != nil {
 					return onetErr
 				}
 
@@ -204,13 +204,13 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 				}
 
 				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+				if payload, tgtAddr, onetErr = h.extractPayloadAndDestination(textData); onetErr != nil {
 					return onetErr
 				}
 			}
 
 			debugUDP(l, "Proxy exit.")
-			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
+			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr)
 			if err != nil {
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
 			}
@@ -226,9 +226,9 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 	}
 }
 
-// Given the decrypted contents of a UDP packet, return the payload and the
-// destination address, or an error if this packet cannot be forwarded.
-func (h *associationHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+// extractPayloadAndDestination processes a decrypted Shadowsocks UDP packet and
+// extracts the payload data and destination address.
+func (h *associationHandler) extractPayloadAndDestination(textData []byte) ([]byte, net.Addr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
