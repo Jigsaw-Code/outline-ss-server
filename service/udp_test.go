@@ -210,8 +210,8 @@ func startTestHandler() (AssociationHandler, func(target net.Addr, payload []byt
 
 func TestAssociationCloseWhileReading(t *testing.T) {
 	assoc := &association{
-		pc:    makePacketConn(),
-		raddr: &clientAddr,
+		pc:     makePacketConn(),
+		raddr:  &clientAddr,
 		readCh: make(chan *packet),
 	}
 	go func() {
