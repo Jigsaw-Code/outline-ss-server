@@ -497,7 +497,7 @@ func (m *natmap) Add(clientAddr string, assoc *association) (*association, bool)
 var maxAddrLen int = len(socks.ParseAddr("[2001:db8::1]:12345"))
 
 // relayTargetToClient copies from target to client until read timeout.
-func relayTargetToClient(targetConn net.PacketConn, clientConn net.Conn, cryptoKey *shadowsocks.EncryptionKey, m UDPAssociationMetrics, l *slog.Logger) {
+func relayTargetToClient(targetConn net.PacketConn, clientConn io.Writer, cryptoKey *shadowsocks.EncryptionKey, m UDPAssociationMetrics, l *slog.Logger) {
 	defer targetConn.Close()
 
 	// pkt is used for in-place encryption of downstream UDP packets, with the layout
