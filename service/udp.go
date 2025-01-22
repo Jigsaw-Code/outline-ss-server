@@ -99,7 +99,7 @@ type associationHandler struct {
 
 var _ AssociationHandler = (*associationHandler)(nil)
 
-// NewAssociationHandler creates a AssociationHandler
+// NewAssociationHandler creates a Shadowsocks proxy AssociationHandler.
 func NewAssociationHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetrics) AssociationHandler {
 	if ssMetrics == nil {
 		ssMetrics = &NoOpShadowsocksConnMetrics{}
@@ -147,12 +147,18 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		assocMetrics.AddClose()
 	}()
 
+	var targetConn net.PacketConn
 	var cryptoKey *shadowsocks.EncryptionKey
 
 	readBufLazySlice := readBufPool.LazySlice()
 	readBuf := readBufLazySlice.Acquire()
 	defer readBufLazySlice.Release()
 	for {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
 		clientProxyBytes, err := clientConn.Read(readBuf)
 		if errors.Is(err, net.ErrClosed) {
 			break
@@ -161,7 +167,6 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		debugUDP(l, "Outbound packet.", slog.Int("bytes", clientProxyBytes))
 
 		var proxyTargetBytes int
-		var targetConn net.PacketConn
 
 		connError := func() *onet.ConnectionError {
 			var payload []byte
@@ -290,6 +295,7 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 					pc:     clientConn,
 					raddr:  addr,
 					readCh: make(chan *packet, 5),
+					doneCh: make(chan struct{}),
 				}
 				if err != nil {
 					slog.Error("Failed to handle association", slog.Any("err", err))
@@ -303,11 +309,13 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 					go func() {
 						assocHandle(ctx, assoc)
 						metrics.RemoveNATEntry()
-						nm.Del(addr.String())
+						close(assoc.doneCh)
 					}()
 				}
 			}
 			select {
+			case <-assoc.doneCh:
+				nm.Del(addr.String())
 			case assoc.readCh <- pkt:
 			default:
 				slog.Debug("Dropping packet due to full read queue")
@@ -334,6 +342,7 @@ type association struct {
 	pc     net.PacketConn
 	raddr  net.Addr
 	readCh chan *packet
+	doneCh chan struct{}
 }
 
 var _ net.Conn = (*association)(nil)
@@ -546,12 +555,6 @@ func relayTargetToClient(targetConn net.PacketConn, clientConn net.Conn, cryptoK
 			}
 			proxyClientBytes, err = clientConn.Write(buf)
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok {
-					if netErr.Timeout() {
-						expired = true
-						return nil
-					}
-				}
 				return onet.NewConnectionError("ERR_WRITE", "Failed to write to client", err)
 			}
 			return nil

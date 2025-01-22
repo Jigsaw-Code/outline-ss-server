@@ -125,14 +125,14 @@ func WithPacketListener(listener transport.PacketListener) Option {
 }
 
 type ssConnMetrics struct {
-	metricFunc func(accessKeyFound bool, timeToCipher time.Duration)
+	addCipherSearch func(accessKeyFound bool, timeToCipher time.Duration)
 }
 
 var _ ShadowsocksConnMetrics = (*ssConnMetrics)(nil)
 
 func (cm *ssConnMetrics) AddCipherSearch(accessKeyFound bool, timeToCipher time.Duration) {
-	if cm.metricFunc != nil {
-		cm.metricFunc(accessKeyFound, timeToCipher)
+	if cm.addCipherSearch != nil {
+		cm.addCipherSearch(accessKeyFound, timeToCipher)
 	}
 }
 
