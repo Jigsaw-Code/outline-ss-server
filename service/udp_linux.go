@@ -28,12 +28,12 @@ import (
 )
 
 type udpListener struct {
+	// The validator to be used to validate target IP addresses.
+	targetIPValidator onet.TargetIPValidator
+
 	// NAT mapping timeout is the default time a mapping will stay active
 	// without packets traversing the NAT, applied to non-DNS packets.
 	timeout time.Duration
-
-	// The validator to be used to validate target IP addresses.
-	targetIPValidator onet.TargetIPValidator
 
 	// fwmark can be used in conjunction with other Linux networking features like cgroups, network
 	// namespaces, and TC (Traffic Control) for sophisticated network management.
