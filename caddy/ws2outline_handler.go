@@ -176,10 +176,12 @@ type wsToStreamConn struct {
 
 var _ transport.StreamConn = (*wsToStreamConn)(nil)
 
-func (c wsToStreamConn) CloseRead() error {
-	return c.Close()
-}
-
-func (c wsToStreamConn) CloseWrite() error {
+func (c *wsToStreamConn) CloseRead() error {
+	// Nothing to do.
 	return nil
 }
+
+func (c *wsToStreamConn) CloseWrite() error {
+	return c.Conn.Close()
+}
+
