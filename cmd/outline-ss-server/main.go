@@ -344,6 +344,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
 						}
 						mux := webServers[lnConfig.WebServer]
+						// TODO: Support a "half-closed" state for WebSockets.
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							handler := func(wsConn *websocket.Conn) {
 								defer wsConn.Close()
