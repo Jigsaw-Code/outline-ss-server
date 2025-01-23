@@ -40,7 +40,7 @@ apps:
         routes:
         - match:
           - path:
-            - "/tcp"
+            - "/SECRET/tcp"  # Prevent probing by serving under a secret path.
             header:
               Connection:
               - "*Upgrade*"
@@ -52,7 +52,7 @@ apps:
             connection_handler: ss1
         - match:
           - path:
-            - "/udp"
+            - "/SECRET/udp"  # Prevent probing by serving under a secret path.
             header:
               Connection:
               - "*Upgrade*"
