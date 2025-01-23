@@ -154,7 +154,8 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		default:
 		}
 		clientProxyBytes, err := clientConn.Read(readBuf)
-		if errors.Is(err, net.ErrClosed) {
+		if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
+			debugUDP(l, "Client closed connection")
 			break
 		}
 		pkt := readBuf[:clientProxyBytes]
