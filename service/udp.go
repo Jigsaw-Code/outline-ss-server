@@ -213,7 +213,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			debugUDP(l, "Proxy exit.")
 			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr)
 			if err != nil {
-				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
+				return ensureConnectionError(err, "ERR_WRITE", "Failed to write to target")
 			}
 			return nil
 		}()
@@ -396,7 +396,7 @@ func (vpc *validatingPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 		return 0, fmt.Errorf("failed to resolve target address %v", udpAddr)
 	}
 	if err := vpc.targetIPValidator(udpAddr.IP); err != nil {
-		return 0, err
+		return 0, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
 	}
 	return vpc.PacketConn.WriteTo(p, addr)
 }
