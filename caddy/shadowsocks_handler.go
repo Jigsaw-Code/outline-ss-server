@@ -51,10 +51,10 @@ type KeyConfig struct {
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
-	streamHandler outline.StreamHandler
+	streamHandler      outline.StreamHandler
 	associationHandler outline.AssociationHandler
-	metrics       outline.ServiceMetrics
-	logger        *slog.Logger
+	metrics            outline.ServiceMetrics
+	logger             *slog.Logger
 }
 
 var (
