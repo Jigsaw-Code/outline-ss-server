@@ -38,15 +38,17 @@ const (
 )
 
 type WebServerConfig struct {
-	ID        string   
+	ID string
+
+	// List of listener addresses (e.g., ":8080", "localhost:8081"). Should be localhost for HTTP.
 	Listeners []string `yaml:"listen"`
 }
 
 type ListenerConfig struct {
 	Type      ListenerType
-	Address   string       `yaml:",omitempty"`
-	WebServer string       `yaml:"web_server,omitempty"`
-	Path      string       `yaml:",omitempty"`
+	Address   string `yaml:",omitempty"`
+	WebServer string `yaml:"web_server,omitempty"`
+	Path      string `yaml:",omitempty"`
 }
 
 type DialerConfig struct {
@@ -69,12 +71,12 @@ type WebConfig struct {
 }
 
 type Config struct {
-	Web      WebConfig       
-	Services []ServiceConfig 
+	Web      WebConfig
+	Services []ServiceConfig
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
 	// using the newer `services` format.
-	Keys []LegacyKeyServiceConfig 
+	Keys []LegacyKeyServiceConfig
 }
 
 // Validate checks that the config is valid.
