@@ -178,7 +178,7 @@ func NewStreamHandler(authenticate StreamAuthenticateFunc, timeout time.Duration
 
 // StreamHandler is a handler that handles stream connections.
 type StreamHandler interface {
-	Handle(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
+	HandleStream(ctx context.Context, conn transport.StreamConn, connMetrics TCPConnMetrics)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
 	// SetTargetDialer sets the [transport.StreamDialer] to be used to connect to target addresses.
@@ -221,7 +221,7 @@ type StreamHandleFunc func(ctx context.Context, conn transport.StreamConn)
 // StreamServe repeatedly calls `accept` to obtain connections and `handle` to handle them until
 // accept() returns [ErrClosed]. When that happens, all connection handlers will be notified
 // via their [context.Context]. StreamServe will return after all pending handlers return.
-func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
+func StreamServe(accept StreamAcceptFunc, streamHandle StreamHandleFunc) {
 	var running sync.WaitGroup
 	defer running.Wait()
 	ctx, contextCancel := context.WithCancel(context.Background())
@@ -245,12 +245,12 @@ func StreamServe(accept StreamAcceptFunc, handle StreamHandleFunc) {
 					slog.Warn("Panic in TCP handler. Continuing to listen.", "err", r)
 				}
 			}()
-			handle(ctx, clientConn)
+			streamHandle(ctx, clientConn)
 		}()
 	}
 }
 
-func (h *streamHandler) Handle(ctx context.Context, clientConn transport.StreamConn, connMetrics TCPConnMetrics) {
+func (h *streamHandler) HandleStream(ctx context.Context, clientConn transport.StreamConn, connMetrics TCPConnMetrics) {
 	if connMetrics == nil {
 		connMetrics = &NoOpTCPConnMetrics{}
 	}

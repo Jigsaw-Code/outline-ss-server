@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
@@ -28,9 +29,10 @@ import (
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
 )
 
-const serverUDPBufferSize = 64 * 1024
-
 const ssModuleName = "layer4.handlers.shadowsocks"
+
+// A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
+const defaultNatTimeout time.Duration = 5 * time.Minute
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -48,8 +50,10 @@ type KeyConfig struct {
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
-	service outline.Service
-	logger  *slog.Logger
+	streamHandler      outline.StreamHandler
+	associationHandler outline.AssociationHandler
+	metrics            outline.ServiceMetrics
+	logger             *slog.Logger
 }
 
 var (
@@ -73,6 +77,7 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	if !ok {
 		return fmt.Errorf("module `%s` is of type `%T`, expected `OutlineApp`", outlineModuleName, app)
 	}
+	h.metrics = app.Metrics
 
 	if len(h.Keys) == 0 {
 		h.logger.Warn("no keys configured")
@@ -100,16 +105,12 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	ciphers := outline.NewCipherList()
 	ciphers.Update(cipherList)
 
-	service, err := outline.NewShadowsocksService(
+	h.streamHandler, h.associationHandler = outline.NewShadowsocksHandlers(
 		outline.WithLogger(h.logger),
 		outline.WithCiphers(ciphers),
-		outline.WithMetrics(app.Metrics),
+		outline.WithMetrics(h.metrics),
 		outline.WithReplayCache(&app.ReplayCache),
 	)
-	if err != nil {
-		return err
-	}
-	h.service = service
 	return nil
 }
 
@@ -117,13 +118,9 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
 	switch conn := cx.Conn.(type) {
 	case transport.StreamConn:
-		h.service.HandleStream(cx.Context, conn)
+		h.streamHandler.HandleStream(cx.Context, conn, h.metrics.AddOpenTCPConnection(conn))
 	case net.Conn:
-		assoc, err := h.service.NewConnAssociation(conn)
-		if err != nil {
-			return fmt.Errorf("Failed to handle association: %v", err)
-		}
-		assoc.Handle()
+		h.associationHandler.HandleAssociation(cx.Context, conn, h.metrics.AddOpenUDPAssociation(conn))
 	default:
 		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
 	}

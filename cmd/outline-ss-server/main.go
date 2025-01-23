@@ -266,7 +266,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				ciphers := service.NewCipherList()
 				ciphers.Update(cipherList)
 
-				ssService, err := service.NewShadowsocksService(
+				streamHandler, associationHandler := service.NewShadowsocksHandlers(
 					service.WithCiphers(ciphers),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
@@ -278,14 +278,18 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					return err
 				}
 				slog.Info("TCP service started.", "address", ln.Addr().String())
-				go service.StreamServe(ln.AcceptStream, ssService.HandleStream)
+				go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
+					streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
+				})
 
 				pc, err := lnSet.ListenPacket(addr)
 				if err != nil {
 					return err
 				}
 				slog.Info("UDP service started.", "address", pc.LocalAddr().String())
-				go service.PacketServe(pc, ssService.NewPacketAssociation, s.serverMetrics)
+				go service.PacketServe(pc, func(ctx context.Context, conn net.Conn) {
+					associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
+				}, s.serverMetrics)
 			}
 
 			// Start services with listeners.
@@ -294,7 +298,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				if err != nil {
 					return fmt.Errorf("failed to create cipher list from config: %v", err)
 				}
-				ssService, err := service.NewShadowsocksService(
+				streamHandler, associationHandler := service.NewShadowsocksHandlers(
 					service.WithCiphers(ciphers),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
@@ -318,7 +322,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							return serviceConfig.Dialer.Fwmark
 						}())
-						go service.StreamServe(ln.AcceptStream, ssService.HandleStream)
+						go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
+							streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
+						})
 					case listenerTypeUDP:
 						pc, err := lnSet.ListenPacket(lnConfig.Address)
 						if err != nil {
@@ -330,7 +336,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							return serviceConfig.Dialer.Fwmark
 						}())
-						go service.PacketServe(pc, ssService.NewPacketAssociation, s.serverMetrics)
+						go service.PacketServe(pc, func(ctx context.Context, conn net.Conn) {
+							associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
+						}, s.serverMetrics)
 					case listenerTypeWebsocketStream:
 						if _, exists := webServers[lnConfig.WebServer]; !exists {
 							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
@@ -348,7 +356,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 									return
 								}
 								conn := &streamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
-								ssService.HandleStream(ctx, conn)
+								streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
@@ -362,6 +370,8 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							handler := func(wsConn *websocket.Conn) {
 								defer wsConn.Close()
+								ctx, contextCancel := context.WithCancel(context.Background())
+								defer contextCancel()
 								raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
 								if err != nil {
 									slog.Error("failed to upgrade", "err", err)
@@ -369,13 +379,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 									return
 								}
 								conn := &wrappedConn{Conn: wsConn, raddr: raddr}
-								assoc, err := ssService.NewConnAssociation(conn)
-								if err != nil {
-									slog.Error("failed to upgrade", "err", err)
-									w.WriteHeader(http.StatusBadGateway)
-									return
-								}
-								assoc.Handle()
+								associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
