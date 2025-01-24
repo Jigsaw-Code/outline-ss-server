@@ -165,7 +165,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 
 		connError := func() *onet.ConnectionError {
 			var payload []byte
-			var tgtAddr *net.UDPAddr
+			var tgtAddr net.Addr
 			if targetConn == nil {
 				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var textData []byte
@@ -211,7 +211,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			}
 
 			debugUDP(l, "Proxy exit.")
-			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr) // accept only `net.UDPAddr` despite the signature
+			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr)
 			if err != nil {
 				return ensureConnectionError(err, "ERR_WRITE", "Failed to write to target")
 			}
@@ -229,15 +229,15 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 
 // extractPayloadAndDestination processes a decrypted Shadowsocks UDP packet and
 // extracts the payload data and destination address.
-func (h *associationHandler) extractPayloadAndDestination(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+func (h *associationHandler) extractPayloadAndDestination(textData []byte) ([]byte, net.Addr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
 	}
 
-	tgtUDPAddr, err := net.ResolveUDPAddr("udp", tgtAddr.String())
+	tgtUDPAddr, err := transport.MakeNetAddr("udp", tgtAddr.String())
 	if err != nil {
-		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
+		return nil, nil, onet.NewConnectionError("ERR_CONVERT_ADDRESS", fmt.Sprintf("Failed to convert target address %v", tgtAddr), err)
 	}
 
 	payload := textData[len(tgtAddr):]
@@ -391,16 +391,9 @@ type validatingPacketConn struct {
 }
 
 func (vpc *validatingPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	var (
-		udpAddr *net.UDPAddr
-		ok      bool
-	)
-	if udpAddr, ok = addr.(*net.UDPAddr); !ok {
-		var err error
-		udpAddr, err = net.ResolveUDPAddr("udp", addr.String())
-		if err != nil {
-			return 0, fmt.Errorf("failed to resolve target address %v", addr)
-		}
+	udpAddr, err := net.ResolveUDPAddr("udp", addr.String())
+	if err != nil {
+		return 0, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", udpAddr), err)
 	}
 	if err := vpc.targetIPValidator(udpAddr.IP); err != nil {
 		return 0, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
