@@ -192,7 +192,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 				if err != nil {
 					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
 				}
-				l = l.With(slog.Any("ltarget", targetConn.LocalAddr()))
+				l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
 				go relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
 			} else {
 				unpackStart := time.Now()
@@ -267,7 +267,7 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 					lazySlice.Release()
 				}
 			}()
-			n, addr, err := clientConn.ReadFrom(buffer)
+			n, clientAddr, err := clientConn.ReadFrom(buffer)
 			if err != nil {
 				lazySlice.Release()
 				if errors.Is(err, net.ErrClosed) {
@@ -280,13 +280,13 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 			pkt := &packet{payload: buffer[:n], done: lazySlice.Release}
 
 			// TODO(#19): Include server address in the NAT key as well.
-			assoc := nm.Get(addr.String())
+			assoc := nm.Get(clientAddr.String())
 			if assoc == nil {
 				assoc = &association{
-					pc:     clientConn,
-					raddr:  addr,
-					readCh: make(chan *packet, 5),
-					doneCh: make(chan struct{}),
+					pc:         clientConn,
+					clientAddr: clientAddr,
+					readCh:     make(chan *packet, 5),
+					doneCh:     make(chan struct{}),
 				}
 				if err != nil {
 					slog.Error("Failed to handle association", slog.Any("err", err))
@@ -294,7 +294,7 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 				}
 
 				var existing bool
-				assoc, existing = nm.Add(addr.String(), assoc)
+				assoc, existing = nm.Add(clientAddr.String(), assoc)
 				if !existing {
 					metrics.AddNATEntry()
 					go func() {
@@ -306,7 +306,7 @@ func PacketServe(clientConn net.PacketConn, assocHandle AssociationHandleFunc, m
 			}
 			select {
 			case <-assoc.doneCh:
-				nm.Del(addr.String())
+				nm.Del(clientAddr.String())
 			case assoc.readCh <- pkt:
 			default:
 				slog.Debug("Dropping packet due to full read queue")
@@ -330,10 +330,10 @@ type packet struct {
 
 // association wraps a [net.PacketConn] with an address into a [net.Conn].
 type association struct {
-	pc     net.PacketConn
-	raddr  net.Addr
-	readCh chan *packet
-	doneCh chan struct{}
+	pc         net.PacketConn
+	clientAddr net.Addr
+	readCh     chan *packet
+	doneCh     chan struct{}
 }
 
 var _ net.Conn = (*association)(nil)
@@ -352,7 +352,7 @@ func (c *association) Read(p []byte) (int, error) {
 }
 
 func (c *association) Write(b []byte) (n int, err error) {
-	return c.pc.WriteTo(b, c.raddr)
+	return c.pc.WriteTo(b, c.clientAddr)
 }
 
 func (c *association) Close() error {
@@ -365,19 +365,19 @@ func (c *association) LocalAddr() net.Addr {
 }
 
 func (c *association) RemoteAddr() net.Addr {
-	return c.raddr
+	return c.clientAddr
 }
 
 func (c *association) SetDeadline(t time.Time) error {
-	return c.pc.SetDeadline(t)
+	return errors.ErrUnsupported
 }
 
 func (c *association) SetReadDeadline(t time.Time) error {
-	return c.pc.SetReadDeadline(t)
+	return errors.ErrUnsupported
 }
 
 func (c *association) SetWriteDeadline(t time.Time) error {
-	return c.pc.SetWriteDeadline(t)
+	return errors.ErrUnsupported
 }
 
 func isDNS(addr net.Addr) bool {
