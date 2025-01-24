@@ -37,7 +37,7 @@ import (
 
 const (
 	maxUDPPacketSize = 64 * 1024
-	timeout          = 5 * time.Minute
+	natTimeout       = 5 * time.Minute
 )
 
 func init() {
@@ -324,7 +324,7 @@ func TestUDPEcho(t *testing.T) {
 	}
 	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
 
-	proxy.SetTargetPacketListener(service.MakeTargetUDPListener(allowAll, timeout, 0))
+	proxy.SetTargetPacketListener(service.MakeTargetUDPListener(allowAll, natTimeout, 0))
 	natMetrics := &natTestMetrics{}
 	associationMetrics := &fakeUDPAssociationMetrics{}
 	go service.PacketServe(proxyConn, func(ctx context.Context, conn net.Conn) {
@@ -551,7 +551,7 @@ func BenchmarkUDPEcho(b *testing.B) {
 		b.Fatal(err)
 	}
 	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
-	proxy.SetTargetPacketListener(service.MakeTargetUDPListener(allowAll, timeout, 0))
+	proxy.SetTargetPacketListener(service.MakeTargetUDPListener(allowAll, natTimeout, 0))
 	done := make(chan struct{})
 	go func() {
 		service.PacketServe(server, func(ctx context.Context, conn net.Conn) {
@@ -597,7 +597,7 @@ func BenchmarkUDPManyKeys(b *testing.B) {
 		b.Fatal(err)
 	}
 	proxy := service.NewAssociationHandler(cipherList, &fakeShadowsocksMetrics{})
-	proxy.SetTargetPacketListener(service.MakeTargetUDPListener(allowAll, timeout, 0))
+	proxy.SetTargetPacketListener(service.MakeTargetUDPListener(allowAll, natTimeout, 0))
 	done := make(chan struct{})
 	go func() {
 		service.PacketServe(proxyConn, func(ctx context.Context, conn net.Conn) {
