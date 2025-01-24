@@ -17,7 +17,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -119,7 +118,6 @@ func (conn *fakePacketConn) ReadFrom(buffer []byte) (int, net.Addr, error) {
 }
 
 func (conn *fakePacketConn) Close() error {
-	fmt.Println("closing fakePacketConn")
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 	close(conn.send)
@@ -210,9 +208,9 @@ func startTestHandler() (AssociationHandler, func(target net.Addr, payload []byt
 
 func TestAssociationCloseWhileReading(t *testing.T) {
 	assoc := &association{
-		pc:     makePacketConn(),
-		raddr:  &clientAddr,
-		readCh: make(chan *packet),
+		pc:         makePacketConn(),
+		clientAddr: &clientAddr,
+		readCh:     make(chan *packet),
 	}
 	go func() {
 		buf := make([]byte, 1024)
