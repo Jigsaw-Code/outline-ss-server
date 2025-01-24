@@ -165,7 +165,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 
 		connError := func() *onet.ConnectionError {
 			var payload []byte
-			var tgtAddr net.Addr
+			var tgtAddr *net.UDPAddr
 			if targetConn == nil {
 				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var textData []byte
@@ -211,7 +211,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			}
 
 			debugUDP(l, "Proxy exit.")
-			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr)
+			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr) // accept only `net.UDPAddr` despite the signature
 			if err != nil {
 				return ensureConnectionError(err, "ERR_WRITE", "Failed to write to target")
 			}
@@ -229,7 +229,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 
 // extractPayloadAndDestination processes a decrypted Shadowsocks UDP packet and
 // extracts the payload data and destination address.
-func (h *associationHandler) extractPayloadAndDestination(textData []byte) ([]byte, net.Addr, *onet.ConnectionError) {
+func (h *associationHandler) extractPayloadAndDestination(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
@@ -391,14 +391,22 @@ type validatingPacketConn struct {
 }
 
 func (vpc *validatingPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	udpAddr, err := net.ResolveUDPAddr("udp", addr.String())
-	if err != nil {
-		return 0, fmt.Errorf("failed to resolve target address %v", udpAddr)
+	var (
+		udpAddr *net.UDPAddr
+		ok      bool
+	)
+	if udpAddr, ok = addr.(*net.UDPAddr); !ok {
+		var err error
+		udpAddr, err = net.ResolveUDPAddr("udp", addr.String())
+		if err != nil {
+			return 0, fmt.Errorf("failed to resolve target address %v", addr)
+		}
 	}
 	if err := vpc.targetIPValidator(udpAddr.IP); err != nil {
 		return 0, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
 	}
-	return vpc.PacketConn.WriteTo(p, addr)
+
+	return vpc.PacketConn.WriteTo(p, udpAddr) // accept only `net.UDPAddr` despite the signature
 }
 
 type timedPacketConn struct {
