@@ -17,6 +17,7 @@ package main
 import (
 	"container/list"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -24,7 +25,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -198,11 +198,6 @@ func (ls *listenerSet) Len() int {
 	return len(ls.listenerCloseFuncs)
 }
 
-type connWithDone struct {
-	net.Conn
-	doneCh chan struct{}
-}
-
 func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 	startErrCh := make(chan error)
 	stopErrCh := make(chan error)
@@ -234,7 +229,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					go func() {
 						defer server.Shutdown(context.Background())
 						err := server.Serve(&HTTPStreamListener{ln})
-						if err != nil && err != http.ErrServerClosed && !isErrClosing(err) {
+						if err != nil && !errors.Is(http.ErrServerClosed, err) && !errors.Is(net.ErrClosed, err) {
 							slog.Error("Failed to run web server.", "err", err, "ID", srvConfig.ID)
 						}
 					}()
@@ -342,7 +337,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						}, s.serverMetrics)
 					} else if cfg.WebsocketStream != nil {
 						if _, exists := webServers[cfg.WebsocketStream.WebServer]; !exists {
-							return fmt.Errorf("listener references unknown web server `%s`", cfg.WebsocketStream.WebServer)
+							return fmt.Errorf("websocket-stream listener references unknown web server `%s`", cfg.WebsocketStream.WebServer)
 						}
 						mux := webServers[cfg.WebsocketStream.WebServer]
 						// TODO: Support a "half-closed" state for WebSockets.
@@ -351,13 +346,14 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								defer wsConn.Close()
 								ctx, contextCancel := context.WithCancel(context.Background())
 								defer contextCancel()
-								raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
+								// TODO: Get the forwarded client address.
+								raddr, err := transport.MakeNetAddr("tcp", r.RemoteAddr)
 								if err != nil {
-									slog.Error("failed to upgrade", "err", err)
+									slog.Error("failed to determine client address", "err", err)
 									w.WriteHeader(http.StatusBadGateway)
 									return
 								}
-								conn := &streamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
+								conn := &streamConn{&replaceAddrConn{Conn: wsConn, raddr: raddr}}
 								streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
@@ -366,7 +362,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						slog.Info("WebSocket stream service started.", "ID", cfg.WebsocketStream.WebServer, "path", cfg.WebsocketStream.Path)
 					} else if cfg.WebsocketPacket != nil {
 						if _, exists := webServers[cfg.WebsocketPacket.WebServer]; !exists {
-							return fmt.Errorf("listener references unknown web server `%s`", cfg.WebsocketPacket.WebServer)
+							return fmt.Errorf("websocket-packet listener references unknown web server `%s`", cfg.WebsocketPacket.WebServer)
 						}
 						mux := webServers[cfg.WebsocketPacket.WebServer]
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -374,13 +370,13 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								defer wsConn.Close()
 								ctx, contextCancel := context.WithCancel(context.Background())
 								defer contextCancel()
-								raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
+								raddr, err := transport.MakeNetAddr("udp", r.RemoteAddr)
 								if err != nil {
-									slog.Error("failed to upgrade", "err", err)
+									slog.Error("failed to determine client address", "err", err)
 									w.WriteHeader(http.StatusBadGateway)
 									return
 								}
-								conn := &wrappedConn{Conn: wsConn, raddr: raddr}
+								conn := &replaceAddrConn{Conn: wsConn, raddr: raddr}
 								associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
@@ -430,10 +426,6 @@ func (s *OutlineServer) Stop() error {
 	return nil
 }
 
-func isErrClosing(err error) bool {
-	return strings.Contains(err.Error(), "use of closed network connection")
-}
-
 // RunOutlineServer starts an Outline server running, and returns the server or an error.
 func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *serverMetrics, serviceMetrics service.ServiceMetrics, replayHistory int) (*OutlineServer, error) {
 	server := &OutlineServer{
@@ -461,13 +453,13 @@ func RunOutlineServer(filename string, natTimeout time.Duration, serverMetrics *
 }
 
 // TODO: Create a dedicated `ClientConn` struct with `ClientAddr` and `Conn`.
-// wrappedConn overrides [websocket.Conn]'s remote address handling.
-type wrappedConn struct {
+// replaceAddrConn overrides [websocket.Conn]'s remote address handling.
+type replaceAddrConn struct {
 	*websocket.Conn
 	raddr net.Addr
 }
 
-func (c wrappedConn) RemoteAddr() net.Addr {
+func (c replaceAddrConn) RemoteAddr() net.Addr {
 	return c.raddr
 }
 
@@ -477,6 +469,7 @@ type streamConn struct {
 
 var _ transport.StreamConn = (*streamConn)(nil)
 
+// TODO: Support a "half-closed" state.
 func (c *streamConn) CloseRead() error {
 	return c.Close()
 }
