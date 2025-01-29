@@ -46,20 +46,25 @@ const (
 )
 
 type WebServerConfig struct {
+	// Unique identifier of the web server to be referenced in Websocket connections.
 	ID string
 
 	// List of listener addresses (e.g., ":8080", "localhost:8081"). Should be localhost for HTTP.
 	Listeners []string `yaml:"listen"`
 }
 
-type TCPUDPConfig struct {
-	Address string
-}
-
+// ListenerConfig holds the configuration for a listener.  It supports different
+// listener types, configured via the embedded type and unmarshalled based on
+// the "type" field in the YAML/JSON configuration. Only one of the fields will
+// be set, corresponding to the listener type.
 type ListenerConfig struct {
-	TCP             *TCPUDPConfig
-	UDP             *TCPUDPConfig
+	// TCP configuration for the listener.
+	TCP *TCPUDPConfig
+	// UDP configuration for the listener.
+	UDP *TCPUDPConfig
+	// Websocket stream configuration for the listener.
 	WebsocketStream *WebsocketConfig
+	// Websocket packet configuration for the listener.
 	WebsocketPacket *WebsocketConfig
 }
 
@@ -132,6 +137,11 @@ func (c *ListenerConfig) validate() error {
 	return nil
 }
 
+type TCPUDPConfig struct {
+	// Address for the TCP or UDP listener.  Should be in the format host:port.
+	Address string
+}
+
 var _ Validator = (*TCPUDPConfig)(nil)
 
 func (c *TCPUDPConfig) validate() error {
@@ -145,8 +155,10 @@ func (c *TCPUDPConfig) validate() error {
 }
 
 type WebsocketConfig struct {
+	// Web server unique identifier to use for the websocket connection.
 	WebServer string `json:"web_server"`
-	Path      string
+	// Path for the websocket connection.
+	Path string
 }
 
 var _ Validator = (*WebsocketConfig)(nil)
