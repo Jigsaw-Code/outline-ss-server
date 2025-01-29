@@ -25,11 +25,11 @@ import (
 func TestConfigValidate(t *testing.T) {
 	t.Run("InvalidConfig/InvalidListenerType", func(t *testing.T) {
 		yaml := `
-	services:
-		- listeners:
-			- type: foo
-				address: "[::]:9000"
-	`
+services:
+	- listeners:
+		- type: foo
+			address: "[::]:9000"
+`
 
 		_, err := readConfig([]byte(yaml))
 
