@@ -346,14 +346,13 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								defer wsConn.Close()
 								ctx, contextCancel := context.WithCancel(context.Background())
 								defer contextCancel()
-								// TODO: Get the forwarded client address.
-								raddr, err := transport.MakeNetAddr("tcp", r.RemoteAddr)
+								clientIP, err := onet.GetClientIPFromRequest(r)
 								if err != nil {
 									slog.Error("failed to determine client address", "err", err)
 									w.WriteHeader(http.StatusBadGateway)
 									return
 								}
-								conn := &streamConn{&replaceAddrConn{Conn: wsConn, raddr: raddr}}
+								conn := &streamConn{&replaceAddrConn{Conn: wsConn, raddr: &net.TCPAddr{IP: clientIP}}}
 								streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
@@ -370,13 +369,13 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								defer wsConn.Close()
 								ctx, contextCancel := context.WithCancel(context.Background())
 								defer contextCancel()
-								raddr, err := transport.MakeNetAddr("udp", r.RemoteAddr)
+								clientIP, err := onet.GetClientIPFromRequest(r)
 								if err != nil {
 									slog.Error("failed to determine client address", "err", err)
 									w.WriteHeader(http.StatusBadGateway)
 									return
 								}
-								conn := &replaceAddrConn{Conn: wsConn, raddr: raddr}
+								conn := &replaceAddrConn{Conn: wsConn, raddr: &net.UDPAddr{IP: clientIP}}
 								associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
