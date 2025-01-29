@@ -17,7 +17,6 @@ package main
 import (
 	"container/list"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -93,7 +92,7 @@ func (s *OutlineServer) loadConfig(filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config (%v): %w", filename, err)
 	}
-	if err := config.Validate(); err != nil {
+	if err := config.validate(); err != nil {
 		return fmt.Errorf("failed to validate config: %w", err)
 	}
 
@@ -222,6 +221,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 			// Start configured web servers.
 			webServers := make(map[string]*http.ServeMux)
 			for _, srvConfig := range config.Web.Servers {
+				if _, exists := webServers[srvConfig.ID]; exists {
+					return fmt.Errorf("web server with ID `%s` already exists", srvConfig.ID)
+				}
 				mux := http.NewServeMux()
 				for _, addr := range srvConfig.Listeners {
 					server := &http.Server{Addr: addr, Handler: mux}
@@ -309,10 +311,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 				if err != nil {
 					return err
 				}
-				for _, lnConfig := range serviceConfig.Listeners {
-					switch lnConfig.Type {
-					case listenerTypeTCP:
-						ln, err := lnSet.ListenStream(lnConfig.Address)
+				for _, cfg := range serviceConfig.Listeners {
+					if cfg.TCP != nil {
+						ln, err := lnSet.ListenStream(cfg.TCP.Address)
 						if err != nil {
 							return err
 						}
@@ -325,8 +326,8 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						go service.StreamServe(ln.AcceptStream, func(ctx context.Context, conn transport.StreamConn) {
 							streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 						})
-					case listenerTypeUDP:
-						pc, err := lnSet.ListenPacket(lnConfig.Address)
+					} else if cfg.UDP != nil {
+						pc, err := lnSet.ListenPacket(cfg.UDP.Address)
 						if err != nil {
 							return err
 						}
@@ -339,11 +340,11 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						go service.PacketServe(pc, func(ctx context.Context, conn net.Conn) {
 							associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 						}, s.serverMetrics)
-					case listenerTypeWebsocketStream:
-						if _, exists := webServers[lnConfig.WebServer]; !exists {
-							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
+					} else if cfg.WebsocketStream != nil {
+						if _, exists := webServers[cfg.WebsocketStream.WebServer]; !exists {
+							return fmt.Errorf("listener references unknown web server `%s`", cfg.WebsocketStream.WebServer)
 						}
-						mux := webServers[lnConfig.WebServer]
+						mux := webServers[cfg.WebsocketStream.WebServer]
 						// TODO: Support a "half-closed" state for WebSockets.
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							handler := func(wsConn *websocket.Conn) {
@@ -361,13 +362,13 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
-						mux.Handle(lnConfig.Path, http.StripPrefix(lnConfig.Path, handler))
-						slog.Info("WebSocket stream service started.", "ID", lnConfig.WebServer, "path", lnConfig.Path)
-					case listenerTypeWebsocketPacket:
-						if _, exists := webServers[lnConfig.WebServer]; !exists {
-							return fmt.Errorf("listener type `%s` references unknown web server `%s`", lnConfig.Type, lnConfig.WebServer)
+						mux.Handle(cfg.WebsocketStream.Path, http.StripPrefix(cfg.WebsocketStream.Path, handler))
+						slog.Info("WebSocket stream service started.", "ID", cfg.WebsocketStream.WebServer, "path", cfg.WebsocketStream.Path)
+					} else if cfg.WebsocketPacket != nil {
+						if _, exists := webServers[cfg.WebsocketPacket.WebServer]; !exists {
+							return fmt.Errorf("listener references unknown web server `%s`", cfg.WebsocketPacket.WebServer)
 						}
-						mux := webServers[lnConfig.WebServer]
+						mux := webServers[cfg.WebsocketPacket.WebServer]
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							handler := func(wsConn *websocket.Conn) {
 								defer wsConn.Close()
@@ -384,10 +385,10 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							websocket.Handler(handler).ServeHTTP(w, r)
 						})
-						mux.Handle(lnConfig.Path, http.StripPrefix(lnConfig.Path, handler))
-						slog.Info("WebSocket packet service started.", "ID", lnConfig.WebServer, "path", lnConfig.Path)
-					default:
-						return errors.New("unsupported listener configuration")
+						mux.Handle(cfg.WebsocketPacket.Path, http.StripPrefix(cfg.WebsocketPacket.Path, handler))
+						slog.Info("WebSocket packet service started.", "ID", cfg.WebsocketPacket.WebServer, "path", cfg.WebsocketPacket.Path)
+					} else {
+						return fmt.Errorf("unknown listener configuration: %v", cfg)
 					}
 				}
 				totalCipherCount += len(serviceConfig.Keys)

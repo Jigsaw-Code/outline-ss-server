@@ -23,263 +23,144 @@ import (
 )
 
 func TestConfigValidate(t *testing.T) {
+	t.Run("InvalidConfig/InvalidListenerType", func(t *testing.T) {
+		yaml := `
+	services:
+		- listeners:
+			- type: foo
+				address: "[::]:9000"
+	`
+
+		_, err := readConfig([]byte(yaml))
+
+		require.Error(t, err)
+	})
+
 	t.Run("InvalidConfig", func(t *testing.T) {
 		tests := []struct {
 			name   string
-			cfg    *Config
+			yaml   string
 			errStr string
 		}{
 			{
-				name: "UnknownListenerType",
-				cfg: &Config{
-					Services: []ServiceConfig{
-						ServiceConfig{
-							Listeners: []ListenerConfig{
-								ListenerConfig{Type: "foo", Address: "[::]:9000"},
-							},
-						},
-					},
-				},
-				errStr: "unsupported listener type",
+				name: "MissingAddress",
+				yaml: `
+services:
+  - listeners:
+    - type: tcp
+`,
+				errStr: "`address` must be specified",
 			},
 			{
-				name: "InvalidListenerAddress",
-				cfg: &Config{
-					Services: []ServiceConfig{
-						ServiceConfig{
-							Listeners: []ListenerConfig{
-								ListenerConfig{Type: listenerTypeTCP, Address: "tcp/[::]:9000"},
-							},
-						},
-					},
-				},
-				errStr: "invalid listener address",
+				name: "InvalidAddress",
+				yaml: `
+services:
+  - listeners:
+    - type: tcp
+      address: "tcp/[::]:9000"
+`,
+				errStr: "invalid address",
 			},
 			{
 				name: "HostnameAddress",
-				cfg: &Config{
-					Services: []ServiceConfig{
-						ServiceConfig{
-							Listeners: []ListenerConfig{
-								ListenerConfig{Type: listenerTypeTCP, Address: "example.com:9000"},
-							},
-						},
-					},
-				},
+				yaml: `
+services:
+  - listeners:
+    - type: tcp
+      address: "example.com:9000"
+`,
 				errStr: "address must be IP",
 			},
 			{
-				name: "DuplicateListeners",
-				cfg: &Config{
-					Services: []ServiceConfig{
-						ServiceConfig{
-							Listeners: []ListenerConfig{
-								ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
-							},
-						},
-						ServiceConfig{
-							Listeners: []ListenerConfig{
-								ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
-							},
-						},
-					},
-				},
-				errStr: "already exists",
-			},
-			{
 				name: "WebServerMissingID",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								Listeners: []string{"[::]:8000"},
-							},
-						},
-					},
-					Services: []ServiceConfig{},
-				},
+				yaml: `
+web:
+  servers:
+    - listen:
+        - "127.0.0.1:8000"
+`,
 				errStr: "web server must have an ID",
 			},
 			{
-				name: "WebServerDuplicateID",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								ID:        "foo",
-								Listeners: []string{"[::]:8000"},
-							},
-							{
-								ID:        "foo",
-								Listeners: []string{"[::]:8001"},
-							},
-						},
-					},
-					Services: []ServiceConfig{},
-				},
-				errStr: "already exists",
-			},
-			{
 				name: "WebServerInvalidAddress",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								ID:        "foo",
-								Listeners: []string{":invalid"},
-							},
-						},
-					},
-					Services: []ServiceConfig{},
-				},
+				yaml: `
+web:
+  servers:
+    - id: foo
+      listen:
+        - ":invalid"
+`,
 				errStr: "invalid listener for web server `foo`",
 			},
 			{
-				name: "WebsocketListenerMissingWebServer",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								ID:        "foo",
-								Listeners: []string{"[::]:8000"},
-							},
-						},
-					},
-					Services: []ServiceConfig{
-						{
-							Listeners: []ListenerConfig{
-								{
-									Type: listenerTypeWebsocketStream,
-									Path: "/tcp",
-								},
-							},
-						},
-					},
-				},
-				errStr: "requires a `web_server`",
+				name: "WebsocketMissingWebServer",
+				yaml: `
+services:
+  - listeners:
+      - type: websocket-stream
+        path: "/tcp"
+`,
+				errStr: "`web_server` must be specified",
 			},
 			{
-				name: "WebsocketListenerUnknownWebServer",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								ID:        "foo",
-								Listeners: []string{"[::]:8000"},
-							},
-						},
-					},
-					Services: []ServiceConfig{
-						{
-							Listeners: []ListenerConfig{
-								{
-									Type:      listenerTypeWebsocketStream,
-									WebServer: "unknown_server",
-									Path:      "/tcp",
-								},
-							},
-						},
-					},
-				},
-				errStr: "unknown web server `unknown_server`",
+				name: "WebsocketMissingPath",
+				yaml: `
+services:
+  - listeners:
+      - type: websocket-stream
+        web_server: my_web_server
+`,
+				errStr: "`path` must be specified",
 			},
 			{
-				name: "WebsocketListenerMissingPath",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								ID:        "foo",
-								Listeners: []string{"[::]:8000"},
-							},
-						},
-					},
-					Services: []ServiceConfig{
-						{
-							Listeners: []ListenerConfig{
-								{
-									Type:      listenerTypeWebsocketStream,
-									WebServer: "foo",
-								},
-							},
-						},
-					},
-				},
-				errStr: "requires a `path`",
-			},
-			{
-				name: "ListenerInvalidType",
-				cfg: &Config{
-					Web: WebConfig{
-						Servers: []WebServerConfig{
-							{
-								ID:        "foo",
-								Listeners: []string{"[::]:8000"},
-							},
-						},
-					},
-					Services: []ServiceConfig{
-						{
-							Listeners: []ListenerConfig{
-								{
-									Type:      "invalid-type",
-									WebServer: "foo",
-									Path:      "/tcp",
-								},
-							},
-						},
-					},
-				},
-				errStr: "unsupported listener type: invalid-type",
+				name: "WebsocketInvalidPath",
+				yaml: `
+services:
+  - listeners:
+      - type: websocket-stream
+        web_server: my_web_server
+        path: "tcp"
+`,
+				errStr: "`path` must start with `/`",
 			},
 		}
 
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				err := tc.cfg.Validate()
+				cfg, err := readConfig([]byte(tc.yaml))
+				require.NoError(t, err)
+				err = cfg.validate()
 				require.Error(t, err)
 				if !isStrInError(err, tc.errStr) {
-					t.Errorf("Config.Validate() error=`%v`, expected=`%v`", err, tc.errStr)
+					t.Errorf("config validation error=`%v`, expected=`%v`", err, tc.errStr)
 				}
 			})
 		}
 	})
 
 	t.Run("ValidConfig", func(t *testing.T) {
-		config := Config{
-			Web: WebConfig{
-				Servers: []WebServerConfig{
-					{
-						ID:        "my_web_server",
-						Listeners: []string{"[::]:8000"},
-					},
-				},
-			},
-			Services: []ServiceConfig{
-				{
-					Listeners: []ListenerConfig{
-						{
-							Type:      listenerTypeWebsocketStream,
-							WebServer: "my_web_server",
-							Path:      "/tcp",
-						},
-						{
-							Type:      listenerTypeWebsocketPacket,
-							WebServer: "my_web_server",
-							Path:      "/udp",
-						},
-					},
-					Keys: []KeyConfig{
-						{
-							ID:     "user-0",
-							Cipher: "chacha20-ietf-poly1305",
-							Secret: "Secret0",
-						},
-					},
-				},
-			},
-		}
-		err := config.Validate()
+		yaml := `
+web:
+  servers:
+    - id: my_web_server
+      listen:
+        - "127.0.0.1:8000"
+
+services:
+  - listeners:
+      - type: tcp
+        address: "[::]:9000"
+      - type: websocket-stream
+        web_server: my_web_server
+        path: "/tcp"
+    keys:
+      - id: user-0
+        cipher: chacha20-ietf-poly1305
+        secret: Secret0
+`
+		cfg, err := readConfig([]byte(yaml))
+		require.NoError(t, err)
+		err = cfg.validate()
 		require.NoError(t, err)
 	})
 }
@@ -293,16 +174,16 @@ func TestReadConfig(t *testing.T) {
 		expected := Config{
 			Web: WebConfig{
 				Servers: []WebServerConfig{
-					WebServerConfig{ID: "my_web_server", Listeners: []string{"[::]:8000"}},
+					WebServerConfig{ID: "my_web_server", Listeners: []string{"127.0.0.1:8000"}},
 				},
 			},
 			Services: []ServiceConfig{
 				ServiceConfig{
 					Listeners: []ListenerConfig{
-						ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9000"},
-						ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9000"},
-						ListenerConfig{Type: listenerTypeWebsocketStream, WebServer: "my_web_server", Path: "/tcp"},
-						ListenerConfig{Type: listenerTypeWebsocketPacket, WebServer: "my_web_server", Path: "/udp"},
+						ListenerConfig{TCP: &TCPUDPConfig{Address: "[::]:9000"}},
+						ListenerConfig{UDP: &TCPUDPConfig{Address: "[::]:9000"}},
+						ListenerConfig{WebsocketStream: &WebsocketConfig{WebServer: "my_web_server", Path: "/SECRET/tcp"}},
+						ListenerConfig{WebsocketPacket: &WebsocketConfig{WebServer: "my_web_server", Path: "/SECRET/udp"}},
 					},
 					Keys: []KeyConfig{
 						KeyConfig{"user-0", "chacha20-ietf-poly1305", "Secret0"},
@@ -311,8 +192,8 @@ func TestReadConfig(t *testing.T) {
 				},
 				ServiceConfig{
 					Listeners: []ListenerConfig{
-						ListenerConfig{Type: listenerTypeTCP, Address: "[::]:9001"},
-						ListenerConfig{Type: listenerTypeUDP, Address: "[::]:9001"},
+						ListenerConfig{TCP: &TCPUDPConfig{Address: "[::]:9001"}},
+						ListenerConfig{UDP: &TCPUDPConfig{Address: "[::]:9001"}},
 					},
 					Keys: []KeyConfig{
 						KeyConfig{"user-2", "chacha20-ietf-poly1305", "Secret2"},
