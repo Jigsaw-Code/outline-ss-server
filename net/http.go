@@ -21,8 +21,9 @@ import (
 	"strings"
 )
 
-// GetClientIPFromRequest retrieves the client's IP address from the request,
-// using the provided headers configuration.
+// GetClientIPFromRequest retrieves the client's IP address from the request.
+// This checks common headers that forward the client IP, falling back to the
+// request's `RemoteAddr`.
 func GetClientIPFromRequest(r *http.Request) (net.IP, error) {
 	clientIP, err := func() (string, error) {
 		// `Forwarded` (RFC 7239).
