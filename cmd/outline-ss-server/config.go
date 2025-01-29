@@ -15,7 +15,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -72,45 +71,46 @@ var _ Validator = (*ListenerConfig)(nil)
 var _ yaml.Unmarshaler = (*ListenerConfig)(nil)
 
 func (c *ListenerConfig) UnmarshalYAML(value *yaml.Node) error {
-	raw := make(map[string]interface{})
+	var raw map[string]interface{}
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
 
-	// The `type` is embedded in the value, which we should remove.
+	// Remove the "type" field so we can decode directly into the target struct.
 	rawType, ok := raw["type"]
 	if !ok {
 		return errors.New("`type` field required")
 	}
 	delete(raw, "type")
 
-	jsonData, err := json.Marshal(raw)
+	node := &yaml.Node{}
+	err := node.Encode(raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to encode map to YAML node: %w", err)
 	}
 
 	switch ListenerType(rawType.(string)) {
 	case TCPListenerType:
 		c.TCP = &TCPUDPConfig{}
-		if err := json.Unmarshal(jsonData, c.TCP); err != nil {
+		if err := node.Decode(c.TCP); err != nil {
 			return err
 		}
 
 	case UDPListenerType:
 		c.UDP = &TCPUDPConfig{}
-		if err := json.Unmarshal(jsonData, c.UDP); err != nil {
+		if err := node.Decode(c.UDP); err != nil {
 			return err
 		}
 
 	case WebsocketStreamListenerType:
 		c.WebsocketStream = &WebsocketConfig{}
-		if err := json.Unmarshal(jsonData, c.WebsocketStream); err != nil {
+		if err := node.Decode(c.WebsocketStream); err != nil {
 			return err
 		}
 
 	case WebsocketPacketListenerType:
 		c.WebsocketPacket = &WebsocketConfig{}
-		if err := json.Unmarshal(jsonData, c.WebsocketPacket); err != nil {
+		if err := node.Decode(c.WebsocketPacket); err != nil {
 			return err
 		}
 
@@ -156,7 +156,7 @@ func (c *TCPUDPConfig) validate() error {
 
 type WebsocketConfig struct {
 	// Web server unique identifier to use for the websocket connection.
-	WebServer string `json:"web_server"`
+	WebServer string `yaml:"web_server"`
 	// Path for the websocket connection.
 	Path string
 }
