@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,6 +71,14 @@ type ListenerConfig struct {
 var _ Validator = (*ListenerConfig)(nil)
 var _ yaml.Unmarshaler = (*ListenerConfig)(nil)
 
+// Define a map to associate listener types with [ListenerConfig] field names.
+var listenerTypeMap = map[ListenerType]string{
+	TCPListenerType:             "TCP",
+	UDPListenerType:             "UDP",
+	WebsocketStreamListenerType: "WebsocketStream",
+	WebsocketPacketListenerType: "WebsocketPacket",
+}
+
 func (c *ListenerConfig) UnmarshalYAML(value *yaml.Node) error {
 	var raw map[string]interface{}
 	if err := value.Decode(&raw); err != nil {
@@ -83,39 +92,25 @@ func (c *ListenerConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	delete(raw, "type")
 
-	node := &yaml.Node{}
-	err := node.Encode(raw)
-	if err != nil {
-		return fmt.Errorf("failed to encode map to YAML node: %w", err)
+	lnType := ListenerType(rawType.(string))
+	fieldName, ok := listenerTypeMap[lnType]
+	if !ok {
+		return fmt.Errorf("invalid listener type: %v", lnType)
+	}
+	v := reflect.ValueOf(c).Elem()
+	field := v.FieldByName(fieldName)
+	if !field.IsValid() {
+		return fmt.Errorf("invalid field name: %s for type: %s", fieldName, lnType)
+	}
+	fieldType := field.Type()
+	if fieldType.Kind() != reflect.Ptr || fieldType.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("field %s is not a pointer to a struct", fieldName)
 	}
 
-	switch ListenerType(rawType.(string)) {
-	case TCPListenerType:
-		c.TCP = &TCPUDPConfig{}
-		if err := node.Decode(c.TCP); err != nil {
-			return err
-		}
-
-	case UDPListenerType:
-		c.UDP = &TCPUDPConfig{}
-		if err := node.Decode(c.UDP); err != nil {
-			return err
-		}
-
-	case WebsocketStreamListenerType:
-		c.WebsocketStream = &WebsocketConfig{}
-		if err := node.Decode(c.WebsocketStream); err != nil {
-			return err
-		}
-
-	case WebsocketPacketListenerType:
-		c.WebsocketPacket = &WebsocketConfig{}
-		if err := node.Decode(c.WebsocketPacket); err != nil {
-			return err
-		}
-
-	default:
-		return fmt.Errorf("invalid listener type: %v", rawType)
+	configValue := reflect.New(fieldType.Elem())
+	field.Set(configValue)
+	if err := mapstructure.Decode(raw, configValue.Interface()); err != nil {
+		return fmt.Errorf("failed to decode map: %w", err)
 	}
 	return nil
 }
@@ -156,7 +151,7 @@ func (c *TCPUDPConfig) validate() error {
 
 type WebsocketConfig struct {
 	// Web server unique identifier to use for the websocket connection.
-	WebServer string `yaml:"web_server"`
+	WebServer string `mapstructure:"web_server"`
 	// Path for the websocket connection.
 	Path string
 }
