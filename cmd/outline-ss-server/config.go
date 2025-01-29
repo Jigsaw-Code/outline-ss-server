@@ -90,9 +90,13 @@ func (c *ListenerConfig) UnmarshalYAML(value *yaml.Node) error {
 	if !ok {
 		return errors.New("`type` field required")
 	}
+	lnTypeStr, ok := rawType.(string)
+	if !ok {
+		return fmt.Errorf("`type` is not a string, but %T", rawType)	
+	}
+	lnType := ListenerType(lnTypeStr)
 	delete(raw, "type")
 
-	lnType := ListenerType(rawType.(string))
 	fieldName, ok := listenerTypeMap[lnType]
 	if !ok {
 		return fmt.Errorf("invalid listener type: %v", lnType)
@@ -123,8 +127,8 @@ func (c *ListenerConfig) validate() error {
 		if field.Kind() == reflect.Ptr && field.IsNil() {
 			continue
 		}
-		if field.Type().Implements(reflect.TypeOf((*Validator)(nil)).Elem()) {
-			if err := field.Interface().(Validator).validate(); err != nil {
+		if validator, ok := field.Interface().(Validator); ok {
+			if err := validator.validate(); err != nil {
 				return fmt.Errorf("invalid config: %v", err)
 			}
 		}
