@@ -519,6 +519,8 @@ github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250129215116-5f6d09583605 h1:TOsuI
 github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250129215116-5f6d09583605/go.mod h1:9iEpNbKBsNU3WJs2XzhlI2AOf6DH018bjWxOC38o1Zc=
 github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250130191133-1f7340826841 h1:1tpY2KX6a9/1/uyN0riQVxQHqNthyAvzIhoWWmdYOBA=
 github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250130191133-1f7340826841/go.mod h1:9iEpNbKBsNU3WJs2XzhlI2AOf6DH018bjWxOC38o1Zc=
+github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250130222646-80b6430a1fc8 h1:TsWEVm5XU/SalHlZ6VztE9YwHmN0akCgbWFgQ0j7Mys=
+github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250130222646-80b6430a1fc8/go.mod h1:aFUEz6Z/eD0NS3c3fEIX+JO2D9aIrXCmWTb1zJFlItw=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=

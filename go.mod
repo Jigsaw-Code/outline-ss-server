@@ -2,7 +2,7 @@ module github.com/Jigsaw-Code/outline-ss-server
 
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629
-	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250130191133-1f7340826841
+	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250130222646-80b6430a1fc8
 	github.com/go-task/task/v3 v3.34.1
 	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/google/addlicense v1.1.1
