@@ -346,7 +346,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								slog.Error("failed to upgrade", "err", err)
 							}
 							defer conn.Close()
-							conn = &replaceAddrConn{StreamConn: conn, raddr: &net.TCPAddr{IP: net.ParseIP(r.RemoteAddr)}}
+							if clientIP := net.ParseIP(r.RemoteAddr); clientIP != nil {
+								conn = &replaceAddrConn{StreamConn: conn, raddr: &net.TCPAddr{IP: clientIP}}
+							}
 							streamHandler.HandleStream(r.Context(), conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 						})
 						mux.Handle(cfg.WebsocketStream.Path, http.StripPrefix(cfg.WebsocketStream.Path, handlers.ProxyHeaders(handler)))
@@ -362,7 +364,9 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								slog.Error("failed to upgrade", "err", err)
 							}
 							defer conn.Close()
-							conn = &replaceAddrConn{StreamConn: conn, raddr: &net.UDPAddr{IP: net.ParseIP(r.RemoteAddr)}}
+							if clientIP := net.ParseIP(r.RemoteAddr); clientIP != nil {
+								conn = &replaceAddrConn{StreamConn: conn, raddr: &net.UDPAddr{IP: clientIP}}
+							}
 							associationHandler.HandleAssociation(r.Context(), conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 						})
 						mux.Handle(cfg.WebsocketPacket.Path, http.StripPrefix(cfg.WebsocketPacket.Path, handlers.ProxyHeaders(handler)))
