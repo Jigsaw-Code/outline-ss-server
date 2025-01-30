@@ -33,7 +33,6 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-sdk/x/websocket"
 	"github.com/gorilla/handlers"
-	gorilla "github.com/gorilla/websocket"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -58,10 +57,6 @@ const tcpReadTimeout time.Duration = 59 * time.Second
 
 // A UDP NAT timeout of at least 5 minutes is recommended in RFC 4787 Section 4.3.
 const defaultNatTimeout time.Duration = 5 * time.Minute
-
-// defaultUpgrader is a pre-configured instance of the gorilla.Upgrader which provides
-// reasonable default values for various upgrade parameters.
-var defaultUpgrader = gorilla.Upgrader{}
 
 func init() {
 	logHandler = tint.NewHandler(
@@ -346,14 +341,14 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						}
 						mux := webServers[cfg.WebsocketStream.WebServer]
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							wsConn, err := defaultUpgrader.Upgrade(w, r, nil)
+							conn, err := websocket.Upgrade(w, r, nil)
 							if err != nil {
 								slog.Error("failed to upgrade", "err", err)
 							}
-							defer wsConn.Close()
+							defer conn.Close()
+							conn = &replaceAddrConn{StreamConn: conn, raddr: &net.TCPAddr{IP: net.ParseIP(r.RemoteAddr)}}
 							ctx, contextCancel := context.WithCancel(context.Background())
 							defer contextCancel()
-							conn := &replaceAddrConn{StreamConn: websocket.WrapConn(wsConn), raddr: &net.TCPAddr{IP: net.ParseIP(r.RemoteAddr)}}
 							streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 						})
 						mux.Handle(cfg.WebsocketStream.Path, http.StripPrefix(cfg.WebsocketStream.Path, handlers.ProxyHeaders(handler)))
@@ -364,14 +359,14 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 						}
 						mux := webServers[cfg.WebsocketPacket.WebServer]
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							wsConn, err := defaultUpgrader.Upgrade(w, r, nil)
+							conn, err := websocket.Upgrade(w, r, nil)
 							if err != nil {
 								slog.Error("failed to upgrade", "err", err)
 							}
-							defer wsConn.Close()
+							defer conn.Close()
+							conn = &replaceAddrConn{StreamConn: conn, raddr: &net.UDPAddr{IP: net.ParseIP(r.RemoteAddr)}}
 							ctx, contextCancel := context.WithCancel(context.Background())
 							defer contextCancel()
-							conn := &replaceAddrConn{StreamConn: websocket.WrapConn(wsConn), raddr: &net.UDPAddr{IP: net.ParseIP(r.RemoteAddr)}}
 							associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 						})
 						mux.Handle(cfg.WebsocketPacket.Path, http.StripPrefix(cfg.WebsocketPacket.Path, handlers.ProxyHeaders(handler)))

@@ -2,10 +2,13 @@ module github.com/Jigsaw-Code/outline-ss-server
 
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629
+	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250129215116-5f6d09583605
 	github.com/go-task/task/v3 v3.34.1
+	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/google/addlicense v1.1.1
 	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
+	github.com/gorilla/handlers v0.0.0-20150720190736-60c7bfde3e33
 	github.com/lmittmann/tint v1.0.5
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.8.0
@@ -45,7 +48,6 @@ require (
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v0.8.1 // indirect
 	github.com/BurntSushi/toml v1.1.0 // indirect
-	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250129215116-5f6d09583605 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/Masterminds/semver/v3 v3.2.1 // indirect
@@ -134,7 +136,6 @@ require (
 	github.com/go-openapi/validate v0.22.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.1 // indirect
