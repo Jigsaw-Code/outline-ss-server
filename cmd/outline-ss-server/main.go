@@ -347,9 +347,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							defer conn.Close()
 							conn = &replaceAddrConn{StreamConn: conn, raddr: &net.TCPAddr{IP: net.ParseIP(r.RemoteAddr)}}
-							ctx, contextCancel := context.WithCancel(context.Background())
-							defer contextCancel()
-							streamHandler.HandleStream(ctx, conn, s.serviceMetrics.AddOpenTCPConnection(conn))
+							streamHandler.HandleStream(r.Context(), conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 						})
 						mux.Handle(cfg.WebsocketStream.Path, http.StripPrefix(cfg.WebsocketStream.Path, handlers.ProxyHeaders(handler)))
 						logger.Info("WebSocket stream service started.", "ID", cfg.WebsocketStream.WebServer, "path", cfg.WebsocketStream.Path)
@@ -365,9 +363,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							}
 							defer conn.Close()
 							conn = &replaceAddrConn{StreamConn: conn, raddr: &net.UDPAddr{IP: net.ParseIP(r.RemoteAddr)}}
-							ctx, contextCancel := context.WithCancel(context.Background())
-							defer contextCancel()
-							associationHandler.HandleAssociation(ctx, conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
+							associationHandler.HandleAssociation(r.Context(), conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 						})
 						mux.Handle(cfg.WebsocketPacket.Path, http.StripPrefix(cfg.WebsocketPacket.Path, handlers.ProxyHeaders(handler)))
 						logger.Info("WebSocket packet service started.", "ID", cfg.WebsocketPacket.WebServer, "path", cfg.WebsocketPacket.Path)
