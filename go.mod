@@ -8,7 +8,7 @@ require (
 	github.com/google/addlicense v1.1.1
 	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
-	github.com/gorilla/handlers v0.0.0-20150720190736-60c7bfde3e33
+	github.com/gorilla/handlers v1.3.0
 	github.com/lmittmann/tint v1.0.5
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.8.0
