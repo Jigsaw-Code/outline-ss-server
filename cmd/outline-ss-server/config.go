@@ -15,11 +15,20 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"reflect"
+	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
 )
+
+type Validator interface {
+	// Validate checks that the type is valid.
+	validate() error
+}
 
 type ServiceConfig struct {
 	Listeners []ListenerConfig
@@ -29,13 +38,141 @@ type ServiceConfig struct {
 
 type ListenerType string
 
-const listenerTypeTCP ListenerType = "tcp"
+const (
+	TCPListenerType             = ListenerType("tcp")
+	UDPListenerType             = ListenerType("udp")
+	WebsocketStreamListenerType = ListenerType("websocket-stream")
+	WebsocketPacketListenerType = ListenerType("websocket-packet")
+)
 
-const listenerTypeUDP ListenerType = "udp"
+type WebServerConfig struct {
+	// Unique identifier of the web server to be referenced in Websocket connections.
+	ID string
 
+	// List of listener addresses (e.g., ":8080", "localhost:8081"). Should be localhost for HTTP.
+	Listeners []string `yaml:"listen"`
+}
+
+// ListenerConfig holds the configuration for a listener.  It supports different
+// listener types, configured via the embedded type and unmarshalled based on
+// the "type" field in the YAML/JSON configuration. Only one of the fields will
+// be set, corresponding to the listener type.
 type ListenerConfig struct {
-	Type    ListenerType
+	// TCP configuration for the listener.
+	TCP *TCPUDPConfig
+	// UDP configuration for the listener.
+	UDP *TCPUDPConfig
+	// Websocket stream configuration for the listener.
+	WebsocketStream *WebsocketConfig
+	// Websocket packet configuration for the listener.
+	WebsocketPacket *WebsocketConfig
+}
+
+var _ Validator = (*ListenerConfig)(nil)
+var _ yaml.Unmarshaler = (*ListenerConfig)(nil)
+
+// Define a map to associate listener types with [ListenerConfig] field names.
+var listenerTypeMap = map[ListenerType]string{
+	TCPListenerType:             "TCP",
+	UDPListenerType:             "UDP",
+	WebsocketStreamListenerType: "WebsocketStream",
+	WebsocketPacketListenerType: "WebsocketPacket",
+}
+
+func (c *ListenerConfig) UnmarshalYAML(value *yaml.Node) error {
+	var raw map[string]interface{}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	// Remove the "type" field so we can decode directly into the target struct.
+	rawType, ok := raw["type"]
+	if !ok {
+		return errors.New("`type` field required")
+	}
+	lnTypeStr, ok := rawType.(string)
+	if !ok {
+		return fmt.Errorf("`type` is not a string, but %T", rawType)	
+	}
+	lnType := ListenerType(lnTypeStr)
+	delete(raw, "type")
+
+	fieldName, ok := listenerTypeMap[lnType]
+	if !ok {
+		return fmt.Errorf("invalid listener type: %v", lnType)
+	}
+	v := reflect.ValueOf(c).Elem()
+	field := v.FieldByName(fieldName)
+	if !field.IsValid() {
+		return fmt.Errorf("invalid field name: %s for type: %s", fieldName, lnType)
+	}
+	fieldType := field.Type()
+	if fieldType.Kind() != reflect.Ptr || fieldType.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("field %s is not a pointer to a struct", fieldName)
+	}
+
+	configValue := reflect.New(fieldType.Elem())
+	field.Set(configValue)
+	if err := mapstructure.Decode(raw, configValue.Interface()); err != nil {
+		return fmt.Errorf("failed to decode map: %w", err)
+	}
+	return nil
+}
+
+func (c *ListenerConfig) validate() error {
+	v := reflect.ValueOf(c).Elem()
+
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		if field.Kind() == reflect.Ptr && field.IsNil() {
+			continue
+		}
+		if validator, ok := field.Interface().(Validator); ok {
+			if err := validator.validate(); err != nil {
+				return fmt.Errorf("invalid config: %v", err)
+			}
+		}
+	}
+	return nil
+}
+
+type TCPUDPConfig struct {
+	// Address for the TCP or UDP listener.  Should be in the format host:port.
 	Address string
+}
+
+var _ Validator = (*TCPUDPConfig)(nil)
+
+func (c *TCPUDPConfig) validate() error {
+	if c.Address == "" {
+		return errors.New("`address` must be specified")
+	}
+	if err := validateAddress(c.Address); err != nil {
+		return fmt.Errorf("invalid address: %v", err)
+	}
+	return nil
+}
+
+type WebsocketConfig struct {
+	// Web server unique identifier to use for the websocket connection.
+	WebServer string `mapstructure:"web_server"`
+	// Path for the websocket connection.
+	Path string
+}
+
+var _ Validator = (*WebsocketConfig)(nil)
+
+func (c *WebsocketConfig) validate() error {
+	if c.WebServer == "" {
+		return errors.New("`web_server` must be specified")
+	}
+	if c.Path == "" {
+		return errors.New("`path` must be specified")
+	}
+	if !strings.HasPrefix(c.Path, "/") {
+		return errors.New("`path` must start with `/`")
+	}
+	return nil
 }
 
 type DialerConfig struct {
@@ -53,7 +190,12 @@ type LegacyKeyServiceConfig struct {
 	Port      int
 }
 
+type WebConfig struct {
+	Servers []WebServerConfig `yaml:"servers"`
+}
+
 type Config struct {
+	Web      WebConfig
 	Services []ServiceConfig
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
@@ -61,28 +203,37 @@ type Config struct {
 	Keys []LegacyKeyServiceConfig
 }
 
-// Validate checks that the config is valid.
-func (c *Config) Validate() error {
-	existingListeners := make(map[string]bool)
-	for _, serviceConfig := range c.Services {
-		for _, lnConfig := range serviceConfig.Listeners {
-			// TODO: Support more listener types.
-			if lnConfig.Type != listenerTypeTCP && lnConfig.Type != listenerTypeUDP {
-				return fmt.Errorf("unsupported listener type: %s", lnConfig.Type)
-			}
-			host, _, err := net.SplitHostPort(lnConfig.Address)
-			if err != nil {
-				return fmt.Errorf("invalid listener address `%s`: %v", lnConfig.Address, err)
-			}
-			if ip := net.ParseIP(host); ip == nil {
-				return fmt.Errorf("address must be IP, found: %s", host)
-			}
-			key := string(lnConfig.Type) + "/" + lnConfig.Address
-			if _, exists := existingListeners[key]; exists {
-				return fmt.Errorf("listener of type %s with address %s already exists.", lnConfig.Type, lnConfig.Address)
-			}
-			existingListeners[key] = true
+var _ Validator = (*Config)(nil)
+
+func (c *Config) validate() error {
+	for _, srv := range c.Web.Servers {
+		if srv.ID == "" {
+			return fmt.Errorf("web server must have an ID")
 		}
+		for _, addr := range srv.Listeners {
+			if err := validateAddress(addr); err != nil {
+				return fmt.Errorf("invalid listener for web server `%s`: %w", srv.ID, err)
+			}
+		}
+	}
+
+	for _, service := range c.Services {
+		for _, ln := range service.Listeners {
+			if err := ln.validate(); err != nil {
+				return fmt.Errorf("invalid listener: %v", err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateAddress(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if ip := net.ParseIP(host); ip == nil {
+		return fmt.Errorf("address must be IP, found: %s", host)
 	}
 	return nil
 }
