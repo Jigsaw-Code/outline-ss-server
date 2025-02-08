@@ -31,6 +31,9 @@ jobs:
   license-check:
     runs-on: ubuntu-latest
     env:
+      # The `nomysql` build tag excludes MySQL drivers from the Caddy binary,
+      # avoiding the inclusion of MPL-2 licensed code. See
+      # https://github.com/caddyserver/caddy/issues/6613.
       GOFLAGS: -tags=nomysql
     steps:
     - name: Check out code into the Go module directory

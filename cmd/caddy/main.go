@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The `nomysql` build tag excludes MySQL drivers from the Caddy binary,
+// avoiding the inclusion of MPL-2 licensed code. See
+// https://github.com/caddyserver/caddy/issues/6613.
+//
 //go:build nomysql
 // +build nomysql
 
