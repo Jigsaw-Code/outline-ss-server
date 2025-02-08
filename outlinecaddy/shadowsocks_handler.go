@@ -46,7 +46,13 @@ type KeyConfig struct {
 	Secret string
 }
 
-// ShadowsocksHandler implements a Caddy plugin for Shadowsocks connections.
+// ShadowsocksHandler implements a Caddy plugin for handling Outline Shadowsocks
+// connections.
+//
+// It manages Shadowsocks encryption keys, creates the necessary
+// [outline.StreamHandler] or [outline.AssociationHandler], and dispatches
+// connections to the appropriate handler based on the connection type (stream
+// or packet).
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 

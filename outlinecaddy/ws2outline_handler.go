@@ -40,13 +40,24 @@ func init() {
 	})
 }
 
-// WebSocketHandler implements a middleware Caddy web handler that proxies
-// WebSockets Outline connections.
+// WebSocketHandler implements a Caddy HTTP middleware handler that proxies
+// WebSocket connections for Outline.
+//
+// It upgrades HTTP WebSocket requests to a raw connection that can be handled
+// by an Outline connection handler.  This allows using Outline's connection
+// handling logic over WebSockets.
 type WebSocketHandler struct {
-	// The type of connection.
-	Type              ConnectionType `json:"type,omitempty"`
-	ConnectionHandler string         `json:"connection_handler,omitempty"`
-	compiledHandler   layer4.NextHandler
+	// Type specifies the type of connection being proxied (stream or packet).
+	// If not provided, it defaults to StreamConnectionType.
+	Type ConnectionType `json:"type,omitempty"`
+
+	// ConnectionHandler specifies the name of the connection handler to use.
+	// This name must match a handler configured within the Outline app.
+	ConnectionHandler string `json:"connection_handler,omitempty"`
+
+	// compiledHandler is the compiled instance of the named connection
+	// handler. It is populated during the Provision step.
+	compiledHandler layer4.NextHandler
 
 	logger  *slog.Logger
 	zlogger *zap.Logger

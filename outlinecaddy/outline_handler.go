@@ -44,10 +44,22 @@ const (
 	PacketConnectionType = ConnectionType("packet")
 )
 
-// OutlineHandler implements a Caddy layer4 plugin for Outline connections.
+// OutlineHandler implements a Caddy layer4 plugin for handling Outline
+// connections.
+//
+// It acts as a bridge between the Caddy layer4 framework and the Outline app's
+// configured connection handlers. It selects the appropriate handler based
+// on the `connection_handler` configuration and the connection type (stream or
+// packet). This allows different processing logic to be applied depending on
+// the underlying protocol.
 type OutlineHandler struct {
+	// ConnectionHandler specifies the name of the connection handler to use.
+	// This name must match a handler configured within the Outline app.
 	ConnectionHandler string `json:"connection_handler,omitempty"`
-	compiledHandler   layer4.NextHandler
+
+	// compiledHandler is the compiled instance of the named connection
+	// handler. It is populated during the Provision step.
+	compiledHandler layer4.NextHandler
 
 	logger *slog.Logger
 }

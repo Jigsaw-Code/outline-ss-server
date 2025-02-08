@@ -22,10 +22,30 @@ import (
 	"github.com/mholt/caddy-l4/layer4"
 )
 
+// ConnectionHandler represents a named, reusable connection handler.
+//
+// These handlers are configured within the Outline app and can be shared
+// across different applications. A ConnectionHandler compiles and wraps a layer4
+// handler, allowing it to be referenced and reused by name. This enables sharing
+// configurations and services between different protocol stacks.
+//
+// For example, you might have a Shadowsocks handler (TCP or UDP) in the layer4
+// app and a Shadowsocks-over-WebSockets handler in the HTTP app. Using
+// ConnectionHandler, you can wrap a single Shadowsocks handler and reference
+// it by name in both the layer4 and HTTP app configurations, ensuring they
+// share the same Shadowsocks service configuration.
 type ConnectionHandler struct {
-	Name              string          `json:"name,omitempty"`
+	// Name of the connection handlerThis is used to reference the
+	// handler within the Outline app configuration.
+	Name string `json:"name,omitempty"`
+
+	// WrappedHandlerRaw is the raw JSON configuration for the wrapped
+	// layer4.NextHandler. It is unmarshalled and used to create the
+	// actual handler instance.
 	WrappedHandlerRaw json.RawMessage `json:"handle,omitempty" caddy:"namespace=layer4.handlers inline_key=handler"`
 
+	// compiled is the compiled instance of the wrapped layer4.NextHandler.
+	// It is populated during the Provision step.
 	compiled layer4.NextHandler
 }
 
