@@ -63,9 +63,17 @@ func NewShadowsocksHandlers(opts ...Option) (StreamHandler, AssociationHandler) 
 		opt(s)
 	}
 
+	var (
+		tcpShadowsocksConnMetrics ShadowsocksConnMetrics
+		udpShadowsocksConnMetrics ShadowsocksConnMetrics
+	)
+	if s.metrics != nil {
+		tcpShadowsocksConnMetrics = &ssConnMetrics{s.metrics.AddTCPCipherSearch}
+		udpShadowsocksConnMetrics = &ssConnMetrics{s.metrics.AddUDPCipherSearch}
+	}
 	// TODO: Register initial data metrics at zero.
 	sh := NewStreamHandler(
-		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, &ssConnMetrics{s.metrics.AddTCPCipherSearch}, s.logger),
+		NewShadowsocksStreamAuthenticator(s.ciphers, s.replayCache, tcpShadowsocksConnMetrics, s.logger),
 		tcpReadTimeout,
 	)
 	if s.streamDialer != nil {
@@ -73,7 +81,7 @@ func NewShadowsocksHandlers(opts ...Option) (StreamHandler, AssociationHandler) 
 	}
 	sh.SetLogger(s.logger)
 
-	ah := NewAssociationHandler(s.ciphers, &ssConnMetrics{s.metrics.AddUDPCipherSearch})
+	ah := NewAssociationHandler(s.ciphers, udpShadowsocksConnMetrics)
 	if s.packetListener != nil {
 		ah.SetTargetPacketListener(s.packetListener)
 	}

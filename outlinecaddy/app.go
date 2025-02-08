@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	outline "github.com/Jigsaw-Code/outline-ss-server/service"
@@ -127,7 +128,8 @@ func (app *OutlineApp) defineMetrics() error {
 func registerCollector[T prometheus.Collector](registerer prometheus.Registerer, coll T) (T, error) {
 	if err := registerer.Register(coll); err != nil {
 		are := &prometheus.AlreadyRegisteredError{}
-		if !errors.As(err, are) {
+		dupeErr := strings.Contains(err.Error(), "duplicate metrics collector registration attempted")
+		if !errors.As(err, are) || dupeErr {
 			// This collector has been registered before. This is expected during a config reload.
 			coll = are.ExistingCollector.(T)
 		} else {
