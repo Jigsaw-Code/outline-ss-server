@@ -16,8 +16,8 @@ From this directory, build and run a custom Caddy binary with this Go module plu
 xcaddy build \
   --with github.com/iamd3vil/caddy_yaml_adapter \
   --with github.com/mholt/caddy-l4 \
-  --with github.com/Jigsaw-Code/outline-ss-server/caddy
-./caddy run --config caddy/examples/simple.yaml --adapter yaml --watch
+  --with github.com/Jigsaw-Code/outline-ss-server/outlinecaddy
+./caddy run --config examples/simple.yaml --adapter yaml --watch
 ```
 
 In a separate window, confirm you can fetch a page over Shadowsocks:
@@ -32,11 +32,11 @@ Prometheus metrics are available on http://localhost:9091/metrics.
 
 ## Development
 
-From the repo's root directory, run the Caddy module directly from Go:
+From this directory, run the Caddy module directly from Go:
 
 ```sh
 go run -tags nomysql ./cmd/caddy run \
   --adapter yaml \
-  --config caddy/examples/simple.yml \
+  --config examples/simple.yml \
   --watch
 ```
