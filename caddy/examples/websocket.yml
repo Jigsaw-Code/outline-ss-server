@@ -32,8 +32,7 @@ apps:
           - path:
             - "/metrics"
           handle:
-          - disable_openmetrics: true
-            handler: metrics
+          - handler: metrics
       '1':
         listen:
         - ":8000"
