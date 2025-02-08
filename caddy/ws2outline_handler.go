@@ -22,16 +22,16 @@ import (
 	"net/http"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"github.com/Jigsaw-Code/outline-sdk/x/websocket"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/mholt/caddy-l4/layer4"
 	"go.uber.org/zap"
-	"golang.org/x/net/websocket"
+
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
-const (
-	wsModuleName = "http.handlers.ws2outline"
-)
+const wsModuleName = "http.handlers.ws2outline"
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -39,13 +39,6 @@ func init() {
 		New: func() caddy.Module { return new(WebSocketHandler) },
 	})
 }
-
-type ConnectionType string
-
-const (
-	connectionTypeStream ConnectionType = "stream"
-	connectionTypePacket ConnectionType = "packet"
-)
 
 // WebSocketHandler implements a middleware Caddy web handler that proxies
 // WebSockets Outline connections.
@@ -75,7 +68,7 @@ func (h *WebSocketHandler) Provision(ctx caddy.Context) error {
 	h.zlogger = ctx.Logger()
 	if h.Type == "" {
 		// The default connection type if not provided is a stream.
-		h.Type = connectionTypeStream
+		h.Type = StreamConnectionType
 	}
 
 	mod, err := ctx.AppIfConfigured(outlineModuleName)
@@ -101,7 +94,7 @@ func (h *WebSocketHandler) Provision(ctx caddy.Context) error {
 
 // Validate implements caddy.Validator.
 func (h *WebSocketHandler) Validate() error {
-	if h.Type != "" && h.Type != connectionTypeStream && h.Type != connectionTypePacket {
+	if h.Type != "" && h.Type != StreamConnectionType && h.Type != PacketConnectionType {
 		return fmt.Errorf("unsupported `type`: %v", h.Type)
 	}
 	if h.ConnectionHandler == "" {
@@ -117,55 +110,35 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, _ ca
 		slog.String("path", r.URL.Path),
 		slog.Any("remote_addr", r.RemoteAddr))
 
-	switch h.Type {
-	case connectionTypeStream:
-		handler := func(wsConn *websocket.Conn) {
-			raddr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
-			if err != nil {
-				h.logger.Error("failed to upgrade", "err", err)
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-
-			conn := &wsToStreamConn{&wrappedConn{Conn: wsConn, raddr: raddr}}
-
-			if err = h.compiledHandler.Handle(layer4.WrapConnection(conn, []byte{}, h.zlogger), nil); err != nil {
-				h.logger.Error("failed to upgrade", "err", err)
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-		}
-		websocket.Handler(handler).ServeHTTP(w, r)
-	case connectionTypePacket:
-		handler := func(wsConn *websocket.Conn) {
-			raddr, err := net.ResolveUDPAddr("udp", r.RemoteAddr)
-			if err != nil {
-				h.logger.Error("failed to upgrade", "err", err)
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-
-			conn := &wrappedConn{Conn: wsConn, raddr: raddr}
-
-			if err = h.compiledHandler.Handle(layer4.WrapConnection(conn, []byte{}, h.zlogger), nil); err != nil {
-				h.logger.Error("failed to upgrade", "err", err)
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-		}
-		websocket.Handler(handler).ServeHTTP(w, r)
+	conn, err := websocket.Upgrade(w, r, nil)
+	if err != nil {
+		h.logger.Error("failed to upgrade", "err", err)
 	}
-
-	return nil
+	defer conn.Close()
+	clientAddrPort, clientIpErr := onet.ParseAddrPortOrIP(r.RemoteAddr)
+	switch h.Type {
+	case StreamConnectionType:
+		if clientIpErr == nil {
+			conn = &replaceAddrConn{StreamConn: conn, raddr: net.TCPAddrFromAddrPort(clientAddrPort)}
+		}
+	case PacketConnectionType:
+		if clientIpErr == nil {
+			conn = &replaceAddrConn{StreamConn: conn, raddr: net.UDPAddrFromAddrPort(clientAddrPort)}
+		}
+	}
+	cx := layer4.WrapConnection(conn, []byte{}, h.zlogger)
+	cx.SetVar(outlineConnectionTypeCtxKey, h.Type)
+	return h.compiledHandler.Handle(cx, nil)
 }
 
-// wrappedConn overrides [websocket.Conn]'s remote address handling.
-type wrappedConn struct {
-	*websocket.Conn
+// TODO: Create a dedicated `ClientConn` struct with `ClientAddr` and `Conn`.
+// replaceAddrConn overrides a [transport.StreamConn]'s remote address handling.
+type replaceAddrConn struct {
+	transport.StreamConn
 	raddr net.Addr
 }
 
-func (c wrappedConn) RemoteAddr() net.Addr {
+func (c replaceAddrConn) RemoteAddr() net.Addr {
 	return c.raddr
 }
 
@@ -184,4 +157,3 @@ func (c *wsToStreamConn) CloseRead() error {
 func (c *wsToStreamConn) CloseWrite() error {
 	return c.Conn.Close()
 }
-

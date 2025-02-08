@@ -18,12 +18,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/mholt/caddy-l4/layer4"
 )
 
-const outlineHandlerModuleName = "layer4.handlers.outline"
+const (
+	outlineHandlerModuleName    = "layer4.handlers.outline"
+	outlineConnectionTypeCtxKey = "layer4.handlers.outline.cxtype"
+)
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -31,6 +36,13 @@ func init() {
 		New: func() caddy.Module { return new(OutlineHandler) },
 	})
 }
+
+type ConnectionType string
+
+const (
+	StreamConnectionType = ConnectionType("stream")
+	PacketConnectionType = ConnectionType("packet")
+)
 
 // OutlineHandler implements a Caddy layer4 plugin for Outline connections.
 type OutlineHandler struct {
@@ -85,5 +97,11 @@ func (h *OutlineHandler) Validate() error {
 
 // Handle implements layer4.NextHandler.
 func (h *OutlineHandler) Handle(cx *layer4.Connection, next layer4.Handler) error {
+	switch cx.Conn.(type) {
+	case transport.StreamConn:
+		cx.SetVar(outlineConnectionTypeCtxKey, StreamConnectionType)
+	case net.Conn:
+		cx.SetVar(outlineConnectionTypeCtxKey, PacketConnectionType)
+	}
 	return h.compiledHandler.Handle(cx, next)
 }

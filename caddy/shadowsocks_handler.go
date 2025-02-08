@@ -18,7 +18,6 @@ import (
 	"container/list"
 	"fmt"
 	"log/slog"
-	"net"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
@@ -116,13 +115,18 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 
 // Handle implements layer4.NextHandler.
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
-	switch conn := cx.Conn.(type) {
-	case transport.StreamConn:
-		h.streamHandler.HandleStream(cx.Context, conn, h.metrics.AddOpenTCPConnection(conn))
-	case net.Conn:
-		h.associationHandler.HandleAssociation(cx.Context, conn, h.metrics.AddOpenUDPAssociation(conn))
-	default:
-		return fmt.Errorf("failed to handle unknown connection type: %T", conn)
+	connType, ok := cx.GetVar(outlineConnectionTypeCtxKey).(ConnectionType)
+	if !ok {
+		// Likely if the Shadowsocks handler was used directly instead of through
+		// the Outline connection handler.
+		return fmt.Errorf("unknown outline connection type")
+	}
+
+	switch connType {
+	case StreamConnectionType:
+		h.streamHandler.HandleStream(cx.Context, cx.Conn.(transport.StreamConn), h.metrics.AddOpenTCPConnection(cx))
+	case PacketConnectionType:
+		h.associationHandler.HandleAssociation(cx.Context, cx.Conn, h.metrics.AddOpenUDPAssociation(cx))
 	}
 	return nil
 }
