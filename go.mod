@@ -1,13 +1,16 @@
 module github.com/Jigsaw-Code/outline-ss-server
 
 require (
-	github.com/Jigsaw-Code/outline-sdk v0.0.17
+	github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629
+	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250204151340-93ebcb07dba9
 	github.com/Jigsaw-Code/outline-ss-server/caddy v0.0.0-20241007213154-3c2481719740
 	github.com/caddyserver/caddy/v2 v2.9.2-0.20250117135458-99073eaa33af
 	github.com/go-task/task/v3 v3.34.1
+	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/google/addlicense v1.1.1
 	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
+	github.com/gorilla/handlers v1.4.1
 	github.com/iamd3vil/caddy_yaml_adapter v0.0.0-20200503183711-d479c29b475a
 	github.com/lmittmann/tint v1.0.5
 	github.com/mholt/caddy-l4 v0.0.0-20250102174933-6e5f5e311ead
@@ -194,7 +197,7 @@ require (
 	github.com/goreleaser/chglog v0.4.2 // indirect
 	github.com/goreleaser/fileglob v1.3.0 // indirect
 	github.com/goreleaser/nfpm/v2 v2.28.0 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect

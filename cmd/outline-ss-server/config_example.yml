@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+web:
+  servers:
+    - id: my_web_server
+      listen:
+        - "127.0.0.1:8000"
+
 services:
   - listeners:
       # TODO(sbruens): Allow a string-based listener config, as a convenient short-form
@@ -20,6 +26,12 @@ services:
         address: "[::]:9000"
       - type: udp
         address: "[::]:9000"
+      - type: websocket-stream
+        web_server: my_web_server
+        path: "/SECRET/tcp"  # Prevent probing by serving under a secret path.
+      - type: websocket-packet
+        web_server: my_web_server
+        path: "/SECRET/udp"  # Prevent probing by serving under a secret path.
     keys:
       - id: user-0
         cipher: chacha20-ietf-poly1305
