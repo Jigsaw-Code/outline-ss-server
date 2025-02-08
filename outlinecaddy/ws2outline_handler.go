@@ -126,15 +126,17 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, _ ca
 		h.logger.Error("failed to upgrade", "err", err)
 	}
 	defer conn.Close()
-	clientAddrPort, clientIpErr := onet.ParseAddrPortOrIP(r.RemoteAddr)
-	switch h.Type {
-	case StreamConnectionType:
-		if clientIpErr == nil {
-			conn = &replaceAddrConn{StreamConn: conn, raddr: net.TCPAddrFromAddrPort(clientAddrPort)}
-		}
-	case PacketConnectionType:
-		if clientIpErr == nil {
-			conn = &replaceAddrConn{StreamConn: conn, raddr: net.UDPAddrFromAddrPort(clientAddrPort)}
+	if clientIp, ok := caddyhttp.GetVar(r.Context(), caddyhttp.ClientIPVarKey).(string); ok {
+		clientAddrPort, clientIpErr := onet.ParseAddrPortOrIP(clientIp)
+		switch h.Type {
+		case StreamConnectionType:
+			if clientIpErr == nil {
+				conn = &replaceAddrConn{StreamConn: conn, raddr: net.TCPAddrFromAddrPort(clientAddrPort)}
+			}
+		case PacketConnectionType:
+			if clientIpErr == nil {
+				conn = &replaceAddrConn{StreamConn: conn, raddr: net.UDPAddrFromAddrPort(clientAddrPort)}
+			}
 		}
 	}
 	cx := layer4.WrapConnection(conn, []byte{}, h.zlogger)

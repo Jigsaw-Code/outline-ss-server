@@ -61,6 +61,12 @@ apps:
           - handler: ws2outline
             type: packet
             connection_handler: ss1
+        trusted_proxies:
+          source: static
+          ranges:
+            - 127.0.0.1
+        client_ip_headers:
+          - "X-Forwarded-For"
   layer4:
     servers:
       '1':
