@@ -29,9 +29,9 @@ import (
 )
 
 const (
-	outlineModuleName = "outline"
-	replayCacheCtxKey = "outline.replay_cache"
-	metricsCtxKey     = "outline.metrics"
+	outlineModuleName              = "outline"
+	replayCacheCtxKey caddy.CtxKey = "outline.replay_cache"
+	metricsCtxKey     caddy.CtxKey = "outline.metrics"
 )
 
 func init() {
