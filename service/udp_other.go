@@ -22,10 +22,15 @@ import (
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
+
+	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
 type udpListener struct {
 	*transport.UDPListener
+
+	// The validator to be used to validate target IP addresses.
+	targetIPValidator onet.TargetIPValidator
 
 	// NAT mapping timeout is the default time a mapping will stay active
 	// without packets traversing the NAT, applied to non-DNS packets.
@@ -34,11 +39,15 @@ type udpListener struct {
 
 // fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.
 // Value of 0 disables fwmark (SO_MARK)
-func MakeTargetUDPListener(timeout time.Duration, fwmark uint) transport.PacketListener {
+func MakeTargetUDPListener(targetIPValidator onet.TargetIPValidator, timeout time.Duration, fwmark uint) transport.PacketListener {
 	if fwmark != 0 {
 		panic("fwmark is linux-specific feature and should be 0")
 	}
-	return &udpListener{UDPListener: &transport.UDPListener{Address: ""}}
+	return &udpListener{
+		targetIPValidator: targetIPValidator,
+		timeout:           timeout,
+		UDPListener:       &transport.UDPListener{Address: ""},
+	}
 }
 
 func (ln *udpListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
@@ -46,5 +55,8 @@ func (ln *udpListener) ListenPacket(ctx context.Context) (net.PacketConn, error)
 	if err != nil {
 		return nil, err
 	}
-	return &timedPacketConn{PacketConn: conn, defaultTimeout: ln.timeout}, nil
+	return &validatingPacketConn{
+		PacketConn:        &timedPacketConn{PacketConn: conn, defaultTimeout: ln.timeout},
+		targetIPValidator: ln.targetIPValidator,
+	}, nil
 }
