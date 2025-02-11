@@ -161,7 +161,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		}
 		clientProxyBytes, err := clientConn.Read(readBuf)
 		if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
-			debugUDP(l, "Client closed connection")
+			debugUDP(l, "Client connection closed")
 			break
 		}
 		pkt := readBuf[:clientProxyBytes]
@@ -199,7 +199,10 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
 				}
 				l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
-				go relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
+				go func() {
+					relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
+					clientConn.Close()
+				}()
 			} else {
 				unpackStart := time.Now()
 				textData, err := shadowsocks.Unpack(nil, pkt, cryptoKey)
@@ -348,8 +351,8 @@ type association struct {
 
 var _ net.Conn = (*association)(nil)
 
-func (c *association) Read(p []byte) (int, error) {
-	pkt, ok := <-c.readCh
+func (a *association) Read(p []byte) (int, error) {
+	pkt, ok := <-a.readCh
 	if !ok {
 		return 0, net.ErrClosed
 	}
@@ -361,32 +364,32 @@ func (c *association) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (c *association) Write(b []byte) (n int, err error) {
-	return c.pc.WriteTo(b, c.clientAddr)
+func (a *association) Write(b []byte) (n int, err error) {
+	return a.pc.WriteTo(b, a.clientAddr)
 }
 
-func (c *association) Close() error {
-	close(c.readCh)
-	return c.pc.Close()
+func (a *association) Close() error {
+	close(a.readCh)
+	return nil
 }
 
-func (c *association) LocalAddr() net.Addr {
-	return c.pc.LocalAddr()
+func (a *association) LocalAddr() net.Addr {
+	return a.pc.LocalAddr()
 }
 
-func (c *association) RemoteAddr() net.Addr {
-	return c.clientAddr
+func (a *association) RemoteAddr() net.Addr {
+	return a.clientAddr
 }
 
-func (c *association) SetDeadline(t time.Time) error {
+func (a *association) SetDeadline(t time.Time) error {
 	return errors.ErrUnsupported
 }
 
-func (c *association) SetReadDeadline(t time.Time) error {
+func (a *association) SetReadDeadline(t time.Time) error {
 	return errors.ErrUnsupported
 }
 
-func (c *association) SetWriteDeadline(t time.Time) error {
+func (a *association) SetWriteDeadline(t time.Time) error {
 	return errors.ErrUnsupported
 }
 
