@@ -27,11 +27,9 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/mholt/caddy-l4/layer4"
 	"go.uber.org/zap"
-
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )
 
-const wsModuleName = "http.handlers.ws2outline"
+const wsModuleName = "http.handlers.websocket2layer4"
 
 func init() {
 	caddy.RegisterModule(ModuleRegistration{
@@ -44,15 +42,15 @@ func init() {
 // WebSocket connections for Outline.
 //
 // It upgrades HTTP WebSocket requests to a raw connection that can be handled
-// by an Outline connection handler.  This allows using Outline's connection
+// by an Outline connection handler. This allows using Outline's connection
 // handling logic over WebSockets.
 type WebSocketHandler struct {
-	// Type specifies the type of connection being proxied (stream or packet).
-	// If not provided, it defaults to StreamConnectionType.
+	// Type specifies the type of connection being proxied (stream or packet). If
+	// not provided, it defaults to StreamConnectionType.
 	Type ConnectionType `json:"type,omitempty"`
 
-	// ConnectionHandler specifies the name of the connection handler to use.
-	// This name must match a handler configured within the Outline app.
+	// ConnectionHandler specifies the name of the connection handler to use. This
+	// name must match a handler configured within the Outline app.
 	ConnectionHandler string `json:"connection_handler,omitempty"`
 
 	// compiledHandler is the compiled instance of the named connection
@@ -126,16 +124,13 @@ func (h WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, _ ca
 		h.logger.Error("failed to upgrade", "err", err)
 	}
 	defer conn.Close()
-	if clientIp, ok := caddyhttp.GetVar(r.Context(), caddyhttp.ClientIPVarKey).(string); ok {
-		clientAddrPort, clientIpErr := onet.ParseAddrPortOrIP(clientIp)
-		switch h.Type {
-		case StreamConnectionType:
-			if clientIpErr == nil {
-				conn = &replaceAddrConn{StreamConn: conn, raddr: net.TCPAddrFromAddrPort(clientAddrPort)}
-			}
-		case PacketConnectionType:
-			if clientIpErr == nil {
-				conn = &replaceAddrConn{StreamConn: conn, raddr: net.UDPAddrFromAddrPort(clientAddrPort)}
+	if clientIpStr, ok := caddyhttp.GetVar(r.Context(), caddyhttp.ClientIPVarKey).(string); ok {
+		if clientIp := net.ParseIP(clientIpStr); clientIp != nil {
+			switch h.Type {
+			case StreamConnectionType:
+				conn = &replaceAddrConn{StreamConn: conn, raddr: &net.TCPAddr{IP: clientIp}}
+			case PacketConnectionType:
+				conn = &replaceAddrConn{StreamConn: conn, raddr: &net.UDPAddr{IP: clientIp}}
 			}
 		}
 	}

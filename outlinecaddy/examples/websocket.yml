@@ -13,8 +13,6 @@
 # limitations under the License.
 
 ---
-admin:
-  disabled: true
 logging:
   logs:
     default:
@@ -24,15 +22,6 @@ logging:
 apps:
   http:
     servers:
-      metrics:
-        listen:
-        - ":9091"
-        routes:
-        - match:
-          - path:
-            - "/metrics"
-          handle:
-          - handler: metrics
       '1':
         listen:
         - ":8000"
@@ -40,33 +29,36 @@ apps:
         - match:
           - path:
             - "/SECRET/tcp"  # Prevent probing by serving under a secret path.
-            header:
-              Connection:
-              - "*Upgrade*"
-              Upgrade:
-              - websocket
           handle:
-          - handler: ws2outline
+          - handler: websocket2layer4
             type: stream
             connection_handler: ss1
         - match:
           - path:
             - "/SECRET/udp"  # Prevent probing by serving under a secret path.
-            header:
-              Connection:
-              - "*Upgrade*"
-              Upgrade:
-              - websocket
           handle:
-          - handler: ws2outline
+          - handler: websocket2layer4
             type: packet
             connection_handler: ss1
+
+        # `trusted_proxies` defines the IP ranges of your trusted proxies.
+        # Requests from these proxies will have their client IP determined by
+        # incoming proxy headers specified in `client_ip_headers` below.
         trusted_proxies:
           source: static
           ranges:
             - 127.0.0.1
         client_ip_headers:
           - "X-Forwarded-For"
+          - "X-Original-Forwarded-For"
+          - "Forwarded-For"
+          - "Forwarded"
+          - "Client-IP"
+          - "CF-Connecting-IP"
+          - "X-Real-IP"
+          - "X-Client-IP"
+          - "True-Client-IP"
+
   layer4:
     servers:
       '1':

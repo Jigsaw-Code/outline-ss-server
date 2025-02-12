@@ -13,8 +13,6 @@
 # limitations under the License.
 
 ---
-admin:
-  disabled: true
 logging:
   logs:
     default:
@@ -22,17 +20,6 @@ logging:
       encoder:
         format: console
 apps:
-  http:
-    servers:
-      metrics:
-        listen:
-        - ":9091"
-        routes:
-        - match:
-          - path:
-            - "/metrics"
-          handle:
-          - handler: metrics
   layer4:
     servers:
       '1':

@@ -35,17 +35,17 @@ import (
 // it by name in both the layer4 and HTTP app configurations, ensuring they
 // share the same Shadowsocks service configuration.
 type ConnectionHandler struct {
-	// Name of the connection handlerThis is used to reference the
-	// handler within the Outline app configuration.
+	// Name of the connection handler. This is used to reference the handler
+	//  within the Outline app configuration.
 	Name string `json:"name,omitempty"`
 
 	// WrappedHandlerRaw is the raw JSON configuration for the wrapped
-	// layer4.NextHandler. It is unmarshalled and used to create the
-	// actual handler instance.
+	// layer4.NextHandler. It is unmarshalled and used to create the actual
+	// handler instance.
 	WrappedHandlerRaw json.RawMessage `json:"handle,omitempty" caddy:"namespace=layer4.handlers inline_key=handler"`
 
-	// compiled is the compiled instance of the wrapped layer4.NextHandler.
-	// It is populated during the Provision step.
+	// compiled is the compiled instance of the wrapped layer4.NextHandler. It is
+	// populated during the Provision step.
 	compiled layer4.NextHandler
 }
 
