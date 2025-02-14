@@ -30,6 +30,11 @@ on:
 jobs:
   license-check:
     runs-on: ubuntu-latest
+    env:
+      # The `nomysql` build tag excludes MySQL drivers from the Caddy binary,
+      # avoiding the inclusion of MPL-2 licensed code. See
+      # https://github.com/caddyserver/caddy/issues/6613.
+      GOFLAGS: -tags=nomysql
     steps:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v3
@@ -44,4 +49,10 @@ jobs:
 
     - name: Check licenses
       # We allow only "notice" type of licenses.
-      run: go run github.com/google/go-licenses check --ignore=golang.org/x --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
+      # Note that we ignore our own repo because `go-licenses` ignores the root
+      # license for submodules and we have a submodule.
+      run: |
+        go run github.com/google/go-licenses check \
+          --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT \
+          --ignore github.com/Jigsaw-Code/outline-ss-server \
+          ./...
