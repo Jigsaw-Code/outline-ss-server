@@ -233,6 +233,9 @@ func validateAddress(addr string) error {
 	if err != nil {
 		return err
 	}
+	// NOTE: We allow addresses with only the port number set . This will result
+	// in an address that listens on all available network interfaces (both IPv4
+	// and IPv6).
 	if host != "" {
 		if ip := net.ParseIP(host); ip == nil {
 			return fmt.Errorf("address must be IP, found: %s", host)
