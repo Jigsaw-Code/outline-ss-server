@@ -346,8 +346,10 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								slog.Error("failed to upgrade", "err", err)
 							}
 							defer conn.Close()
-							if clientIP := net.ParseIP(r.RemoteAddr); clientIP != nil {
-								conn = &replaceAddrConn{StreamConn: conn, raddr: &net.TCPAddr{IP: clientIP}}
+							// RemoteAddr is "IP:port" for direct connections, but may be just "IP" when proxied.
+							clientAddrPort, err := onet.ParseAddrPortOrIP(r.RemoteAddr)
+							if err == nil {
+								conn = &replaceAddrConn{StreamConn: conn, raddr: net.TCPAddrFromAddrPort(clientAddrPort)}
 							}
 							streamHandler.HandleStream(r.Context(), conn, s.serviceMetrics.AddOpenTCPConnection(conn))
 						})
@@ -364,8 +366,10 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 								slog.Error("failed to upgrade", "err", err)
 							}
 							defer conn.Close()
-							if clientIP := net.ParseIP(r.RemoteAddr); clientIP != nil {
-								conn = &replaceAddrConn{StreamConn: conn, raddr: &net.UDPAddr{IP: clientIP}}
+							// RemoteAddr is "IP:port" for direct connections, but may be just "IP" when proxied.
+							clientAddrPort, err := onet.ParseAddrPortOrIP(r.RemoteAddr)
+							if err == nil {
+								conn = &replaceAddrConn{StreamConn: conn, raddr: net.UDPAddrFromAddrPort(clientAddrPort)}
 							}
 							associationHandler.HandleAssociation(r.Context(), conn, s.serviceMetrics.AddOpenUDPAssociation(conn))
 						})

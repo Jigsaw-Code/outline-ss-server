@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package caddy
+package outlinecaddy
 
 import (
 	"container/list"
 	"fmt"
 	"log/slog"
-	"net"
 	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
@@ -47,6 +46,13 @@ type KeyConfig struct {
 	Secret string
 }
 
+// ShadowsocksHandler implements a Caddy plugin for handling Outline Shadowsocks
+// connections.
+//
+// It manages Shadowsocks encryption keys, creates the necessary
+// [outline.StreamHandler] or [outline.AssociationHandler], and dispatches
+// connections to the appropriate handler based on the connection type (stream
+// or packet).
 type ShadowsocksHandler struct {
 	Keys []KeyConfig `json:"keys,omitempty"`
 
@@ -68,16 +74,6 @@ func (*ShadowsocksHandler) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Slogger()
-
-	mod, err := ctx.AppIfConfigured(outlineModuleName)
-	if err != nil {
-		return fmt.Errorf("outline app configure error: %w", err)
-	}
-	app, ok := mod.(*OutlineApp)
-	if !ok {
-		return fmt.Errorf("module `%s` is of type `%T`, expected `OutlineApp`", outlineModuleName, app)
-	}
-	h.metrics = app.Metrics
 
 	if len(h.Keys) == 0 {
 		h.logger.Warn("no keys configured")
@@ -105,24 +101,38 @@ func (h *ShadowsocksHandler) Provision(ctx caddy.Context) error {
 	ciphers := outline.NewCipherList()
 	ciphers.Update(cipherList)
 
+	replayCache, ok := ctx.Value(replayCacheCtxKey).(outline.ReplayCache)
+	if !ok {
+		h.logger.Warn("Handler configured outside Outline app; replay cache not available.")
+	}
+	h.metrics, ok = ctx.Value(metricsCtxKey).(outline.ServiceMetrics)
+	if !ok {
+		h.logger.Warn("Handler configured outside Outline app; metrics not available.")
+	}
+
 	h.streamHandler, h.associationHandler = outline.NewShadowsocksHandlers(
 		outline.WithLogger(h.logger),
 		outline.WithCiphers(ciphers),
 		outline.WithMetrics(h.metrics),
-		outline.WithReplayCache(&app.ReplayCache),
+		outline.WithReplayCache(&replayCache),
 	)
 	return nil
 }
 
 // Handle implements layer4.NextHandler.
 func (h *ShadowsocksHandler) Handle(cx *layer4.Connection, _ layer4.Handler) error {
-	switch conn := cx.Conn.(type) {
-	case transport.StreamConn:
-		h.streamHandler.HandleStream(cx.Context, conn, h.metrics.AddOpenTCPConnection(conn))
-	case net.Conn:
-		h.associationHandler.HandleAssociation(cx.Context, conn, h.metrics.AddOpenUDPAssociation(conn))
-	default:
-		return fmt.Errorf("failed to handle unknown connection type: %t", conn)
+	connType, ok := cx.GetVar(outlineConnectionTypeCtxKey).(ConnectionType)
+	if !ok {
+		// Likely if the Shadowsocks handler was used directly instead of through
+		// the Outline connection handler.
+		return fmt.Errorf("unknown outline connection type")
+	}
+
+	switch connType {
+	case StreamConnectionType:
+		h.streamHandler.HandleStream(cx.Context, cx.Conn.(transport.StreamConn), h.metrics.AddOpenTCPConnection(cx))
+	case PacketConnectionType:
+		h.associationHandler.HandleAssociation(cx.Context, cx.Conn, h.metrics.AddOpenUDPAssociation(cx))
 	}
 	return nil
 }

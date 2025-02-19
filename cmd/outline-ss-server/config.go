@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -228,12 +229,26 @@ func (c *Config) validate() error {
 }
 
 func validateAddress(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
+	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
 	}
-	if ip := net.ParseIP(host); ip == nil {
-		return fmt.Errorf("address must be IP, found: %s", host)
+	// NOTE: We allow addresses with only the port number set . This will result
+	// in an address that listens on all available network interfaces (both IPv4
+	// and IPv6).
+	if host != "" {
+		if ip := net.ParseIP(host); ip == nil {
+			return fmt.Errorf("address must be IP, found: %s", host)
+		}
+	}
+	if portStr != "" {
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return fmt.Errorf("invalid port: %s", portStr)
+		}
+		if port < 0 || port > 65535 {
+			return fmt.Errorf("port out of range: %d", port)
+		}
 	}
 	return nil
 }

@@ -165,6 +165,8 @@ services:
   - listeners:
       - type: tcp
         address: "[::]:9000"
+      - type: udp
+        address: ":9000"
       - type: websocket-stream
         web_server: my_web_server
         path: "/tcp"
