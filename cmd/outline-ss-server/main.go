@@ -268,7 +268,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					service.WithCiphers(ciphers),
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
-					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, 0)),
+					service.WithPacketListener(service.MakeTargetUDPListener(onet.RequirePublicIP, s.natTimeout, 0)),
 					service.WithLogger(slog.Default()),
 				)
 				ln, err := lnSet.ListenStream(addr)
@@ -301,7 +301,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 					service.WithMetrics(s.serviceMetrics),
 					service.WithReplayCache(&s.replayCache),
 					service.WithStreamDialer(service.MakeValidatingTCPStreamDialer(onet.RequirePublicIP, serviceConfig.Dialer.Fwmark)),
-					service.WithPacketListener(service.MakeTargetUDPListener(s.natTimeout, serviceConfig.Dialer.Fwmark)),
+					service.WithPacketListener(service.MakeTargetUDPListener(onet.RequirePublicIP, s.natTimeout, serviceConfig.Dialer.Fwmark)),
 					service.WithLogger(slog.Default()),
 				)
 				if err != nil {
