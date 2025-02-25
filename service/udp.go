@@ -189,18 +189,21 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
 				if err != nil {
+					clientConn.Close()
 					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
 				}
 				assocMetrics.AddAuthentication(keyID)
 
 				var onetErr *onet.ConnectionError
 				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+					clientConn.Close()
 					return onetErr
 				}
 
 				// Create the target connection.
 				targetConn, err = h.targetListener.ListenPacket(ctx)
 				if err != nil {
+					clientConn.Close()
 					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
 				}
 				l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
