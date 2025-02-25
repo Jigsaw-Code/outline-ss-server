@@ -48,6 +48,9 @@ var _ error = (*ConnectionError)(nil)
 // IsConnectionError returns boolean indicating whether the error is a *ConnectionError
 // with the specified status.
 func IsConnectionError(err error, status string) bool {
+	if err == nil {
+		return false
+	}
 	if e, ok := err.(*ConnectionError); ok {
 		return e.Status == status
 	}

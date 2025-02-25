@@ -241,7 +241,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			status = connError.Status
 		}
 		assocMetrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
-		if onet.IsConnectionError(connError, "ERR_READ") {
+		if connError != nil && onet.IsConnectionError(connError, "ERR_READ") {
 			break
 		}
 	}

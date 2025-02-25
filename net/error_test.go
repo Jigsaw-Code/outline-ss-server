@@ -85,6 +85,12 @@ func TestIsConnectionError(t *testing.T) {
 			status: "STATUS_FOO",
 			want:   false,
 		},
+		{
+			name:   "NilError",
+			err:    nil,
+			status: "STATUS_FOO",
+			want:   false,
+		},
 	}
 
 	for _, tt := range tests {
