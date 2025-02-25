@@ -170,6 +170,11 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		var proxyTargetBytes int
 
 		connError := func() *onet.ConnectionError {
+			// Error from `clientConn.Read()`.
+			if err != nil {
+				return onet.NewConnectionError("ERR_READ", "Failed to read from association", err)
+			}
+
 			var payload []byte
 			var tgtUDPAddr *net.UDPAddr
 			if targetConn == nil {
