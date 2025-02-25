@@ -44,3 +44,12 @@ func (e *ConnectionError) Unwrap() error {
 }
 
 var _ error = (*ConnectionError)(nil)
+
+// IsConnectionError returns boolean indicating whether the error is a *ConnectionError
+// with the specified status.
+func IsConnectionError(err error, status string) bool {
+	if e, ok := err.(*ConnectionError); ok {
+		return e.Status == status
+	}
+	return false
+}
