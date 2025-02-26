@@ -239,8 +239,8 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		}
 		assocMetrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
 		if targetConn == nil {
-			// If there's still no target connection, we didn't authenticate and break out of handling the
-			// association so resources can be released.
+			// If there's still no target connection, we didn't authenticate. Break out of handling the
+			// association here so resources can be released.
 			break
 		}
 	}
