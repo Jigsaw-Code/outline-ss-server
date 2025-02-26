@@ -172,45 +172,50 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		connError := func() *onet.ConnectionError {
 			// Error from `clientConn.Read()`.
 			if err != nil {
+				clientConn.Close()
 				return onet.NewConnectionError("ERR_READ", "Failed to read from association", err)
 			}
 
 			var payload []byte
 			var tgtUDPAddr *net.UDPAddr
 			if targetConn == nil {
-				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
-				var textData []byte
-				var keyID string
-				textLazySlice := readBufPool.LazySlice()
-				unpackStart := time.Now()
-				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textLazySlice.Acquire(), pkt, h.ciphers, h.logger)
-				timeToCipher := time.Since(unpackStart)
-				textLazySlice.Release()
-				h.ssm.AddCipherSearch(err == nil, timeToCipher)
+				err := func() *onet.ConnectionError {
+					ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
+					var textData []byte
+					var keyID string
+					textLazySlice := readBufPool.LazySlice()
+					unpackStart := time.Now()
+					textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textLazySlice.Acquire(), pkt, h.ciphers, h.logger)
+					timeToCipher := time.Since(unpackStart)
+					textLazySlice.Release()
+					h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
-				if err != nil {
-					clientConn.Close()
-					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
-				}
-				assocMetrics.AddAuthentication(keyID)
+					if err != nil {
+						return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
+					}
+					assocMetrics.AddAuthentication(keyID)
 
-				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
-					clientConn.Close()
-					return onetErr
-				}
+					var onetErr *onet.ConnectionError
+					if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+						return onetErr
+					}
 
-				// Create the target connection.
-				targetConn, err = h.targetListener.ListenPacket(ctx)
-				if err != nil {
-					clientConn.Close()
-					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
-				}
-				l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
-				go func() {
-					relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
-					clientConn.Close()
+					// Create the target connection.
+					targetConn, err = h.targetListener.ListenPacket(ctx)
+					if err != nil {
+						return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
+					}
+					l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
+					go func() {
+						relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
+						clientConn.Close()
+					}()
+					return nil
 				}()
+				if err != nil {
+					clientConn.Close()
+					return err
+				}
 			} else {
 				unpackStart := time.Now()
 				textData, err := shadowsocks.Unpack(nil, pkt, cryptoKey)
@@ -241,9 +246,6 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			status = connError.Status
 		}
 		assocMetrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
-		if connError != nil && onet.IsConnectionError(connError, "ERR_READ") {
-			break
-		}
 	}
 }
 
