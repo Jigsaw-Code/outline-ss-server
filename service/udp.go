@@ -179,43 +179,36 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			var payload []byte
 			var tgtUDPAddr *net.UDPAddr
 			if targetConn == nil {
-				err := func() *onet.ConnectionError {
-					ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
-					var textData []byte
-					var keyID string
-					textLazySlice := readBufPool.LazySlice()
-					unpackStart := time.Now()
-					textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textLazySlice.Acquire(), pkt, h.ciphers, h.logger)
-					timeToCipher := time.Since(unpackStart)
-					textLazySlice.Release()
-					h.ssm.AddCipherSearch(err == nil, timeToCipher)
+				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
+				var textData []byte
+				var keyID string
+				textLazySlice := readBufPool.LazySlice()
+				unpackStart := time.Now()
+				textData, keyID, cryptoKey, err = findAccessKeyUDP(ip, textLazySlice.Acquire(), pkt, h.ciphers, h.logger)
+				timeToCipher := time.Since(unpackStart)
+				textLazySlice.Release()
+				h.ssm.AddCipherSearch(err == nil, timeToCipher)
 
-					if err != nil {
-						return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
-					}
-					assocMetrics.AddAuthentication(keyID)
-
-					var onetErr *onet.ConnectionError
-					if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
-						return onetErr
-					}
-
-					// Create the target connection.
-					targetConn, err = h.targetListener.ListenPacket(ctx)
-					if err != nil {
-						return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
-					}
-					l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
-					go func() {
-						relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
-						clientConn.Close()
-					}()
-					return nil
-				}()
 				if err != nil {
-					clientConn.Close()
-					return err
+					return onet.NewConnectionError("ERR_CIPHER", "Failed to unpack initial packet", err)
 				}
+				assocMetrics.AddAuthentication(keyID)
+
+				var onetErr *onet.ConnectionError
+				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+					return onetErr
+				}
+
+				// Create the target connection.
+				targetConn, err = h.targetListener.ListenPacket(ctx)
+				if err != nil {
+					return onet.NewConnectionError("ERR_CREATE_SOCKET", "Failed to create a `PacketConn`", err)
+				}
+				l = l.With(slog.Any("tgtListener", targetConn.LocalAddr()))
+				go func() {
+					relayTargetToClient(targetConn, clientConn, cryptoKey, assocMetrics, l)
+					clientConn.Close()
+				}()
 			} else {
 				unpackStart := time.Now()
 				textData, err := shadowsocks.Unpack(nil, pkt, cryptoKey)
@@ -246,6 +239,11 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			status = connError.Status
 		}
 		assocMetrics.AddPacketFromClient(status, int64(clientProxyBytes), int64(proxyTargetBytes))
+		if targetConn == nil {
+			// If there's still no target connection, we didn't authenticate and break out of handling the
+			// association so resources can be released.
+			break
+		}
 	}
 }
 
