@@ -172,7 +172,6 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 		connError := func() *onet.ConnectionError {
 			// Error from `clientConn.Read()`.
 			if err != nil {
-				clientConn.Close()
 				return onet.NewConnectionError("ERR_READ", "Failed to read from association", err)
 			}
 
