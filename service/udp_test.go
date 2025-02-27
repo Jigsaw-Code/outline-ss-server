@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	logging "github.com/op/go-logging"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
@@ -60,6 +61,15 @@ type packetListener struct {
 
 func (ln *packetListener) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	return ln.conn, nil
+}
+
+func WrapWithValidatingPacketListener(conn net.PacketConn, targetIPValidator onet.TargetIPValidator) transport.PacketListener {
+	return &packetListener{
+		&validatingPacketConn{
+			PacketConn:        conn,
+			targetIPValidator: targetIPValidator,
+		},
+	}
 }
 
 type fakePacketConn struct {
@@ -225,7 +235,7 @@ func TestAssociationCloseWhileReading(t *testing.T) {
 func TestAssociationHandler_Handle_IPFilter(t *testing.T) {
 	t.Run("RequirePublicIP blocks localhost", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetIPValidator(onet.RequirePublicIP)
+		handler.SetTargetPacketListener(WrapWithValidatingPacketListener(targetConn, onet.RequirePublicIP))
 
 		sendPayload(&localAddr, []byte{1, 2, 3})
 
@@ -239,7 +249,7 @@ func TestAssociationHandler_Handle_IPFilter(t *testing.T) {
 
 	t.Run("allowAll allows localhost", func(t *testing.T) {
 		handler, sendPayload, targetConn := startTestHandler()
-		handler.SetTargetIPValidator(allowAll)
+		handler.SetTargetPacketListener(WrapWithValidatingPacketListener(targetConn, allowAll))
 
 		sendPayload(&localAddr, []byte{1, 2, 3})
 
