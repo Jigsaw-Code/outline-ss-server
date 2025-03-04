@@ -109,7 +109,7 @@ func NewAssociationHandler(cipherList CipherList, ssMetrics ShadowsocksConnMetri
 		ciphers:           cipherList,
 		ssm:               ssMetrics,
 		targetIPValidator: onet.RequirePublicIP,
-		targetListener:    MakeTargetUDPListener(defaultNatTimeout, 0),
+		targetListener:    MakeTargetUDPListener(onet.RequirePublicIP, defaultNatTimeout, 0),
 	}
 }
 
@@ -118,8 +118,6 @@ type AssociationHandler interface {
 	HandleAssociation(ctx context.Context, conn net.Conn, assocMetrics UDPAssociationMetrics)
 	// SetLogger sets the logger used to log messages. Uses a no-op logger if nil.
 	SetLogger(l *slog.Logger)
-	// SetTargetIPValidator sets the function to be used to validate the target IP addresses.
-	SetTargetIPValidator(targetIPValidator onet.TargetIPValidator)
 	// SetTargetPacketListener sets the packet listener to use for target connections.
 	SetTargetPacketListener(targetListener transport.PacketListener)
 }
@@ -129,10 +127,6 @@ func (h *associationHandler) SetLogger(l *slog.Logger) {
 		l = noopLogger()
 	}
 	h.logger = l
-}
-
-func (h *associationHandler) SetTargetIPValidator(targetIPValidator onet.TargetIPValidator) {
-	h.targetIPValidator = targetIPValidator
 }
 
 func (h *associationHandler) SetTargetPacketListener(targetListener transport.PacketListener) {
@@ -176,7 +170,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 			}
 
 			var payload []byte
-			var tgtUDPAddr *net.UDPAddr
+			var tgtAddr net.Addr
 			if targetConn == nil {
 				ip := clientConn.RemoteAddr().(*net.UDPAddr).AddrPort().Addr()
 				var textData []byte
@@ -194,7 +188,7 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 				assocMetrics.AddAuthentication(keyID)
 
 				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+				if payload, tgtAddr, onetErr = h.extractPayloadAndDestination(textData); onetErr != nil {
 					return onetErr
 				}
 
@@ -219,15 +213,15 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 				}
 
 				var onetErr *onet.ConnectionError
-				if payload, tgtUDPAddr, onetErr = h.validatePacket(textData); onetErr != nil {
+				if payload, tgtAddr, onetErr = h.extractPayloadAndDestination(textData); onetErr != nil {
 					return onetErr
 				}
 			}
 
 			debugUDP(l, "Proxy exit.")
-			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtUDPAddr) // accept only UDPAddr despite the signature
+			proxyTargetBytes, err = targetConn.WriteTo(payload, tgtAddr)
 			if err != nil {
-				return onet.NewConnectionError("ERR_WRITE", "Failed to write to target", err)
+				return ensureConnectionError(err, "ERR_WRITE", "Failed to write to target")
 			}
 			return nil
 		}()
@@ -246,21 +240,17 @@ func (h *associationHandler) HandleAssociation(ctx context.Context, clientConn n
 	}
 }
 
-// Given the decrypted contents of a UDP packet, return
-// the payload and the destination address, or an error if
-// this packet cannot or should not be forwarded.
-func (h *associationHandler) validatePacket(textData []byte) ([]byte, *net.UDPAddr, *onet.ConnectionError) {
+// extractPayloadAndDestination processes a decrypted Shadowsocks UDP packet and
+// extracts the payload data and destination address.
+func (h *associationHandler) extractPayloadAndDestination(textData []byte) ([]byte, net.Addr, *onet.ConnectionError) {
 	tgtAddr := socks.SplitAddr(textData)
 	if tgtAddr == nil {
 		return nil, nil, onet.NewConnectionError("ERR_READ_ADDRESS", "Failed to get target address", nil)
 	}
 
-	tgtUDPAddr, err := net.ResolveUDPAddr("udp", tgtAddr.String())
+	tgtUDPAddr, err := transport.MakeNetAddr("udp", tgtAddr.String())
 	if err != nil {
-		return nil, nil, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", tgtAddr), err)
-	}
-	if err := h.targetIPValidator(tgtUDPAddr.IP); err != nil {
-		return nil, nil, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
+		return nil, nil, onet.NewConnectionError("ERR_CONVERT_ADDRESS", fmt.Sprintf("Failed to convert target address %v", tgtAddr), err)
 	}
 
 	payload := textData[len(tgtAddr):]
@@ -406,6 +396,23 @@ func (a *association) SetWriteDeadline(t time.Time) error {
 func isDNS(addr net.Addr) bool {
 	_, port, _ := net.SplitHostPort(addr.String())
 	return port == "53"
+}
+
+type validatingPacketConn struct {
+	net.PacketConn
+	targetIPValidator onet.TargetIPValidator
+}
+
+func (vpc *validatingPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+	udpAddr, err := net.ResolveUDPAddr("udp", addr.String())
+	if err != nil {
+		return 0, onet.NewConnectionError("ERR_RESOLVE_ADDRESS", fmt.Sprintf("Failed to resolve target address %v", udpAddr), err)
+	}
+	if err := vpc.targetIPValidator(udpAddr.IP); err != nil {
+		return 0, ensureConnectionError(err, "ERR_ADDRESS_INVALID", "invalid address")
+	}
+
+	return vpc.PacketConn.WriteTo(p, udpAddr) // accept only `net.UDPAddr` despite the signature
 }
 
 type timedPacketConn struct {
