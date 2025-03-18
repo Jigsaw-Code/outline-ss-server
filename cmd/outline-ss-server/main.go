@@ -344,6 +344,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							conn, err := websocket.Upgrade(w, r, nil)
 							if err != nil {
 								slog.Error("failed to upgrade", "err", err)
+								return
 							}
 							defer conn.Close()
 							// RemoteAddr is "IP:port" for direct connections, but may be just "IP" when proxied.
@@ -364,6 +365,7 @@ func (s *OutlineServer) runConfig(config Config) (func() error, error) {
 							conn, err := websocket.Upgrade(w, r, nil)
 							if err != nil {
 								slog.Error("failed to upgrade", "err", err)
+								return
 							}
 							defer conn.Close()
 							// RemoteAddr is "IP:port" for direct connections, but may be just "IP" when proxied.
