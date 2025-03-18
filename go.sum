@@ -528,10 +528,6 @@ github.com/HdrHistogram/hdrhistogram-go v1.1.0/go.mod h1:yDgFjdqOqDEKOvasDdhWNXY
 github.com/HdrHistogram/hdrhistogram-go v1.1.2/go.mod h1:yDgFjdqOqDEKOvasDdhWNXYg9BVp4O+o5f6V/ehm6Oo=
 github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629 h1:sHi1X4vwtNNBUDCbxynGXe7cM/inwTbavowHziaxlbk=
 github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629/go.mod h1:CFDKyGZA4zatKE4vMLe8TyQpZCyINOeRFbMAmYHxodw=
-github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250204151340-93ebcb07dba9 h1:GKvH8vGir6MbJmWZfh/zNlBKl5z4TxCsfDnn8eHghMk=
-github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250204151340-93ebcb07dba9/go.mod h1:aFUEz6Z/eD0NS3c3fEIX+JO2D9aIrXCmWTb1zJFlItw=
-github.com/Jigsaw-Code/outline-sdk/x v0.0.1 h1:DW8Ja4iWKPqYpnahBXQ/eg1WVDw/F3Pktbz1mBWTZXw=
-github.com/Jigsaw-Code/outline-sdk/x v0.0.1/go.mod h1:aFUEz6Z/eD0NS3c3fEIX+JO2D9aIrXCmWTb1zJFlItw=
 github.com/Jigsaw-Code/outline-sdk/x v0.0.2-0.20250304133713-52f1a365e5ed h1:NfybsWzXQLPNueDsoPJMmvw/i7hWXqk9xaoA9X1cGgM=
 github.com/Jigsaw-Code/outline-sdk/x v0.0.2-0.20250304133713-52f1a365e5ed/go.mod h1:aFUEz6Z/eD0NS3c3fEIX+JO2D9aIrXCmWTb1zJFlItw=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
@@ -1449,8 +1445,8 @@ github.com/goreleaser/fileglob v1.3.0 h1:/X6J7U8lbDpQtBvGcwwPS6OpzkNVlVEsFUVRx9+
 github.com/goreleaser/fileglob v1.3.0/go.mod h1:Jx6BoXv3mbYkEzwm9THo7xbr5egkAraxkGorbJb4RxU=
 github.com/goreleaser/goreleaser v1.18.2 h1:qeNrKKVOHWEs1+/+a6jwASj7g9yg1R4vfLVlo0Beyro=
 github.com/goreleaser/goreleaser v1.18.2/go.mod h1:CfWAXthyGOTzUgubl1FdAtkAgSW69XuRHF6KcA9IrLc=
-github.com/goreleaser/nfpm/v2 v2.28.0 h1:BLKOrJpyBrO/LQ7XQP/mICDBqq6K3iX1cqZIMYKUbCc=
-github.com/goreleaser/nfpm/v2 v2.28.0/go.mod h1:cMwzgk+6Irs3+ZKD6Lz/ADJ8qsVmJxYPlE3/wOxAfVA=
+github.com/goreleaser/nfpm/v2 v2.29.0 h1:QW7MD5Od8ePAWqvC+kGQiF8OH5JkSKV+HcblcT0NX6A=
+github.com/goreleaser/nfpm/v2 v2.29.0/go.mod h1:+O8Rgz7geEXG1ym2Yl8CGPg5nP2LRuCgkBK6CQF+Q3c=
 github.com/gorilla/context v1.1.1/go.mod h1:kBGZzfjB9CEq2AlWe17Uuf7NDRt0dE0s8S51q0aT7Yg=
 github.com/gorilla/handlers v0.0.0-20150720190736-60c7bfde3e33/go.mod h1:Qkdc/uu4tH4g6mTK6auzZ766c4CA0Ng8+o/OAirnOIQ=
 github.com/gorilla/handlers v1.4.1 h1:BHvcRGJe/TrL+OqFxoKQGddTgeibiOjaBssV5a/N9sw=
@@ -1691,8 +1687,8 @@ github.com/klauspost/compress v1.17.11 h1:In6xLpyWOi1+C7tXUUWv2ot1QvBjxevKAaI6IX
 github.com/klauspost/compress v1.17.11/go.mod h1:pMDklpSncoRMuLFrf1W9Ss9KT+0rH90U12bZKk7uwG0=
 github.com/klauspost/cpuid/v2 v2.2.9 h1:66ze0taIn2H33fBvCkXuv9BmCwDfafmiIVpKV9kKGuY=
 github.com/klauspost/cpuid/v2 v2.2.9/go.mod h1:rqkxqrZ1EhYM9G+hXH7YdowN5R5RGN6NK4QwQ3WMXF8=
-github.com/klauspost/pgzip v1.2.5 h1:qnWYvvKqedOF2ulHpMG72XQol4ILEJ8k2wwRl/Km8oE=
-github.com/klauspost/pgzip v1.2.5/go.mod h1:Ch1tH69qFZu15pkjo5kYi6mth2Zzwzt50oCQKQE9RUs=
+github.com/klauspost/pgzip v1.2.6 h1:8RXeL5crjEUFnR2/Sn6GJNWtSQ3Dk8pq4CL3jvdDyjU=
+github.com/klauspost/pgzip v1.2.6/go.mod h1:Ch1tH69qFZu15pkjo5kYi6mth2Zzwzt50oCQKQE9RUs=
 github.com/kolo/xmlrpc v0.0.0-20201022064351-38db28db192b/go.mod h1:pcaDhQK0/NJZEvtCO0qQPPropqV0sJOJ6YW7X+9kRwM=
 github.com/kolo/xmlrpc v0.0.0-20220921171641-a4b6fa1dd06b/go.mod h1:pcaDhQK0/NJZEvtCO0qQPPropqV0sJOJ6YW7X+9kRwM=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
