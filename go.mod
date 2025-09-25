@@ -1,7 +1,7 @@
 module github.com/Jigsaw-Code/outline-ss-server
 
 require (
-	github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629
+	github.com/Jigsaw-Code/outline-sdk v0.0.20
 	github.com/Jigsaw-Code/outline-sdk/x v0.0.2-0.20250304133713-52f1a365e5ed
 	github.com/go-task/task/v3 v3.34.1
 	github.com/go-viper/mapstructure/v2 v2.2.1
@@ -9,15 +9,20 @@ require (
 	github.com/google/go-licenses v1.6.0
 	github.com/goreleaser/goreleaser v1.18.2
 	github.com/gorilla/handlers v1.4.1
-	github.com/lmittmann/tint v1.0.5
+	github.com/lmittmann/tint v1.0.7
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/oschwald/geoip2-golang v1.11.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/crypto v0.32.0
-	golang.org/x/term v0.28.0
+	golang.org/x/crypto v0.41.0
+	golang.org/x/term v0.34.0
 	gopkg.in/yaml.v3 v3.0.1
+)
+
+replace (
+	github.com/Jigsaw-Code/outline-sdk => github.com/42-HitGub/DW-outline-sdk v0.0.0-20250915100540-2053f70dab88
+	github.com/Jigsaw-Code/outline-sdk/x => github.com/42-HitGub/DW-outline-sdk/x v0.0.0-20250915100540-2053f70dab88
 )
 
 require (
@@ -98,7 +103,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/lipgloss v0.7.1 // indirect
 	github.com/chrismellard/docker-credential-acr-env v0.0.0-20220327082430-c57b701bfc08 // indirect
-	github.com/cloudflare/circl v1.3.7 // indirect
+	github.com/cloudflare/circl v1.5.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.5 // indirect
@@ -259,14 +264,14 @@ require (
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	gocloud.dev v0.29.0 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
-	golang.org/x/mod v0.22.0 // indirect
-	golang.org/x/net v0.34.0 // indirect
+	golang.org/x/mod v0.27.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
-	golang.org/x/tools v0.29.0 // indirect
+	golang.org/x/tools v0.36.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	google.golang.org/api v0.217.0 // indirect
 	google.golang.org/genproto v0.0.0-20241118233622-e639e219e697 // indirect
@@ -287,4 +292,6 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-go 1.23
+go 1.24.1
+
+toolchain go1.24.3
