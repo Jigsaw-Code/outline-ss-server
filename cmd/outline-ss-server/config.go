@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 
+	ssServerNet "github.com/Jigsaw-Code/outline-ss-server/net"
+
 	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
 )
@@ -93,7 +95,7 @@ func (c *ListenerConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	lnTypeStr, ok := rawType.(string)
 	if !ok {
-		return fmt.Errorf("`type` is not a string, but %T", rawType)	
+		return fmt.Errorf("`type` is not a string, but %T", rawType)
 	}
 	lnType := ListenerType(lnTypeStr)
 	delete(raw, "type")
@@ -196,8 +198,9 @@ type WebConfig struct {
 }
 
 type Config struct {
-	Web      WebConfig
-	Services []ServiceConfig
+	AllowedPrivateNetwork []string `yaml:"allowednetwork"`
+	Web                   WebConfig
+	Services              []ServiceConfig
 
 	// Deprecated: `keys` exists for backward compatibility. Prefer to configure
 	// using the newer `services` format.
@@ -259,5 +262,9 @@ func readConfig(configData []byte) (*Config, error) {
 	if err := yaml.Unmarshal(configData, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
+	ssServerNet.AddAllowedNetworks(config.AllowedPrivateNetwork)
+	fmt.Printf("        ---------        \n")
+	fmt.Printf("config.AllowedPrivateNetwork:%s\n", config.AllowedPrivateNetwork)
+	fmt.Printf("        ---------        \n")
 	return &config, nil
 }

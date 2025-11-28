@@ -20,7 +20,14 @@ import (
 )
 
 var privateNetworks []*net.IPNet
+var allowedNetworks []*net.IPNet
 
+func AddAllowedNetworks(networks []string) {
+	for _, cidr := range networks {
+		_, subnet, _ := net.ParseCIDR(cidr)
+		allowedNetworks = append(allowedNetworks, subnet)
+	}
+}
 func init() {
 	for _, cidr := range []string{
 		// RFC 1918: private IPv4 networks
@@ -41,6 +48,13 @@ func init() {
 func IsPrivateAddress(ip net.IP) bool {
 	for _, network := range privateNetworks {
 		if network.Contains(ip) {
+			for _, net := range allowedNetworks {
+				if net != nil {
+					if net.Contains(ip) {
+						return false
+					}
+				}
+			}
 			return true
 		}
 	}
