@@ -40,6 +40,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	ssServerNet "github.com/Jigsaw-Code/outline-ss-server/net"
 	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 )
@@ -457,18 +458,29 @@ func (c replaceAddrConn) RemoteAddr() net.Addr {
 	return c.raddr
 }
 
+type listIp []string
+
+func (i *listIp) String() string {
+	return fmt.Sprintf("%v", *i)
+}
+func (i *listIp) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
 func main() {
 	slog.SetDefault(slog.New(logHandler))
 
 	var flags struct {
-		ConfigFile    string
-		MetricsAddr   string
-		IPCountryDB   string
-		IPASNDB       string
-		natTimeout    time.Duration
-		replayHistory int
-		Verbose       bool
-		Version       bool
+		ConfigFile                 string
+		MetricsAddr                string
+		IPCountryDB                string
+		IPASNDB                    string
+		natTimeout                 time.Duration
+		replayHistory              int
+		Verbose                    bool
+		Version                    bool
+		listAllowedPrivateNetworks listIp
 	}
 	flag.StringVar(&flags.ConfigFile, "config", "", "Configuration filename")
 	flag.StringVar(&flags.MetricsAddr, "metrics", "", "Address for the Prometheus metrics")
@@ -478,8 +490,10 @@ func main() {
 	flag.IntVar(&flags.replayHistory, "replay_history", 0, "Replay buffer size (# of handshakes)")
 	flag.BoolVar(&flags.Verbose, "verbose", false, "Enables verbose logging output")
 	flag.BoolVar(&flags.Version, "version", false, "The version of the server")
-
+	flag.Var(&flags.listAllowedPrivateNetworks, "addAllowedPrivateNetwork", "added of pivate networks that will be allowed to access")
 	flag.Parse()
+
+	ssServerNet.AddAllowedPrivateNetworks(flags.listAllowedPrivateNetworks)
 
 	if flags.Verbose {
 		logLevel.Set(slog.LevelDebug)

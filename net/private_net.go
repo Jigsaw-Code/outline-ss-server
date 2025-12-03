@@ -20,12 +20,12 @@ import (
 )
 
 var privateNetworks []*net.IPNet
-var allowedNetworks []*net.IPNet
+var allowedPrivateNetworks []*net.IPNet
 
-func AddAllowedNetworks(networks []string) {
+func AddAllowedPrivateNetworks(networks []string) {
 	for _, cidr := range networks {
 		_, subnet, _ := net.ParseCIDR(cidr)
-		allowedNetworks = append(allowedNetworks, subnet)
+		allowedPrivateNetworks = append(allowedPrivateNetworks, subnet)
 	}
 }
 func init() {
@@ -48,7 +48,7 @@ func init() {
 func IsPrivateAddress(ip net.IP) bool {
 	for _, network := range privateNetworks {
 		if network.Contains(ip) {
-			for _, net := range allowedNetworks {
+			for _, net := range allowedPrivateNetworks {
 				if net != nil {
 					if net.Contains(ip) {
 						return false

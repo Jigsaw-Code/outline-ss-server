@@ -1,0 +1,10 @@
+{
+  "keys": [
+    {
+      "port": 8080,
+      "id": "TEST",
+      "secret": "1P8I2jH",
+      "cipher": "chacha20-ietf-poly1305"
+    }
+  ]
+}
