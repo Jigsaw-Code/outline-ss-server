@@ -22,7 +22,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "github.com/OutlineFoundation/outline-ss-server/net"
 )
 
 // fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.

@@ -24,7 +24,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "github.com/OutlineFoundation/outline-ss-server/net"
 )
 
 type udpListener struct {

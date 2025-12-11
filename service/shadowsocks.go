@@ -21,7 +21,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "github.com/OutlineFoundation/outline-ss-server/net"
 )
 
 // 59 seconds is most common timeout for servers that do not respond to invalid requests

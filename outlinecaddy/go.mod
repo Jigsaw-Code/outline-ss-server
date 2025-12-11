@@ -1,4 +1,4 @@
-module github.com/Jigsaw-Code/outline-ss-server/outlinecaddy
+module github.com/OutlineFoundation/outline-ss-server/outlinecaddy
 
 go 1.23
 
