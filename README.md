@@ -1,9 +1,9 @@
 # Outline ss-server
 
-[![Build Status](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml/badge.svg)](https://github.com/Jigsaw-Code/outline-ss-server/actions/workflows/go.yml?query=branch%3Amaster)
+[![Build Status](https://github.com/OutlineFoundation/outline-ss-server/actions/workflows/go.yml/badge.svg)](https://github.com/OutlineFoundation/outline-ss-server/actions/workflows/go.yml?query=branch%3Amaster)
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/Jigsaw-Code/outline-ss-server)](https://goreportcard.com/report/github.com/Jigsaw-Code/outline-ss-server)
-[![Go Reference](https://pkg.go.dev/badge/github.com/Jigsaw-Code/outline-ss-server.svg)](https://pkg.go.dev/github.com/Jigsaw-Code/outline-ss-server)
+[![Go Report Card](https://goreportcard.com/badge/github.com/OutlineFoundation/outline-ss-server)](https://goreportcard.com/report/github.com/OutlineFoundation/outline-ss-server)
+[![Go Reference](https://pkg.go.dev/badge/github.com/OutlineFoundation/outline-ss-server.svg)](https://pkg.go.dev/github.com/OutlineFoundation/outline-ss-server)
 
 [![Mattermost](https://badgen.net/badge/Mattermost/Outline%20Community/blue)](https://community.internetfreedomfestival.org/community/channels/outline-community)
 [![Reddit](https://badgen.net/badge/Reddit/r%2Foutlinevpn/orange)](https://www.reddit.com/r/outlinevpn/)
@@ -149,14 +149,14 @@ go run github.com/go-task/task/v3/cmd/task test
 
 You can benchmark the cipher finding code with
 ```
-go test -cpuprofile cpu.prof -memprofile mem.prof -bench . -benchmem -run=^$ github.com/Jigsaw-Code/outline-ss-server/shadowsocks
+go test -cpuprofile cpu.prof -memprofile mem.prof -bench . -benchmem -run=^$ github.com/OutlineFoundation/outline-ss-server/shadowsocks
 ```
 
 You can inspect the CPU or memory profiles with `go tool pprof cpu.prof` or `go tool pprof mem.prof`, and then enter `web` on the prompt.
 
 ## Release
 
-We use [GoReleaser](https://goreleaser.com/) to build and upload binaries to our [GitHub releases](https://github.com/Jigsaw-Code/outline-ss-server/releases).
+We use [GoReleaser](https://goreleaser.com/) to build and upload binaries to our [GitHub releases](https://github.com/OutlineFoundation/outline-ss-server/releases).
 
 Summary:
 - Test the build locally:
@@ -177,7 +177,7 @@ Summary:
   ```bash
   go run github.com/go-task/task/v3/cmd/task release
   ```
-- Go to https://github.com/Jigsaw-Code/outline-ss-server/releases, review and publish the release.
+- Go to https://github.com/OutlineFoundation/outline-ss-server/releases, review and publish the release.
 
 - Delete the Github token you created for the release on the [Personal Access Tokens page](https://github.com/settings/tokens).
 

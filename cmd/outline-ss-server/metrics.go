@@ -17,7 +17,7 @@ package main
 import (
 	"time"
 
-	"github.com/Jigsaw-Code/outline-ss-server/service"
+	"github.com/OutlineFoundation/outline-ss-server/service"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

@@ -31,7 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "github.com/OutlineFoundation/outline-ss-server/net"
 )
 
 const timeout = 5 * time.Minute
