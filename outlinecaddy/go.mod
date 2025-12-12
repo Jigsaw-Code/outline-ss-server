@@ -1,11 +1,11 @@
-module github.com/Jigsaw-Code/outline-ss-server/outlinecaddy
+module golang.getoutline.org/tunnel-server/outlinecaddy
 
 go 1.23
 
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629
 	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250204151340-93ebcb07dba9
-	github.com/Jigsaw-Code/outline-ss-server v1.9.0
+	golang.getoutline.org/tunnel-server v1.9.0
 	github.com/caddyserver/caddy/v2 v2.9.1
 	github.com/iamd3vil/caddy_yaml_adapter v0.0.0-20200503183711-d479c29b475a
 	github.com/mholt/caddy-l4 v0.0.0-20250102174933-6e5f5e311ead
