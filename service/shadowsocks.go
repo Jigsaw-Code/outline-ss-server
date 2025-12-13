@@ -19,7 +19,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"golang.getoutline.org/sdk/transport"
 
 	onet "github.com/Jigsaw-Code/outline-ss-server/net"
 )

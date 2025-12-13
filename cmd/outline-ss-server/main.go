@@ -29,9 +29,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
-	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
-	"github.com/Jigsaw-Code/outline-sdk/x/websocket"
+	"golang.getoutline.org/sdk/transport"
+	"golang.getoutline.org/sdk/transport/shadowsocks"
+	"golang.getoutline.org/sdk/x/websocket"
 	"github.com/gorilla/handlers"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
