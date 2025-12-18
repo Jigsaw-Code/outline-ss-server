@@ -33,7 +33,7 @@ import (
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
+	"golang.getoutline.org/tunnel-server/service/metrics"
 )
 
 func init() {

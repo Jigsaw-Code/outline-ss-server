@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-ss-server/prometheus"
+	"golang.getoutline.org/tunnel-server/prometheus"
 )
 
 func TestRunOutlineServer(t *testing.T) {

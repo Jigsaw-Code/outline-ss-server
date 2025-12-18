@@ -30,8 +30,8 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 
-	"github.com/Jigsaw-Code/outline-ss-server/internal/slicepool"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	"golang.getoutline.org/tunnel-server/internal/slicepool"
+	onet "golang.getoutline.org/tunnel-server/net"
 )
 
 // NATMetrics is used to report NAT related metrics.

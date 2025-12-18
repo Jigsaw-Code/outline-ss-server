@@ -24,7 +24,7 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "golang.getoutline.org/tunnel-server/net"
 )
 
 type udpListener struct {

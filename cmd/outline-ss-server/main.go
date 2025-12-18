@@ -38,10 +38,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/term"
 
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
-	outline_prometheus "github.com/Jigsaw-Code/outline-ss-server/prometheus"
-	"github.com/Jigsaw-Code/outline-ss-server/service"
+	"golang.getoutline.org/tunnel-server/ipinfo"
+	onet "golang.getoutline.org/tunnel-server/net"
+	outline_prometheus "golang.getoutline.org/tunnel-server/prometheus"
+	"golang.getoutline.org/tunnel-server/service"
 )
 
 var (
