@@ -1,4 +1,4 @@
-module github.com/Jigsaw-Code/outline-ss-server
+module golang.getoutline.org/tunnel-server
 
 go 1.24.1
 

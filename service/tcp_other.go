@@ -22,7 +22,7 @@ import (
 
 	"golang.getoutline.org/sdk/transport"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "golang.getoutline.org/tunnel-server/net"
 )
 
 // fwmark can be used in conjunction with other Linux networking features like cgroups, network namespaces, and TC (Traffic Control) for sophisticated network management.

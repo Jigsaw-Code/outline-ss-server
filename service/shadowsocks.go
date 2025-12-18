@@ -21,7 +21,7 @@ import (
 
 	"golang.getoutline.org/sdk/transport"
 
-	onet "github.com/Jigsaw-Code/outline-ss-server/net"
+	onet "golang.getoutline.org/tunnel-server/net"
 )
 
 // 59 seconds is most common timeout for servers that do not respond to invalid requests

@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-ss-server/ipinfo"
-	"github.com/Jigsaw-Code/outline-ss-server/service/metrics"
+	"golang.getoutline.org/tunnel-server/ipinfo"
+	"golang.getoutline.org/tunnel-server/service/metrics"
 	"github.com/op/go-logging"
 	"github.com/prometheus/client_golang/prometheus"
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
