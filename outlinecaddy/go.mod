@@ -1,16 +1,16 @@
-module github.com/Jigsaw-Code/outline-ss-server/outlinecaddy
+module golang.getoutline.org/tunnel-server/outlinecaddy
 
 go 1.23
 
 require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.18-0.20241106233708-faffebb12629
-	github.com/Jigsaw-Code/outline-sdk/x v0.0.0-20250204151340-93ebcb07dba9
-	github.com/Jigsaw-Code/outline-ss-server v1.9.0
+	github.com/Jigsaw-Code/outline-sdk/x v0.0.2-0.20250304133713-52f1a365e5ed
 	github.com/caddyserver/caddy/v2 v2.9.1
 	github.com/iamd3vil/caddy_yaml_adapter v0.0.0-20200503183711-d479c29b475a
 	github.com/mholt/caddy-l4 v0.0.0-20250102174933-6e5f5e311ead
 	github.com/prometheus/client_golang v1.20.5
 	go.uber.org/zap v1.27.0
+	golang.getoutline.org/tunnel-server v1.9.3-rc1
 )
 
 require (
@@ -89,7 +89,7 @@ require (
 	github.com/pires/go-proxyproto v0.7.1-0.20240628150027-b718e7ce4964 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
-	github.com/prometheus/common v0.61.0 // indirect
+	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.48.2 // indirect
