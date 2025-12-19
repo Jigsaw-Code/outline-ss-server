@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
-	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"golang.getoutline.org/sdk/transport"
+	"golang.getoutline.org/sdk/transport/shadowsocks"
 	"golang.getoutline.org/tunnel-server/service"
 	"golang.getoutline.org/tunnel-server/service/metrics"
 	logging "github.com/op/go-logging"

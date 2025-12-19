@@ -20,7 +20,7 @@ import (
 	"net"
 	"syscall"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"golang.getoutline.org/sdk/transport"
 
 	onet "golang.getoutline.org/tunnel-server/net"
 )

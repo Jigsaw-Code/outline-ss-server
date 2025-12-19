@@ -19,7 +19,7 @@ import (
 	"net/netip"
 	"sync"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"golang.getoutline.org/sdk/transport/shadowsocks"
 )
 
 // Don't add a tag if it would reduce the salt entropy below this amount.

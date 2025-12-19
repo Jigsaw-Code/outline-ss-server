@@ -17,7 +17,7 @@ package metrics
 import (
 	"io"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"golang.getoutline.org/sdk/transport"
 )
 
 type ProxyMetrics struct {

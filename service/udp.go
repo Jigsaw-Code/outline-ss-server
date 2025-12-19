@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
-	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"golang.getoutline.org/sdk/transport"
+	"golang.getoutline.org/sdk/transport/shadowsocks"
 	"github.com/shadowsocks/go-shadowsocks2/socks"
 
 	"golang.getoutline.org/tunnel-server/internal/slicepool"
