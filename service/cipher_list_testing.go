@@ -18,7 +18,7 @@ import (
 	"container/list"
 	"fmt"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"golang.getoutline.org/sdk/transport/shadowsocks"
 )
 
 // MakeTestCiphers creates a CipherList containing one fresh AEAD cipher
